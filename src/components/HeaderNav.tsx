@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
 
 interface HeaderNavProps {
   userRole: 'drafter' | 'admin' | 'customer';
@@ -116,36 +116,50 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
             {/* Center: Live Stats Pill */}
             {userRole !== 'customer' && (
-              <div className="hidden lg:flex items-center gap-4 bg-slate-950/70 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-                <div className="flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Active Plans: <strong className="text-white">{jobs.length}</strong></span>
-                </div>
-                <span className="text-slate-700">|</span>
-                
-                {currentStaff.canAccessFinancials ? (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Pending Billing: <strong className="text-amber-300">{pendingInvoicingCount}</strong></span>
-                    </div>
-                    <span className="text-slate-700">|</span>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <Share2 className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Delegated Tasks Active</span>
-                    </div>
-                    <span className="text-slate-700">|</span>
-                  </>
-                )}
+              (() => {
+                const isAllAuthorized = canViewAllProjectCards(currentStaff);
+                const activeJobs = jobs.filter(j => !isJobArchived(j));
+                const relevantCount = isAllAuthorized
+                  ? activeJobs.length
+                  : activeJobs.filter(j => 
+                      j.assigned_drafter.toLowerCase().includes(currentStaff.name.toLowerCase()) ||
+                      (j.delegated_tasks || []).some(t => t.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase())) ||
+                      (j.time_logs || []).some(tl => (tl.drafterName || '').toLowerCase().includes(currentStaff.name.toLowerCase()))
+                    ).length;
 
-                <div className="flex items-center gap-1.5">
-                  <AlertTriangle className={`w-3.5 h-3.5 ${activeRoadblocksCount > 0 ? 'text-red-400 animate-pulse' : 'text-slate-500'}`} />
-                  <span>Roadblocks: <strong className={activeRoadblocksCount > 0 ? 'text-red-400' : 'text-slate-400'}>{activeRoadblocksCount}</strong></span>
-                </div>
-              </div>
+                return (
+                  <div className="hidden lg:flex items-center gap-4 bg-slate-950/70 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                    <div className="flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{isAllAuthorized ? 'Active Plans' : `${currentStaff.name.split(' ')[0]}'s Plans`}: <strong className="text-white">{relevantCount}</strong></span>
+                    </div>
+                    <span className="text-slate-700">|</span>
+                    
+                    {currentStaff.canAccessFinancials ? (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Pending Billing: <strong className="text-amber-300">{pendingInvoicingCount}</strong></span>
+                        </div>
+                        <span className="text-slate-700">|</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <Share2 className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Delegated Tasks Active</span>
+                        </div>
+                        <span className="text-slate-700">|</span>
+                      </>
+                    )}
+
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className={`w-3.5 h-3.5 ${activeRoadblocksCount > 0 ? 'text-red-400 animate-pulse' : 'text-slate-500'}`} />
+                      <span>Roadblocks: <strong className={activeRoadblocksCount > 0 ? 'text-red-400' : 'text-slate-400'}>{activeRoadblocksCount}</strong></span>
+                    </div>
+                  </div>
+                );
+              })()
             )}
 
             {/* Right Controls: Staff Switcher, Notifications & Role Switcher */}

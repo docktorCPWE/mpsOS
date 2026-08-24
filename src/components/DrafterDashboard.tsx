@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 
@@ -55,16 +55,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Determine if the current staff member is a dedicated drafter
-  const isIndividualDrafter = currentStaff.role === 'drafter';
+  // Authorized users who can view all cards and switch between boards: Kyle, Jason, Drew, Ethan, Greg Hyatt
+  const isAllCardsAuthorized = canViewAllProjectCards(currentStaff);
+  const isIndividualDrafter = !isAllCardsAuthorized;
 
-  // Initialize selectedDrafter: If current logged-in user is an individual drafter (e.g. James, Aaron, Sarah),
-  // default strictly to their own name so only their assigned projects display.
+  // Initialize selectedDrafter: If current logged-in user is an individual drafter (e.g. James, Aaron, Sarah, Alex, Elena),
+  // lock strictly to their own name so only their assigned cards display.
   const [selectedDrafter, setSelectedDrafter] = useState<string>(() => {
-    return isIndividualDrafter ? currentStaff.name : 'all';
+    return isAllCardsAuthorized ? 'all' : currentStaff.name;
   });
   
   const [roadblockOnly, setRoadblockOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [showWorkloadMatrix, setShowWorkloadMatrix] = useState(false);
   const [showDelegationHub, setShowDelegationHub] = useState(true);
   const [showKyleReviewDrawer, setShowKyleReviewDrawer] = useState(false);
@@ -73,20 +75,28 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Whenever the active staff user is switched, update the board scope
   useEffect(() => {
-    if (isIndividualDrafter) {
+    if (!isAllCardsAuthorized) {
       setSelectedDrafter(currentStaff.name);
     } else if (selectedDrafter !== 'all') {
       // Check if selectedDrafter is still in drafter list
       const exists = STAFF_USERS.some(s => s.name.toLowerCase() === selectedDrafter.toLowerCase());
       if (!exists) setSelectedDrafter('all');
     }
-  }, [currentStaff.id, currentStaff.name, isIndividualDrafter]);
+  }, [currentStaff.id, currentStaff.name, isAllCardsAuthorized]);
 
   const canAccessFinancials = currentStaff.canAccessFinancials;
   const canDelegate = currentStaff.canDelegate;
+  const canMarkProjectCompleted = Boolean(
+    currentStaff &&
+    (currentStaff.name.toLowerCase().includes('kyle') || currentStaff.name.toLowerCase().includes('jason'))
+  );
+
+  // Active jobs (excluding paid and archived)
+  const activeJobs = jobs.filter(j => !isJobArchived(j));
 
   // Collect all delegated tasks across all jobs
   const allDelegatedTasks: DelegatedWorkItem[] = jobs.flatMap(j => j.delegated_tasks || []);
+  const activeDelegatedTasks: DelegatedWorkItem[] = activeJobs.flatMap(j => j.delegated_tasks || []);
 
   // Comprehensive list of all drafters & team members
   const draftersList = Array.from(
@@ -106,11 +116,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     return isLead || hasDelegated || hasTimeLogged;
   };
 
-  // Helper to calculate stats per drafter
+  // Helper to calculate stats per drafter (only counting active, non-archived/unpaid jobs)
   const getDrafterStats = (drafterName: string) => {
     const drafterLower = drafterName.toLowerCase();
-    const relevantJobs = jobs.filter(j => isJobAssignedToDrafter(j, drafterName));
-    const delegatedTasks = allDelegatedTasks.filter(t => 
+    const relevantJobs = activeJobs.filter(j => isJobAssignedToDrafter(j, drafterName));
+    const delegatedTasks = activeDelegatedTasks.filter(t => 
       t.assignedTo.toLowerCase().includes(drafterLower)
     );
     const activeTasks = delegatedTasks.filter(t => t.status !== 'Completed' || (t.status === 'Completed' && !t.isReviewed));
@@ -127,15 +137,38 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Active drafter target:
   // For individual drafters (e.g. James, Aaron, Sarah, Alex, Elena), target strictly currentStaff.name
-  // For managers/leads (Jason, Greg, Kyle), target selectedDrafter ('all' or specific drafter)
-  const activeDrafterTarget = isIndividualDrafter 
-    ? (selectedDrafter !== 'all' ? selectedDrafter : currentStaff.name)
-    : selectedDrafter;
+  // For managers/leads (Kyle, Jason, Drew, Ethan, Greg), target selectedDrafter ('all' or specific drafter)
+  const activeDrafterTarget = isAllCardsAuthorized ? selectedDrafter : currentStaff.name;
 
   // Filter logic: Search by MPS / Job Number, Customer Name, House Style, or Drafter
   const filteredJobs = jobs.filter(job => {
+    const isArchived = isJobArchived(job);
+
+    // 1. Mandatory Drafter Scope:
+    // For individual drafters, strictly only allow cards specific to their board AND never show paid/archived jobs
+    if (!isAllCardsAuthorized) {
+      if (isArchived) {
+        return false;
+      }
+      if (!isJobAssignedToDrafter(job, currentStaff.name)) {
+        return false;
+      }
+    } else {
+      // For managers/leads (Kyle, Jason, Drew, Ethan, Greg):
+      if (activeDrafterTarget !== 'all') {
+        if (!isJobAssignedToDrafter(job, activeDrafterTarget)) {
+          return false;
+        }
+      }
+
+      // If no search query is typed and showArchived is not toggled on, exclude archived/paid jobs
+      const hasSearch = searchQuery.trim().length > 0;
+      if (!hasSearch && !showArchived && isArchived) {
+        return false;
+      }
+    }
+
     const q = searchQuery.toLowerCase().trim();
-    
     let matchesSearch = true;
     if (q) {
       const cleanQuery = q.replace(/[^a-z0-9]/gi, '');
@@ -159,15 +192,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       matchesSearch = matchesNumber || matchesCustomer || matchesStyle || matchesDrafterName || matchesDelegatedTask;
     }
 
-    // Drafter filter: matches if drafter is assigned as lead drafter OR has delegated components OR has logged time
-    let matchesDrafter = true;
-    if (activeDrafterTarget !== 'all') {
-      matchesDrafter = isJobAssignedToDrafter(job, activeDrafterTarget);
-    }
-
     const matchesRoadblock = !roadblockOnly || job.roadblock;
 
-    return matchesSearch && matchesDrafter && matchesRoadblock;
+    return matchesSearch && matchesRoadblock;
   });
   
   // Delegated tasks assigned to the current active user
@@ -730,9 +757,17 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   .map((task) => {
                     const parentJob = jobs.find(j => j.id === task.jobId || j.job_number === task.jobNumber);
                     const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
-                    const isWaitingKyle = (task.delegatedBy || '').toLowerCase().includes('kyle') && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+                    const delegatorName = task.delegatedBy || 'Kyle';
+                    const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
                     const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
                     const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+                    const isAuthorizedReviewer = Boolean(
+                      currentStaff && (
+                        currentStaff.name.toLowerCase().includes('kyle') ||
+                        currentStaff.name.toLowerCase().includes('jason') ||
+                        (task.delegatedBy && currentStaff.name.toLowerCase().includes(task.delegatedBy.toLowerCase()))
+                      )
+                    );
 
                     return (
                       <div
@@ -740,7 +775,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         className={`bg-white rounded-xl p-4 border transition-all shadow-xs space-y-2.5 ${
                           isRevisionReq
                             ? 'border-orange-400 ring-2 ring-orange-300/40 bg-gradient-to-b from-orange-50/30 to-white'
-                            : isWaitingKyle 
+                            : isWaitingReview 
                             ? 'border-amber-400 ring-2 ring-amber-300/40 bg-gradient-to-b from-amber-50/20 to-white' 
                             : isApproved
                             ? 'border-emerald-300 bg-gradient-to-b from-emerald-50/20 to-white'
@@ -764,9 +799,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                                   <span>Revision Requested {task.revisionCount ? `(Rev #${task.revisionCount})` : ''}</span>
                                 </span>
                               )}
-                              {isWaitingKyle && (
+                              {isWaitingReview && (
                                 <span className="text-[10px] font-extrabold bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1">
-                                  <span>Waiting for Kyle to review</span>
+                                  <span>Waiting for {delegatorName} to review</span>
                                 </span>
                               )}
                               {isApproved && (
@@ -790,24 +825,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                           {/* Status Badge & Actions */}
                           <div className="flex items-center gap-2">
-                            {task.status !== 'Completed' && parentJob && onOpenCompleteTaskModal && (
-                              <button
-                                type="button"
-                                onClick={() => onOpenCompleteTaskModal(task, parentJob)}
-                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition flex items-center gap-1 shadow-2xs cursor-pointer active:scale-95 ${
-                                  isRevisionReq
-                                    ? 'bg-orange-600 hover:bg-orange-500 text-white'
-                                    : 'text-emerald-800 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-300'
-                                }`}
-                                title={isRevisionReq ? 'Upload revised files and resubmit' : `Mark task completed, upload review drawings, and notify ${task.delegatedBy}`}
-                              >
-                                {isRevisionReq ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                <span>{isRevisionReq ? 'Upload Revisions' : 'Mark Completed & Upload Files'}</span>
-                              </button>
-                            )}
-
                             <select
-                              value={task.status}
+                              value={task.status === 'Under Review' ? 'Completed' : task.status}
                               onChange={(e) => {
                                 const newStat = e.target.value as DelegatedWorkItem['status'];
                                 if (newStat === 'Completed' && parentJob && onOpenCompleteTaskModal) {
@@ -816,9 +835,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                                   onUpdateTaskStatus(task.jobId, task.id, newStat);
                                 }
                               }}
-                              className={`text-[11px] font-bold px-2 py-1 rounded-lg border cursor-pointer focus:outline-none ${
-                                task.status === 'Completed'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                              className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none transition shadow-2xs ${
+                                task.status === 'Completed' || task.status === 'Under Review'
+                                  ? isApproved
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : 'bg-amber-50 text-amber-800 border-amber-300'
                                   : task.status === 'Revision Requested'
                                   ? 'bg-orange-50 text-orange-800 border-orange-300'
                                   : task.status === 'In Progress'
@@ -828,9 +849,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                             >
                               <option value="Pending">Pending</option>
                               <option value="In Progress">In Progress</option>
-                              <option value="Under Review">Under Review</option>
                               <option value="Revision Requested">Revision Requested</option>
-                              <option value="Completed">✓ Completed</option>
+                              <option value="Completed">
+                                {isApproved
+                                  ? `✓ Approved by ${task.reviewedBy || delegatorName}`
+                                  : `Sent back to ${delegatorName} for Review`}
+                              </option>
                             </select>
                           </div>
                         </div>
@@ -853,7 +877,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                             <div className="flex items-center justify-between font-bold">
                               <span className="flex items-center gap-1.5 text-orange-900">
                                 <RotateCcw className="w-4 h-4 text-orange-600" />
-                                <span>Revision Requested by <strong>{task.revisionRequestedBy || task.delegatedBy}</strong></span>
+                                <span>Revision Requested by <strong>{task.revisionRequestedBy || delegatorName}</strong></span>
                               </span>
                               {task.revisionRequestedAt && (
                                 <span className="text-[10px] text-orange-800 font-mono">
@@ -868,15 +892,15 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         )}
 
                         {/* Completion Details & Review Submission Banner */}
-                        {task.status === 'Completed' && (
+                        {(task.status === 'Completed' || task.status === 'Under Review') && (
                           <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-3 space-y-2 text-xs text-emerald-950">
                             <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
                               <span className="flex items-center gap-1.5 text-emerald-800">
                                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                                 <span>
                                   {isApproved 
-                                    ? `Signed Off & Approved by ${task.reviewedBy || 'Kyle'}`
-                                    : `Task Completed & Submitted to ${task.delegatedBy}`
+                                    ? `Signed Off & Approved by ${task.reviewedBy || delegatorName}`
+                                    : `Task Completed & Submitted to ${delegatorName} for Review`
                                   }
                                 </span>
                               </span>
@@ -887,37 +911,43 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                               )}
                             </div>
 
-                            {/* Kyle Review Actions Callout Box */}
-                            {isWaitingKyle && (
+                            {/* Review Callout Box: ONLY Kyle or Jason or Delegator see action buttons */}
+                            {isWaitingReview && (
                               <div className="bg-amber-500/15 border border-amber-400 p-2.5 rounded-lg flex items-center justify-between gap-2 flex-wrap text-amber-950">
                                 <div className="flex items-center gap-1.5">
                                   <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                  <span className="font-extrabold text-xs">Waiting for Kyle to review</span>
+                                  <span className="font-extrabold text-xs">
+                                    {isAuthorizedReviewer
+                                      ? `Waiting for your review and sign-off`
+                                      : `Waiting for ${delegatorName} to review`}
+                                  </span>
                                 </div>
 
-                                <div className="flex items-center gap-1.5">
-                                  {onRequestTaskRevision && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setRevisionModalTask({ task, job: parentJob })}
-                                      className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <RotateCcw className="w-3 h-3 text-amber-700" />
-                                      <span>Request Revisions</span>
-                                    </button>
-                                  )}
+                                {isAuthorizedReviewer && (
+                                  <div className="flex items-center gap-1.5">
+                                    {onRequestTaskRevision && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setRevisionModalTask({ task, job: parentJob })}
+                                        className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <RotateCcw className="w-3 h-3 text-amber-700" />
+                                        <span>Request Revisions</span>
+                                      </button>
+                                    )}
 
-                                  {onApproveTaskReview && (
-                                    <button
-                                      type="button"
-                                      onClick={() => onApproveTaskReview(task.jobId, task.id, 'Signed off & approved by Kyle')}
-                                      className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded transition flex items-center gap-1 shadow-2xs cursor-pointer"
-                                    >
-                                      <CheckCircle className="w-3 h-3" />
-                                      <span>Sign Off & Approve</span>
-                                    </button>
-                                  )}
-                                </div>
+                                    {onApproveTaskReview && (
+                                      <button
+                                        type="button"
+                                        onClick={() => onApproveTaskReview(task.jobId, task.id, `Signed off & approved by ${currentStaff.name}`)}
+                                        className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                                      >
+                                        <CheckCircle className="w-3 h-3" />
+                                        <span>Sign Off & Approve</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -1226,9 +1256,59 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <AlertTriangle className={`w-3.5 h-3.5 ${roadblockOnly ? 'text-red-600' : 'text-slate-400'}`} />
             <span>Roadblocks Only</span>
           </button>
+
+          {/* Archived & Paid Filter Pill (Authorized Managers: Kyle, Jason, Drew, Ethan, Greg Hyatt) */}
+          {isAllCardsAuthorized && (
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border font-semibold transition cursor-pointer shrink-0 ${
+                showArchived
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-1 ring-emerald-300 shadow-2xs'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+              }`}
+              title="Show paid & archived projects (retrievable by Kyle, Jason, Drew, Ethan for notes & records)"
+            >
+              <Archive className={`w-3.5 h-3.5 ${showArchived ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <span>Archived ({jobs.filter(j => isJobArchived(j)).length})</span>
+            </button>
+          )}
         </div>
 
       </div>
+
+      {/* Active Search & Filter Indicator */}
+      {(searchQuery || (isAllCardsAuthorized && showArchived)) && (
+        <div className="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between gap-2 text-slate-600">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-800">
+              Showing {filteredJobs.length} {filteredJobs.length === 1 ? 'project' : 'projects'}
+            </span>
+            {searchQuery && (
+              <span className="text-slate-500">
+                matching query <strong className="text-blue-700">"{searchQuery}"</strong>
+                {isAllCardsAuthorized && ' (includes active and archived/paid plans)'}
+              </span>
+            )}
+            {isAllCardsAuthorized && showArchived && !searchQuery && (
+              <span className="text-emerald-700 font-medium flex items-center gap-1">
+                • Displaying archived/paid plans along with active boards
+              </span>
+            )}
+          </div>
+
+          {(searchQuery || showArchived) && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setShowArchived(false);
+              }}
+              className="text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+            >
+              Reset Filters
+            </button>
+          )}
+        </div>
+      )}
 
       {/* VIEW MODE 1: GRID VIEW */}
       {viewMode === 'grid' && (
@@ -1296,10 +1376,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           isRunning ? 'border-emerald-400 bg-emerald-50/20' : job.roadblock ? 'border-red-300 bg-red-50/30' : 'border-slate-200 hover:border-blue-400'
                         }`}
                       >
-                        <div className="flex justify-between items-start">
-                          <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
-                            MPS #{job.job_number}
-                          </span>
+                        <div className="flex justify-between items-start gap-1 flex-wrap">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
+                              MPS #{job.job_number}
+                            </span>
+                            {isJobArchived(job) && (
+                              <span className="text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <Archive className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>Archived</span>
+                              </span>
+                            )}
+                          </div>
                           {isRunning ? (
                             <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
                               <Clock className="w-3 h-3 text-emerald-600 animate-spin" />
@@ -1409,19 +1497,41 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                   return (
                     <tr key={job.id} className={`transition ${isRunning ? 'bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
-                      <td className="p-3.5 font-mono font-bold text-blue-700">MPS #{job.job_number}</td>
+                      <td className="p-3.5 font-mono font-bold text-blue-700">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>MPS #{job.job_number}</span>
+                          {isJobArchived(job) && (
+                            <span className="text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                              <Archive className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>Archived</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="p-3.5 font-bold text-slate-900">{job.customer_name}</td>
                       <td className="p-3.5">{job.style} ({job.sq_ft} sq ft)</td>
                       <td className="p-3.5">{job.assigned_drafter}</td>
                       <td className="p-3.5">
                         <select
                           value={job.current_status}
-                          onChange={(e) => onUpdateStatus(job.id, e.target.value as JobPhase)}
+                          onChange={(e) => {
+                            const newPhase = e.target.value as JobPhase;
+                            if (newPhase === 'Completed' && !canMarkProjectCompleted) {
+                              alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+                              return;
+                            }
+                            onUpdateStatus(job.id, newPhase);
+                          }}
                           className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-semibold cursor-pointer"
                         >
-                          {PHASES.map(p => (
-                            <option key={p} value={p}>{p}</option>
-                          ))}
+                          {PHASES.map(p => {
+                            const isLocked = p === 'Completed' && !canMarkProjectCompleted;
+                            return (
+                              <option key={p} value={p} disabled={isLocked}>
+                                {isLocked ? `🔒 ${p} (Kyle & Jason only)` : p}
+                              </option>
+                            );
+                          })}
                         </select>
                       </td>
                       <td className="p-3.5 font-mono font-bold text-slate-800">

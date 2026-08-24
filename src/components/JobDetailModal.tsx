@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
+import { isJobArchived } from '../data/mockData';
 
 interface JobDetailModalProps {
   job: Job | null;
@@ -63,6 +64,12 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   
   // Delegated Task Revision Modal State
   const [revisionModalTask, setRevisionModalTask] = useState<DelegatedWorkItem | null>(null);
+
+  // Completed status authorization (Kyle or Jason only)
+  const canMarkProjectCompleted = Boolean(
+    currentStaff &&
+    (currentStaff.name.toLowerCase().includes('kyle') || currentStaff.name.toLowerCase().includes('jason'))
+  );
 
   // Version History Snapshot State
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string>('live');
@@ -272,6 +279,11 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
   // Phase change handler
   const handlePhaseChange = (newPhase: JobPhase) => {
+    if (newPhase === 'Completed' && !canMarkProjectCompleted) {
+      alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+      return;
+    }
+
     const updated: Job = {
       ...job,
       current_status: newPhase,
@@ -280,7 +292,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
         {
           id: `a-${Date.now()}`,
           action: 'Phase Updated',
-          performedBy: 'Drafter Studio',
+          performedBy: currentStaff?.name || 'Drafter Studio',
           timestamp: new Date().toISOString(),
           details: `Changed phase from ${job.current_status} to ${newPhase}`
         },
@@ -586,10 +598,18 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
         {/* Modal Top Header */}
         <div className="bg-slate-900 text-white p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-mono font-bold bg-blue-600 text-white px-2.5 py-1 rounded border border-blue-400/30 flex items-center gap-1 shadow-2xs">
-              <span className="text-[10px] text-blue-200 font-sans font-bold uppercase">MPS #:</span>
-              <span>{job.job_number}</span>
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-mono font-bold bg-blue-600 text-white px-2.5 py-1 rounded border border-blue-400/30 flex items-center gap-1 shadow-2xs">
+                <span className="text-[10px] text-blue-200 font-sans font-bold uppercase">MPS #:</span>
+                <span>{job.job_number}</span>
+              </span>
+              {isJobArchived(job) && (
+                <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded flex items-center gap-1">
+                  <Archive className="w-3 h-3 text-emerald-400" />
+                  <span>Paid & Archived</span>
+                </span>
+              )}
+            </div>
             <div>
               <h3 className="font-bold text-lg text-white">{job.customer_name}</h3>
               <p className="text-xs text-slate-400">{job.style} • {job.sq_ft} sq ft • Drafter: {job.assigned_drafter}</p>
@@ -641,6 +661,23 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Paid & Archived Banner */}
+        {isJobArchived(job) && (
+          <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-950">
+            <div className="flex items-center gap-2">
+              <Archive className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>Archived & Paid Project:</strong> This project has been paid and archived from active drafter board(s). Retrievable via search by Kyle, Jason, Drew, and Ethan for notes, records, and client follow-ups.
+              </span>
+            </div>
+            {job.archived_at && (
+              <span className="text-[11px] text-emerald-800 font-mono bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-300 shrink-0">
+                Paid {new Date(job.archived_at).toLocaleDateString()} {job.archived_by ? `by ${job.archived_by}` : ''}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="bg-slate-50 px-6 py-2 border-b border-slate-200 flex items-center gap-4 text-xs font-semibold text-slate-600 overflow-x-auto">
@@ -747,17 +784,30 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 <div className="flex flex-wrap gap-2">
                   {PHASES.map((p) => {
                     const isCurrent = job.current_status === p;
+                    const isCompletedPhase = p === 'Completed';
+                    const isLocked = isCompletedPhase && !canMarkProjectCompleted;
+
                     return (
                       <button
                         key={p}
-                        onClick={() => handlePhaseChange(p)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                        onClick={() => {
+                          if (isLocked) {
+                            alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+                            return;
+                          }
+                          handlePhaseChange(p);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border flex items-center gap-1.5 ${
                           isCurrent
                             ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400'
+                            : isLocked
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400 cursor-pointer'
                         }`}
+                        title={isLocked ? 'Only Kyle or Jason can mark a project as Completed' : undefined}
                       >
-                        {p}
+                        {isLocked && <Lock className="w-3 h-3 text-slate-400" />}
+                        <span>{p}</span>
                       </button>
                     );
                   })}
@@ -978,9 +1028,17 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 ) : (
                   <div className="space-y-3">
                     {job.delegated_tasks.map((task) => {
-                      const isWaitingKyle = (task.delegatedBy || '').toLowerCase().includes('kyle') && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+                      const delegatorName = task.delegatedBy || 'Kyle';
+                      const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
                       const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
                       const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+                      const isAuthorizedReviewer = Boolean(
+                        currentStaff && (
+                          currentStaff.name.toLowerCase().includes('kyle') ||
+                          currentStaff.name.toLowerCase().includes('jason') ||
+                          (task.delegatedBy && currentStaff.name.toLowerCase().includes(task.delegatedBy.toLowerCase()))
+                        )
+                      );
 
                       return (
                         <div
@@ -988,7 +1046,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                           className={`p-3.5 rounded-xl border transition ${
                             isRevisionReq
                               ? 'bg-orange-50/40 border-orange-300 ring-1 ring-orange-200'
-                              : isWaitingKyle
+                              : isWaitingReview
                               ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200'
                               : isApproved
                               ? 'bg-emerald-50/40 border-emerald-300'
@@ -1010,9 +1068,9 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                                     <span>Revision Requested {task.revisionCount ? `(Rev #${task.revisionCount})` : ''}</span>
                                   </span>
                                 )}
-                                {isWaitingKyle && (
+                                {isWaitingReview && (
                                   <span className="text-[10px] font-extrabold bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1">
-                                    <span>Waiting for Kyle to review</span>
+                                    <span>Waiting for {delegatorName} to review</span>
                                   </span>
                                 )}
                                 {isApproved && (
@@ -1054,7 +1112,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                                   <div className="flex items-center justify-between font-bold">
                                     <span className="flex items-center gap-1.5 text-orange-900">
                                       <RotateCcw className="w-3.5 h-3.5 text-orange-600" />
-                                      <span>Revision Requested by <strong>{task.revisionRequestedBy || task.delegatedBy}</strong></span>
+                                      <span>Revision Requested by <strong>{task.revisionRequestedBy || delegatorName}</strong></span>
                                     </span>
                                     {task.revisionRequestedAt && (
                                       <span className="text-[10px] text-orange-800 font-mono">
@@ -1069,15 +1127,15 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                               )}
 
                               {/* Completed details & Review banner */}
-                              {task.status === 'Completed' && (
+                              {(task.status === 'Completed' || task.status === 'Under Review') && (
                                 <div className="mt-2 bg-white/90 p-2.5 rounded-lg border border-emerald-200 text-xs text-emerald-950 space-y-2">
                                   <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
                                     <span className="flex items-center gap-1.5 text-emerald-800">
                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                       <span>
                                         {isApproved
-                                          ? `Approved & Signed Off by ${task.reviewedBy || 'Kyle'}`
-                                          : `Completed & Submitted for Review to ${task.delegatedBy}`
+                                          ? `Approved & Signed Off by ${task.reviewedBy || delegatorName}`
+                                          : `Completed & Submitted for Review to ${delegatorName}`
                                         }
                                       </span>
                                     </span>
@@ -1088,35 +1146,42 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                                     )}
                                   </div>
 
-                                  {isWaitingKyle && (
-                                    <div className="bg-amber-500/15 border border-amber-400 text-amber-950 p-2 rounded-lg flex items-center justify-between gap-2 flex-wrap">
+                                  {isWaitingReview && (
+                                    <div className="bg-amber-500/15 border border-amber-400 text-amber-950 p-2.5 rounded-lg flex items-center justify-between gap-2 flex-wrap">
                                       <div className="flex items-center gap-1.5">
                                         <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                                        <span className="font-extrabold text-[11px]">Waiting for Kyle to review</span>
+                                        <span className="font-extrabold text-[11px]">
+                                          {isAuthorizedReviewer
+                                            ? `Waiting for your review and sign-off`
+                                            : `Waiting for ${delegatorName} to review`}
+                                        </span>
                                       </div>
                                       
-                                      <div className="flex items-center gap-1.5">
-                                        {onRequestTaskRevision && (
-                                          <button
-                                            type="button"
-                                            onClick={() => setRevisionModalTask(task)}
-                                            className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
-                                          >
-                                            <RotateCcw className="w-3 h-3 text-amber-700" />
-                                            <span>Request Revisions</span>
-                                          </button>
-                                        )}
-                                        {onApproveTaskReview && (
-                                          <button
-                                            type="button"
-                                            onClick={() => onApproveTaskReview(job.id, task.id, 'Approved by Kyle')}
-                                            className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                          >
-                                            <CheckCircle2 className="w-3 h-3" />
-                                            <span>Sign Off & Approve</span>
-                                          </button>
-                                        )}
-                                      </div>
+                                      {/* Only Kyle, Jason, or the original delegator can Sign Off & Approve or Request Revisions */}
+                                      {isAuthorizedReviewer && (
+                                        <div className="flex items-center gap-1.5">
+                                          {onRequestTaskRevision && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setRevisionModalTask(task)}
+                                              className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
+                                            >
+                                              <RotateCcw className="w-3 h-3 text-amber-700" />
+                                              <span>Request Revisions</span>
+                                            </button>
+                                          )}
+                                          {onApproveTaskReview && (
+                                            <button
+                                              type="button"
+                                              onClick={() => onApproveTaskReview(job.id, task.id, `Approved by ${currentStaff?.name || 'Reviewer'}`)}
+                                              className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                            >
+                                              <CheckCircle2 className="w-3.5 h-3.5" />
+                                              <span>Sign Off & Approve</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
 
@@ -1143,24 +1208,9 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                               )}
                             </div>
 
-                            <div className="flex sm:flex-col items-end gap-1.5 shrink-0 mt-2 sm:mt-0">
-                              {task.status !== 'Completed' && onOpenCompleteTaskModal && (
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenCompleteTaskModal(task, job)}
-                                  className={`font-bold text-xs px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-2xs cursor-pointer ${
-                                    isRevisionReq
-                                      ? 'bg-orange-600 hover:bg-orange-500 text-white'
-                                      : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                                  }`}
-                                >
-                                  {isRevisionReq ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                  <span>{isRevisionReq ? 'Upload Revised Files' : 'Complete & Upload Files'}</span>
-                                </button>
-                              )}
-
+                            <div className="flex items-center gap-1.5 shrink-0 mt-2 sm:mt-0">
                               <select
-                                value={task.status}
+                                value={task.status === 'Under Review' ? 'Completed' : task.status}
                                 onChange={(e) => {
                                   const newStat = e.target.value as DelegatedWorkItem['status'];
                                   if (newStat === 'Completed' && onOpenCompleteTaskModal) {
@@ -1169,9 +1219,11 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                                     onUpdateTaskStatus(job.id, task.id, newStat);
                                   }
                                 }}
-                                className={`text-[11px] font-bold px-2 py-1 rounded-lg border cursor-pointer focus:outline-none ${
-                                  task.status === 'Completed'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none transition shadow-2xs ${
+                                  task.status === 'Completed' || task.status === 'Under Review'
+                                    ? isApproved
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                      : 'bg-amber-50 text-amber-800 border-amber-300'
                                     : task.status === 'Revision Requested'
                                     ? 'bg-orange-50 text-orange-800 border-orange-300'
                                     : task.status === 'In Progress'
@@ -1181,9 +1233,12 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                               >
                                 <option value="Pending">Pending</option>
                                 <option value="In Progress">In Progress</option>
-                                <option value="Under Review">Under Review</option>
                                 <option value="Revision Requested">Revision Requested</option>
-                                <option value="Completed">✓ Completed</option>
+                                <option value="Completed">
+                                  {isApproved
+                                    ? `✓ Approved by ${task.reviewedBy || delegatorName}`
+                                    : `Sent back to ${delegatorName} for Review`}
+                                </option>
                               </select>
                             </div>
                           </div>
@@ -1795,24 +1850,83 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
               {/* Action Controls & Invoice Export Button */}
               {canAccessFinancials && (
-                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div>
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
-                      <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                      <span>Invoicing Team Report</span>
-                    </h4>
-                    <p className="text-xs text-emerald-800 mt-0.5">
-                      Generate an itemized CSV breakdown of all drafting hours for this specific job.
-                    </p>
+                <div className="space-y-4">
+                  {/* Invoice Status & Auto-Archive Control */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-emerald-600" />
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                          Invoice & Archive Status
+                        </h4>
+                        {isJobArchived(job) && (
+                          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
+                            <Archive className="w-3 h-3 text-emerald-600" />
+                            <span>Paid & Archived</span>
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Setting invoice status to <strong>"Paid"</strong> automatically archives the project, removes it from active drafter boards, and keeps it searchable by Kyle, Jason, Drew, and Ethan for notes.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                      <select
+                        value={job.invoice_status || 'Uninvoiced'}
+                        onChange={(e) => {
+                          const newStatus = e.target.value as Job['invoice_status'];
+                          const isPaid = newStatus === 'Paid';
+                          const updated: Job = {
+                            ...job,
+                            invoice_status: newStatus,
+                            is_archived: isPaid,
+                            archived_at: isPaid ? (job.archived_at || new Date().toISOString()) : undefined,
+                            archived_by: isPaid ? (job.archived_by || currentStaff?.name || 'Operations') : undefined,
+                            audit_logs: [
+                              {
+                                id: `a-${Date.now()}`,
+                                action: isPaid ? 'Project Paid & Archived' : 'Invoice Status Updated',
+                                performedBy: currentStaff?.name || 'Admin',
+                                timestamp: new Date().toISOString(),
+                                details: isPaid
+                                  ? `Marked as Paid. Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`
+                                  : `Changed invoice status to "${newStatus}"`
+                              },
+                              ...job.audit_logs
+                            ]
+                          };
+                          onUpdateJob(updated);
+                        }}
+                        className="w-full sm:w-auto bg-slate-50 border border-slate-300 font-mono font-bold text-xs rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                      >
+                        <option value="Uninvoiced">Uninvoiced</option>
+                        <option value="Pending Invoicing">Pending Invoicing</option>
+                        <option value="Invoiced">Invoiced</option>
+                        <option value="Paid">Paid (Auto-Archive)</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <button
-                    onClick={() => exportInvoicingCSV([job], job.id)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download Job Invoice CSV</span>
-                  </button>
+                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                        <span>Invoicing Team Report</span>
+                      </h4>
+                      <p className="text-xs text-emerald-800 mt-0.5">
+                        Generate an itemized CSV breakdown of all drafting hours for this specific job.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => exportInvoicingCSV([job], job.id)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Job Invoice CSV</span>
+                    </button>
+                  </div>
                 </div>
               )}
 

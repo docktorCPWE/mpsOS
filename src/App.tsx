@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
@@ -264,10 +264,11 @@ export default function App() {
 
   const handleMarkChatRead = () => {
     setChatMessages(prev => {
-      const hasUnread = prev.some(m => !m.readByStaffIds.includes(currentStaff.id));
+      const relevantMsgs = prev.filter(m => isMessageRelevantForUser(m, currentStaff, jobs));
+      const hasUnread = relevantMsgs.some(m => !m.readByStaffIds.includes(currentStaff.id));
       if (!hasUnread) return prev;
       const updated = prev.map(m => {
-        if (!m.readByStaffIds.includes(currentStaff.id)) {
+        if (isMessageRelevantForUser(m, currentStaff, jobs) && !m.readByStaffIds.includes(currentStaff.id)) {
           return { ...m, readByStaffIds: [...m.readByStaffIds, currentStaff.id] };
         }
         return m;
@@ -277,13 +278,27 @@ export default function App() {
     });
   };
 
-  // Count unread chat messages for current staff
-  const unreadChatCount = chatMessages.filter(m => !m.readByStaffIds.includes(currentStaff.id)).length;
+  // Count unread chat messages for current staff (only counting messages relevant to their profile)
+  const unreadChatCount = chatMessages.filter(
+    m => isMessageRelevantForUser(m, currentStaff, jobs) && !m.readByStaffIds.includes(currentStaff.id)
+  ).length;
 
   // 1. Update Job Status & Automatically Trigger Email
   const handleUpdateJobStatus = (jobId: string, newStatus: JobPhase) => {
     const targetJob = jobs.find(j => j.id === jobId);
     if (!targetJob) return;
+
+    // Completed status can only be set by Kyle or Jason
+    if (newStatus === 'Completed' && userRole === 'drafter') {
+      const canMarkCompleted = currentStaff && (
+        currentStaff.name.toLowerCase().includes('kyle') ||
+        currentStaff.name.toLowerCase().includes('jason')
+      );
+      if (!canMarkCompleted) {
+        alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+        return;
+      }
+    }
 
     const nextPhaseIndex = Math.min(PHASES.length - 1, PHASES.indexOf(newStatus) + 1);
     const calculatedNextStep = PHASES[nextPhaseIndex]

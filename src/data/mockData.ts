@@ -81,11 +81,31 @@ export const STAFF_USERS: StaffUser[] = [
     role: 'drafter',
     canAccessFinancials: false, // Drafter (only): STRICTLY NO access to financial, billing, or hourly rate data
     canDelegate: false          // Drafter (only): No delegation authority
+  },
+  {
+    id: 'staff-ethan',
+    name: 'Ethan',
+    email: 'ethan@myplanstore.com',
+    title: 'Operations & Project Manager',
+    role: 'admin',
+    canAccessFinancials: true,
+    canDelegate: true
   }
 ];
 
-export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Drew Lupkey'];
-export const AUTHORIZED_DELEGATOR_NAMES = ['Kyle', 'Jason', 'Greg Hyatt'];
+export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Drew Lupkey', 'Ethan'];
+export const AUTHORIZED_DELEGATOR_NAMES = ['Kyle', 'Jason', 'Greg Hyatt', 'Ethan'];
+export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Kyle', 'Jason', 'Drew', 'Ethan', 'Greg Hyatt'];
+
+export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
+  return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+}
+
+export function isJobArchived(job: Job): boolean {
+  return Boolean(job.is_archived || job.invoice_status === 'Paid');
+}
 
 export function canUserAccessFinancials(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
@@ -99,7 +119,144 @@ export function canUserDelegate(userNameOrStaff?: string | StaffUser): boolean {
   return AUTHORIZED_DELEGATOR_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
 }
 
+/**
+ * Determines whether a chat message is specifically relevant to the currently logged in staff user.
+ * A message is displayed for a staff profile if:
+ * 1. The message was sent by the staff member
+ * 2. The staff member is @mentioned in the message
+ * 3. The message is a reply to the staff member's message
+ * 4. The message directly references an active job/plan the staff member is assigned to or involved with
+ */
+export function isMessageRelevantForUser(msg: ChatMessage, staff?: StaffUser, jobs: Job[] = []): boolean {
+  if (!staff) return false;
+  const staffLower = staff.name.toLowerCase();
+  
+  // 1. Sent by current staff
+  if (msg.senderId === staff.id || msg.senderName.toLowerCase().includes(staffLower) || staffLower.includes(msg.senderName.toLowerCase())) {
+    return true;
+  }
+  
+  // 2. Mentions current staff
+  if (msg.mentions && msg.mentions.some(m => m.toLowerCase().includes(staffLower) || staffLower.includes(m.toLowerCase()))) {
+    return true;
+  }
+
+  // 3. Replied to message sent by current staff
+  if (msg.replyToMessage && (
+    msg.replyToMessage.senderName.toLowerCase().includes(staffLower) || 
+    staffLower.includes(msg.replyToMessage.senderName.toLowerCase())
+  )) {
+    return true;
+  }
+
+  // 4. Message directly references a job number that this staff member is involved with
+  if (msg.referencedJobNumbers && msg.referencedJobNumbers.length > 0 && jobs.length > 0) {
+    const isUserOnReferencedJob = jobs.some(j => {
+      const isMatchingJob = (msg.referencedJobNumbers || []).some(rjn => {
+        const cleanR = rjn.replace(/^#/, '').toLowerCase();
+        const cleanJ = j.job_number.replace(/^#/, '').toLowerCase();
+        return cleanR === cleanJ || cleanR.includes(cleanJ) || cleanJ.includes(cleanR);
+      });
+      if (!isMatchingJob) return false;
+
+      // Check if current user is involved in this job
+      const isLead = (j.assigned_drafter || '').toLowerCase().includes(staffLower);
+      const isPM = (j.project_manager || '').toLowerCase().includes(staffLower);
+      const isDelegated = (j.delegated_tasks || []).some(t => 
+        (t.assignedTo || '').toLowerCase().includes(staffLower) ||
+        (t.delegatedBy || '').toLowerCase().includes(staffLower)
+      );
+      const isTimeLogger = (j.time_logs || []).some(tl => 
+        (tl.drafterName || '').toLowerCase().includes(staffLower)
+      );
+
+      return isLead || isPM || isDelegated || isTimeLogger;
+    });
+
+    if (isUserOnReferencedJob) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: 'notif-ethan-1',
+    recipientName: 'Ethan',
+    recipientEmail: 'ethan@myplanstore.com',
+    title: 'Truss Calculation Review Request',
+    message: 'Jason requested review of structural truss calculations on #MPS-2024-002 before sending client invoice.',
+    timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
+    read: false,
+    type: 'comment',
+    jobId: 'job-2',
+    jobNumber: 'MPS-2024-002',
+    senderName: 'Jason'
+  },
+  {
+    id: 'notif-ethan-2',
+    recipientName: 'Ethan',
+    recipientEmail: 'ethan@myplanstore.com',
+    title: 'Operations Schedule: Farmhouse Intake',
+    message: 'Greg Hyatt flagged 5 modern farmhouse submissions for ops scheduling in current sprint.',
+    timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+    read: false,
+    type: 'comment',
+    senderName: 'Greg Hyatt'
+  },
+  {
+    id: 'notif-kyle-1',
+    recipientName: 'Kyle',
+    recipientEmail: 'kyle@myplanstore.com',
+    title: 'Revision Completed: Garage Header Heights',
+    message: 'Sarah Jenkins completed garage ceiling clearance to 10\'-4" for Job #MPS-2024-001.',
+    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
+    read: false,
+    type: 'review_ready',
+    jobId: 'job-1',
+    jobNumber: 'MPS-2024-001',
+    senderName: 'Sarah Jenkins'
+  },
+  {
+    id: 'notif-kyle-2',
+    recipientName: 'Kyle',
+    recipientEmail: 'kyle@myplanstore.com',
+    title: 'Setback Verified: #MPS-test',
+    message: 'Aaron verified 25ft front and 10ft side county setbacks on #MPS-test.',
+    timestamp: new Date(Date.now() - 3600000 * 1).toISOString(),
+    read: false,
+    type: 'comment',
+    jobNumber: 'MPS-test',
+    senderName: 'Aaron'
+  },
+  {
+    id: 'notif-jason-1',
+    recipientName: 'Jason',
+    recipientEmail: 'jason@myplanstore.com',
+    title: 'Engineering Sign-Off: Permit Packet',
+    message: 'Structural engineering permit packet for #MPS-2024-003 is signed off and ready for review.',
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    read: false,
+    type: 'comment',
+    jobId: 'job-3',
+    jobNumber: 'MPS-2024-003',
+    senderName: 'Engineering'
+  },
+  {
+    id: 'notif-jason-2',
+    recipientName: 'Jason',
+    recipientEmail: 'jason@myplanstore.com',
+    title: '3D Render Uploaded',
+    message: 'Alex Rivers uploaded 3D exterior perspective for #MPS-2024-002.',
+    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    read: false,
+    type: 'deliverable_uploaded',
+    jobId: 'job-2',
+    jobNumber: 'MPS-2024-002',
+    senderName: 'Alex Rivers'
+  },
   {
     id: 'notif-1',
     recipientName: 'Sarah Jenkins',
@@ -137,6 +294,41 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     type: 'delegation',
     jobId: 'job-1',
     jobNumber: 'M26-195',
+    senderName: 'Jason'
+  },
+  {
+    id: 'notif-aaron-1',
+    recipientName: 'Aaron',
+    recipientEmail: 'aaron@myplanstore.com',
+    title: 'Setback Boundary Check Request',
+    message: 'Kyle requested setback verification and zoning review for #MPS-test.',
+    timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
+    read: false,
+    type: 'comment',
+    jobNumber: 'MPS-test',
+    senderName: 'Kyle'
+  },
+  {
+    id: 'notif-drew-1',
+    recipientName: 'Drew Lupkey',
+    recipientEmail: 'drew@myplanstore.com',
+    title: 'Weekly Invoicing Audit Request',
+    message: 'Greg Hyatt requested weekly billing reconciliation for completed drafter packages.',
+    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    read: false,
+    type: 'comment',
+    senderName: 'Greg Hyatt'
+  },
+  {
+    id: 'notif-greg-1',
+    recipientName: 'Greg Hyatt',
+    recipientEmail: 'greg@myplanstore.com',
+    title: 'Engineering Sign-Off: #MPS-2024-003',
+    message: 'Jason completed engineering review and marked preliminary structural permit ready.',
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    read: false,
+    type: 'comment',
+    jobNumber: 'MPS-2024-003',
     senderName: 'Jason'
   }
 ];
@@ -554,6 +746,9 @@ export const INITIAL_JOBS: Job[] = [
     hourly_rate: 110,
     invoice_status: 'Paid',
     invoice_number: 'INV-2026-004',
+    is_archived: true,
+    archived_at: '2026-06-25T14:30:00Z',
+    archived_by: 'Ethan',
     phase_entry_date: new Date(Date.now() - 3600000 * 48).toISOString(), // 2 days in phase
     delegated_tasks: [
       {
@@ -752,6 +947,67 @@ export const INITIAL_JOBS: Job[] = [
 ];
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
+  // Ethan (Operations & Project Manager) Messages
+  {
+    id: 'msg-ethan-1',
+    senderId: 'staff-jason',
+    senderName: 'Jason',
+    senderRole: 'Project Manager & Operations',
+    text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #MPS-2024-002 before we send the customer invoice?',
+    timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
+    mentions: ['Ethan'],
+    referencedJobNumbers: ['MPS-2024-002'],
+    readByStaffIds: ['staff-jason'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-ethan-2',
+    senderId: 'staff-ethan',
+    senderName: 'Ethan',
+    senderRole: 'Operations & Project Manager',
+    text: 'Checked #MPS-2024-002. Truss layouts and engineering stamps look solid. Permitting packet is good to go for customer invoicing!',
+    timestamp: new Date(Date.now() - 3600000 * 1.8).toISOString(),
+    mentions: ['Jason'],
+    referencedJobNumbers: ['MPS-2024-002'],
+    replyToId: 'msg-ethan-1',
+    replyToMessage: {
+      id: 'msg-ethan-1',
+      senderName: 'Jason',
+      text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #MPS-2024-002 before we send the customer invoice?'
+    },
+    readByStaffIds: ['staff-ethan', 'staff-jason'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-ethan-3',
+    senderId: 'staff-greg',
+    senderName: 'Greg Hyatt',
+    senderRole: 'Owner & Founder',
+    text: '@Ethan please check the operations schedule for the upcoming 5 modern farmhouse submissions.',
+    timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+    mentions: ['Ethan'],
+    readByStaffIds: ['staff-greg'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-ethan-4',
+    senderId: 'staff-ethan',
+    senderName: 'Ethan',
+    senderRole: 'Operations & Project Manager',
+    text: '@Greg Hyatt scheduled Aaron and Sarah on the primary intake queues. We are on track for this sprint.',
+    timestamp: new Date(Date.now() - 3600000 * 4.2).toISOString(),
+    mentions: ['Greg Hyatt'],
+    replyToId: 'msg-ethan-3',
+    replyToMessage: {
+      id: 'msg-ethan-3',
+      senderName: 'Greg Hyatt',
+      text: '@Ethan please check the operations schedule for the upcoming 5 modern farmhouse submissions.'
+    },
+    readByStaffIds: ['staff-ethan', 'staff-greg'],
+    channelId: 'general'
+  },
+
+  // Kyle & Sarah Jenkins
   {
     id: 'msg-1',
     senderId: 'staff-kyle',
@@ -782,6 +1038,8 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     readByStaffIds: ['staff-sarah', 'staff-kyle'],
     channelId: 'general'
   },
+
+  // Jason & Greg Hyatt
   {
     id: 'msg-3',
     senderId: 'staff-jason',
@@ -794,6 +1052,21 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     readByStaffIds: ['staff-jason', 'staff-kyle'],
     channelId: 'general'
   },
+  {
+    id: 'msg-greg-resp',
+    senderId: 'staff-greg',
+    senderName: 'Greg Hyatt',
+    senderRole: 'Owner & Founder',
+    text: '@Jason verified and approved for customer review delivery.',
+    timestamp: new Date(Date.now() - 3600000 * 1.6).toISOString(),
+    mentions: ['Jason'],
+    referencedJobNumbers: ['MPS-2024-003'],
+    replyToId: 'msg-3',
+    readByStaffIds: ['staff-greg', 'staff-jason'],
+    channelId: 'general'
+  },
+
+  // Kyle & Aaron
   {
     id: 'msg-4',
     senderId: 'staff-kyle',
@@ -823,12 +1096,118 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     },
     readByStaffIds: ['staff-aaron', 'staff-kyle'],
     channelId: 'general'
+  },
+
+  // Alex Rivers & Jason
+  {
+    id: 'msg-al-1',
+    senderId: 'staff-jason',
+    senderName: 'Jason',
+    senderRole: 'Project Manager & Operations',
+    text: 'Hey @Alex Rivers, can you upload the 3D exterior rendering for #MPS-2024-002 when ready?',
+    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    mentions: ['Alex Rivers'],
+    referencedJobNumbers: ['MPS-2024-002'],
+    readByStaffIds: ['staff-jason', 'staff-alex'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-al-2',
+    senderId: 'staff-alex',
+    senderName: 'Alex Rivers',
+    senderRole: 'CAD Designer',
+    text: 'Rendering v2 is uploaded in deliverables for #MPS-2024-002! Let me know if the trim colors need tweaking.',
+    timestamp: new Date(Date.now() - 3600000 * 3.2).toISOString(),
+    mentions: ['Jason'],
+    referencedJobNumbers: ['MPS-2024-002'],
+    replyToId: 'msg-al-1',
+    readByStaffIds: ['staff-alex', 'staff-jason'],
+    channelId: 'general'
+  },
+
+  // James & Jason
+  {
+    id: 'msg-jm-1',
+    senderId: 'staff-jason',
+    senderName: 'Jason',
+    senderRole: 'Project Manager & Operations',
+    text: 'Hey @James, I delegated the hidden pantry CAD detail for #M26-195. Let me know if you need the sketch reference.',
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    mentions: ['James'],
+    referencedJobNumbers: ['M26-195'],
+    readByStaffIds: ['staff-jason', 'staff-james'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-jm-2',
+    senderId: 'staff-james',
+    senderName: 'James',
+    senderRole: 'Architectural Drafter',
+    text: '@Jason got the concept sketches, drafting the millwork elevations and detail sections now.',
+    timestamp: new Date(Date.now() - 3600000 * 1.2).toISOString(),
+    mentions: ['Jason'],
+    referencedJobNumbers: ['M26-195'],
+    replyToId: 'msg-jm-1',
+    readByStaffIds: ['staff-james', 'staff-jason'],
+    channelId: 'general'
+  },
+
+  // Elena Rostova & Kyle
+  {
+    id: 'msg-el-1',
+    senderId: 'staff-kyle',
+    senderName: 'Kyle',
+    senderRole: 'Lead Project Manager & Senior Drafter',
+    text: 'Hey @Elena Rostova, can you review the shear wall placement and anchor spacing on #MPS-2024-004?',
+    timestamp: new Date(Date.now() - 3600000 * 3.5).toISOString(),
+    mentions: ['Elena Rostova'],
+    referencedJobNumbers: ['MPS-2024-004'],
+    readByStaffIds: ['staff-kyle', 'staff-elena'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-el-2',
+    senderId: 'staff-elena',
+    senderName: 'Elena Rostova',
+    senderRole: 'Structural Specialist',
+    text: '@Kyle shear wall calcs and anchor bolt spacing updated on sheet S-101 for #MPS-2024-004.',
+    timestamp: new Date(Date.now() - 3600000 * 2.8).toISOString(),
+    mentions: ['Kyle'],
+    referencedJobNumbers: ['MPS-2024-004'],
+    replyToId: 'msg-el-1',
+    readByStaffIds: ['staff-elena', 'staff-kyle'],
+    channelId: 'general'
+  },
+
+  // Drew Lupkey & Greg Hyatt
+  {
+    id: 'msg-dr-1',
+    senderId: 'staff-greg',
+    senderName: 'Greg Hyatt',
+    senderRole: 'Owner & Founder',
+    text: '@Drew Lupkey can you run the weekly invoicing audit for the closed and pending projects?',
+    timestamp: new Date(Date.now() - 3600000 * 4.5).toISOString(),
+    mentions: ['Drew Lupkey'],
+    readByStaffIds: ['staff-greg', 'staff-drew'],
+    channelId: 'general'
+  },
+  {
+    id: 'msg-dr-2',
+    senderId: 'staff-drew',
+    senderName: 'Drew Lupkey',
+    senderRole: 'Finance & Project Admin',
+    text: '@Greg Hyatt billing audit complete and invoice summaries exported. Ready for distribution.',
+    timestamp: new Date(Date.now() - 3600000 * 3.8).toISOString(),
+    mentions: ['Greg Hyatt'],
+    replyToId: 'msg-dr-1',
+    readByStaffIds: ['staff-drew', 'staff-greg'],
+    channelId: 'general'
   }
 ];
 
-export const STORAGE_KEY = 'my_plan_store_os_jobs_v9';
-export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v9';
-export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v9';
+export const STORAGE_KEY = 'my_plan_store_os_jobs_v10';
+export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v10';
+export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v10';
 
 export function getStoredJobs(): Job[] {
   try {

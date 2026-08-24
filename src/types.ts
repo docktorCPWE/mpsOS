@@ -145,7 +145,7 @@ export interface AppNotification {
   message: string;
   timestamp: string;
   read: boolean;
-  type: 'delegation' | 'status_change' | 'roadblock' | 'comment';
+  type: 'delegation' | 'status_change' | 'roadblock' | 'comment' | 'review_ready' | 'deliverable_uploaded';
   jobId?: string;
   jobNumber?: string;
   taskId?: string;
@@ -159,6 +159,7 @@ export interface Job {
   customer_email: string;
   customer_phone: string;
   assigned_drafter: string;
+  project_manager?: string;
   sq_ft: number;
   style: string;
   lot_details: string;
@@ -175,6 +176,10 @@ export interface Job {
   hourly_rate?: number; // e.g. $85/hr for drafting calculation
   invoice_status?: 'Uninvoiced' | 'Pending Invoicing' | 'Invoiced' | 'Paid';
   invoice_number?: string;
+  is_archived?: boolean;
+  archived_at?: string;
+  archived_by?: string;
+  archive_notes?: string;
   phase_entry_date?: string; // ISO timestamp when current phase was entered
   time_logs?: TimeLog[];
   delegated_tasks?: DelegatedWorkItem[];

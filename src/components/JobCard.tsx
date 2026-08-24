@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Eye, FileCheck, Layers, MessageSquare, ChevronRight, User, Sparkles, ShieldAlert, Play, Square, DollarSign, History, Share2, ListTodo, Paperclip } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Eye, FileCheck, Layers, MessageSquare, ChevronRight, User, Sparkles, ShieldAlert, Play, Square, DollarSign, History, Share2, ListTodo, Paperclip, Archive } from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
+import { isJobArchived } from '../data/mockData';
 
 interface JobCardProps {
   job: Job;
@@ -85,7 +86,7 @@ export const JobCard: React.FC<JobCardProps> = ({
         
         {/* Header Row: Job Number & Status Badges */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md shadow-2xs flex items-center gap-1">
               <span className="text-[10px] text-blue-500 font-sans uppercase">MPS</span>
               <span>#{job.job_number}</span>
@@ -93,6 +94,12 @@ export const JobCard: React.FC<JobCardProps> = ({
             <span className="text-xs font-mono text-slate-500 font-medium">
               {job.sq_ft} sq ft
             </span>
+            {isJobArchived(job) && (
+              <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                <Archive className="w-3 h-3 text-emerald-600" />
+                <span>Paid & Archived</span>
+              </span>
+            )}
           </div>
 
           {/* Roadblock Badge Button */}

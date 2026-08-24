@@ -17,7 +17,7 @@ import {
   Filter
 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, isJobArchived } from '../data/mockData';
 import { formatSecondsToReadable, calculateJobTotalSeconds } from '../utils/timeUtils';
 
 interface JasonDrafterProjectBoardProps {
@@ -79,18 +79,19 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     }))
   ];
 
-  // Map each drafter to their assigned jobs & delegated work items
+  // Map each drafter to their active assigned jobs & delegated work items (excluding paid/archived)
+  const activeJobs = jobs.filter(j => !isJobArchived(j));
   const drafterWorkloads = allDrafters.map(drafter => {
     const drafterLower = drafter.name.toLowerCase();
 
-    // Lead assigned projects
-    const leadProjects = jobs.filter(j => 
+    // Lead assigned active projects
+    const leadProjects = activeJobs.filter(j => 
       j.assigned_drafter.toLowerCase().includes(drafterLower)
     );
 
     // Projects where this drafter has delegated components
     const delegatedProjectsWithTasks: { job: Job; tasks: any[] }[] = [];
-    jobs.forEach(j => {
+    activeJobs.forEach(j => {
       const matchingTasks = (j.delegated_tasks || []).filter(t => 
         t.assignedTo.toLowerCase().includes(drafterLower)
       );
@@ -99,12 +100,12 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
       }
     });
 
-    // All unique projects involved with this drafter
+    // All unique active projects involved with this drafter
     const allInvolvedJobIds = new Set([
       ...leadProjects.map(j => j.id),
       ...delegatedProjectsWithTasks.map(d => d.job.id)
     ]);
-    const allInvolvedJobs = jobs.filter(j => allInvolvedJobIds.has(j.id));
+    const allInvolvedJobs = activeJobs.filter(j => allInvolvedJobIds.has(j.id));
 
     // Live timer check
     const activeRunningJob = allInvolvedJobs.find(j => Boolean(j.active_timer_start));

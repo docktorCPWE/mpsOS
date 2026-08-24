@@ -23,7 +23,7 @@ import {
   Filter
 } from 'lucide-react';
 import { ChatMessage, Job, StaffUser } from '../types';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, isMessageRelevantForUser } from '../data/mockData';
 
 interface GeneralChatWidgetProps {
   isOpen: boolean;
@@ -192,8 +192,11 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     }
   };
 
-  // Filter messages
-  const filteredMessages = messages.filter(msg => {
+  // Filter messages specifically relevant to current staff user
+  const userRelevantMessages = messages.filter(msg => isMessageRelevantForUser(msg, currentStaff, jobs));
+
+  // Filter messages by search and active tab
+  const filteredMessages = userRelevantMessages.filter(msg => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchText = msg.text.toLowerCase().includes(q);

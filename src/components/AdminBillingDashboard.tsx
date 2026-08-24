@@ -224,16 +224,22 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
 
   // Update job invoice status handler
   const handleUpdateInvoiceStatus = (job: Job, newInvoiceStatus: Job['invoice_status']) => {
+    const isPaid = newInvoiceStatus === 'Paid';
     const updated: Job = {
       ...job,
       invoice_status: newInvoiceStatus,
+      is_archived: isPaid,
+      archived_at: isPaid ? (job.archived_at || new Date().toISOString()) : undefined,
+      archived_by: isPaid ? (job.archived_by || currentStaff?.name || 'Operations') : undefined,
       audit_logs: [
         {
           id: `a-${Date.now()}`,
-          action: 'Invoice Status Updated',
-          performedBy: 'Billing Admin',
+          action: isPaid ? 'Project Paid & Archived' : 'Invoice Status Updated',
+          performedBy: currentStaff?.name || 'Billing Admin',
           timestamp: new Date().toISOString(),
-          details: `Changed invoice status to "${newInvoiceStatus}"`
+          details: isPaid
+            ? `Marked as Paid. Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`
+            : `Changed invoice status to "${newInvoiceStatus}"`
         },
         ...job.audit_logs
       ]
