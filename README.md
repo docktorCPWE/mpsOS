@@ -1,0 +1,4 @@
+Welcome to the MPS OS System. This has been created for the entire operation of My Plan Store to keep track of employee time cards, project management timing, and phasing and communications. 
+We are currently in version 2.4 of this application and are working to iron out all of the bugs and details as we progress through the development phase of this new software. 
+Upon completion, Greg Hyatt, will be providing a complete walkthrough for those who may not understand how to utilize the software to its fullest. 
+Our goal is to simply our processes and how we communicate here at My Plan Store. Once this software is completed, it will be mandatory for all drafters and associates to utilize it to keep track of both their time cards, as well as projects that are being worked on. There will be NO exceptions to using this. You will either comply, or potentially face disciplinarian action. 
