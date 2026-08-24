@@ -1,0 +1,6 @@
+{
+  "name": "My Plan Store OS",
+  "description": "Architectural drafting, floor plan design workflow and customer progress tracking portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
