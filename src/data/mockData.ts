@@ -1,4 +1,10 @@
-import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage } from '../types';
+import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage, TimeCardShift } from '../types';
+
+export function isStaffExemptFromClock(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
+  return name.toLowerCase().includes('jason');
+}
 
 export const STAFF_USERS: StaffUser[] = [
   {
@@ -1450,9 +1456,430 @@ export function saveStoredChatMessages(messages: ChatMessage[]) {
   }
 }
 
+export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v10';
+
+export const INITIAL_TIME_CARDS: TimeCardShift[] = [
+  // Sarah Jenkins (Mon, Tue, Wed)
+  {
+    id: 'shift-sarah-mon',
+    staffId: 'staff-sarah',
+    staffName: 'Sarah Jenkins',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:02:15.000Z',
+    clockOutTime: '2026-08-24T16:35:40.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-sarah-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:35:00.000Z',
+        durationSeconds: 2100
+      }
+    ],
+    totalWorkSeconds: 28705, // ~7.97 hrs
+    totalBreakSeconds: 2100,
+    notes: 'Floor plan modeling and kitchen island detailing'
+  },
+  {
+    id: 'shift-sarah-tue',
+    staffId: 'staff-sarah',
+    staffName: 'Sarah Jenkins',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T07:58:00.000Z',
+    clockOutTime: '2026-08-25T16:45:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-sarah-tue-1',
+        startTime: '2026-08-25T12:15:00.000Z',
+        endTime: '2026-08-25T12:45:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 29820, // ~8.28 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Structural grid alignment for Craftsman job'
+  },
+  {
+    id: 'shift-sarah-wed',
+    staffId: 'staff-sarah',
+    staffName: 'Sarah Jenkins',
+    date: '2026-08-26',
+    clockInTime: '2026-08-26T08:00:00.000Z',
+    status: 'clocked_in',
+    breaks: [],
+    totalWorkSeconds: 0,
+    totalBreakSeconds: 0,
+    notes: 'Active shift'
+  },
+
+  // Alex Rivers (Mon, Tue, Wed)
+  {
+    id: 'shift-alex-mon',
+    staffId: 'staff-alex',
+    staffName: 'Alex Rivers',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:30:00.000Z',
+    clockOutTime: '2026-08-24T17:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-alex-mon-1',
+        startTime: '2026-08-24T12:30:00.000Z',
+        endTime: '2026-08-24T13:00:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: '3D exterior rendering passes'
+  },
+  {
+    id: 'shift-alex-tue',
+    staffId: 'staff-alex',
+    staffName: 'Alex Rivers',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T08:25:00.000Z',
+    clockOutTime: '2026-08-25T16:55:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-alex-tue-1',
+        startTime: '2026-08-25T12:10:00.000Z',
+        endTime: '2026-08-25T12:40:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Elevation perspective drafting'
+  },
+  {
+    id: 'shift-alex-wed',
+    staffId: 'staff-alex',
+    staffName: 'Alex Rivers',
+    date: '2026-08-26',
+    clockInTime: '2026-08-26T08:15:00.000Z',
+    status: 'clocked_in',
+    breaks: [],
+    totalWorkSeconds: 0,
+    totalBreakSeconds: 0,
+    notes: 'Active shift'
+  },
+
+  // Elena Rostova (Mon, Tue, Wed)
+  {
+    id: 'shift-elena-mon',
+    staffId: 'staff-elena',
+    staffName: 'Elena Rostova',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:10:00.000Z',
+    clockOutTime: '2026-08-24T16:40:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-elena-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Foundation structural detail review'
+  },
+  {
+    id: 'shift-elena-tue',
+    staffId: 'staff-elena',
+    staffName: 'Elena Rostova',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T08:05:00.000Z',
+    clockOutTime: '2026-08-25T16:50:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-elena-tue-1',
+        startTime: '2026-08-25T12:00:00.000Z',
+        endTime: '2026-08-25T12:45:00.000Z',
+        durationSeconds: 2700
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 2700,
+    notes: 'Load bearing calculations and truss specs'
+  },
+
+  // Kyle (Lead Drafter)
+  {
+    id: 'shift-kyle-mon',
+    staffId: 'staff-kyle',
+    staffName: 'Kyle',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T07:45:00.000Z',
+    clockOutTime: '2026-08-24T16:45:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-kyle-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 30600, // 8.5 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Workload delegation and QA review of completed sheets'
+  },
+  {
+    id: 'shift-kyle-tue',
+    staffId: 'staff-kyle',
+    staffName: 'Kyle',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T07:40:00.000Z',
+    clockOutTime: '2026-08-25T16:50:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-kyle-tue-1',
+        startTime: '2026-08-25T12:15:00.000Z',
+        endTime: '2026-08-25T12:45:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 31200, // 8.66 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Customer design consultation & revision signoffs'
+  },
+  {
+    id: 'shift-kyle-wed',
+    staffId: 'staff-kyle',
+    staffName: 'Kyle',
+    date: '2026-08-26',
+    clockInTime: '2026-08-26T07:50:00.000Z',
+    status: 'clocked_in',
+    breaks: [],
+    totalWorkSeconds: 0,
+    totalBreakSeconds: 0,
+    notes: 'Active shift'
+  },
+
+  // James (Drafter)
+  {
+    id: 'shift-james-mon',
+    staffId: 'staff-james',
+    staffName: 'James',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:00:00.000Z',
+    clockOutTime: '2026-08-24T16:30:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-james-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Initial blueprint setup and dimensional stringing'
+  },
+  {
+    id: 'shift-james-tue',
+    staffId: 'staff-james',
+    staffName: 'James',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T08:00:00.000Z',
+    clockOutTime: '2026-08-25T16:30:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-james-tue-1',
+        startTime: '2026-08-25T12:00:00.000Z',
+        endTime: '2026-08-25T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Roof framing and section cuts'
+  },
+
+  // Aaron (Drafter)
+  {
+    id: 'shift-aaron-mon',
+    staffId: 'staff-aaron',
+    staffName: 'Aaron',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:15:00.000Z',
+    clockOutTime: '2026-08-24T16:45:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-aaron-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Electrical layouts and ceiling plan layers'
+  },
+  {
+    id: 'shift-aaron-tue',
+    staffId: 'staff-aaron',
+    staffName: 'Aaron',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T08:10:00.000Z',
+    clockOutTime: '2026-08-25T16:40:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-aaron-tue-1',
+        startTime: '2026-08-25T12:00:00.000Z',
+        endTime: '2026-08-25T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Window and door scheduling'
+  },
+
+  // Drew Lupkey (Finance)
+  {
+    id: 'shift-drew-mon',
+    staffId: 'staff-drew',
+    staffName: 'Drew Lupkey',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T08:30:00.000Z',
+    clockOutTime: '2026-08-24T17:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-drew-mon-1',
+        startTime: '2026-08-24T12:30:00.000Z',
+        endTime: '2026-08-24T13:00:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Invoice reconciliations and time log audits'
+  },
+  {
+    id: 'shift-drew-tue',
+    staffId: 'staff-drew',
+    staffName: 'Drew Lupkey',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T08:30:00.000Z',
+    clockOutTime: '2026-08-25T17:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-drew-tue-1',
+        startTime: '2026-08-25T12:30:00.000Z',
+        endTime: '2026-08-25T13:00:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Customer payment processing and contractor timesheets'
+  },
+
+  // Greg Hyatt (Owner & Architect)
+  {
+    id: 'shift-greg-mon',
+    staffId: 'staff-greg',
+    staffName: 'Greg Hyatt',
+    date: '2026-08-24',
+    clockInTime: '2026-08-24T07:30:00.000Z',
+    clockOutTime: '2026-08-24T17:30:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-greg-mon-1',
+        startTime: '2026-08-24T12:00:00.000Z',
+        endTime: '2026-08-24T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 34200, // 9.5 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Principal architect reviews and client onboarding meetings'
+  },
+  {
+    id: 'shift-greg-tue',
+    staffId: 'staff-greg',
+    staffName: 'Greg Hyatt',
+    date: '2026-08-25',
+    clockInTime: '2026-08-25T07:30:00.000Z',
+    clockOutTime: '2026-08-25T17:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-greg-tue-1',
+        startTime: '2026-08-25T12:00:00.000Z',
+        endTime: '2026-08-25T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 32400, // 9.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Plan approval reviews and operations coordination'
+  },
+  {
+    id: 'shift-greg-wed',
+    staffId: 'staff-greg',
+    staffName: 'Greg Hyatt',
+    date: '2026-08-26',
+    clockInTime: '2026-08-26T07:30:00.000Z',
+    status: 'clocked_in',
+    breaks: [],
+    totalWorkSeconds: 0,
+    totalBreakSeconds: 0,
+    notes: 'Active shift'
+  }
+];
+
+export function getStoredTimeCards(): TimeCardShift[] {
+  try {
+    const raw = localStorage.getItem(TIME_CARDS_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(INITIAL_TIME_CARDS));
+      return INITIAL_TIME_CARDS;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_TIME_CARDS;
+  } catch (err) {
+    console.error('Failed to load stored time cards:', err);
+    return INITIAL_TIME_CARDS;
+  }
+}
+
+export function saveStoredTimeCards(shifts: TimeCardShift[]) {
+  try {
+    localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(shifts));
+  } catch (err) {
+    console.error('Failed to save time cards:', err);
+  }
+}
+
+export function resetStoredTimeCards(): TimeCardShift[] {
+  localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(INITIAL_TIME_CARDS));
+  return INITIAL_TIME_CARDS;
+}
+
 export function resetStoredJobs(): Job[] {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_JOBS));
   localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(INITIAL_NOTIFICATIONS));
   localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(INITIAL_CHAT_MESSAGES));
+  localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(INITIAL_TIME_CARDS));
   return INITIAL_JOBS;
 }
+

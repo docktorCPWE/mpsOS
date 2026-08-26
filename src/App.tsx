@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff } from './data/mockData';
+import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak } from './types';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
@@ -14,6 +14,8 @@ import { CompleteTaskModal, CompleteTaskPayload } from './components/CompleteTas
 import { KyleDelegationInboxModal } from './components/KyleDelegationInboxModal';
 import { GeneralChatWidget } from './components/GeneralChatWidget';
 import { StaffManagementModal } from './components/StaffManagementModal';
+import { TimeClockBar } from './components/TimeClockBar';
+import { TimeCardModal } from './components/TimeCardModal';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -31,12 +33,14 @@ export default function App() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [nowTimestamp, setNowTimestamp] = useState<number>(Date.now());
   
-  // Staff User and Notifications State
+  // Staff User, Notifications & Time Cards State
   const [staffList, setStaffList] = useState<StaffUser[]>(STAFF_USERS);
   const [currentStaff, setCurrentStaff] = useState<StaffUser>(STAFF_USERS[0]); // Default: Greg Hyatt (Owner)
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
+  const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' } | null>(null);
 
   // Modals state
   const [selectedJobForDetail, setSelectedJobForDetail] = useState<Job | null>(null);
@@ -47,6 +51,8 @@ export default function App() {
   const [timerPromptJob, setTimerPromptJob] = useState<{ job: Job; initialNote?: string } | null>(null);
   const [isKyleInboxOpen, setIsKyleInboxOpen] = useState(false);
   const [isStaffManagementOpen, setIsStaffManagementOpen] = useState(false);
+  const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
+  const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
 
   // Live ticker for active timers
   useEffect(() => {
@@ -56,7 +62,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Initialize jobs, staff and chat from local storage or mock dataset
+  // Initialize jobs, staff, chat, and time cards from local storage or mock dataset
   useEffect(() => {
     const loaded = getStoredJobs();
     setJobs(loaded);
@@ -70,6 +76,7 @@ export default function App() {
     if (matchingStaff) {
       setCurrentStaff(matchingStaff);
     }
+    setTimeCards(getStoredTimeCards());
   }, []);
 
   // Sync jobs state to localStorage whenever modified
@@ -192,8 +199,275 @@ export default function App() {
       setChatMessages(getStoredChatMessages());
       const resetStaff = resetStoredStaff();
       setStaffList(resetStaff);
+      const resetCards = resetStoredTimeCards();
+      setTimeCards(resetCards);
       if (reset.length > 0) setSelectedCustomerId(reset[0].id);
     }
+  };
+
+  // Time card & punch clock handlers
+  const handleClockIn = (notes?: string) => {
+    if (isStaffExemptFromClock(currentStaff)) {
+      return;
+    }
+    const todayStr = new Date().toISOString().split('T')[0];
+    const active = timeCards.find(s => s.staffId === currentStaff.id && (s.status === 'clocked_in' || s.status === 'on_break'));
+    if (active) return;
+
+    const newShift: TimeCardShift = {
+      id: `shift-${currentStaff.id}-${Date.now()}`,
+      staffId: currentStaff.id,
+      staffName: currentStaff.name,
+      date: todayStr,
+      clockInTime: new Date().toISOString(),
+      status: 'clocked_in',
+      breaks: [],
+      totalWorkSeconds: 0,
+      totalBreakSeconds: 0,
+      notes: notes || 'Regular Shift'
+    };
+
+    const updated = [newShift, ...timeCards];
+    setTimeCards(updated);
+    saveStoredTimeCards(updated);
+  };
+
+  const handleStartBreak = () => {
+    if (isStaffExemptFromClock(currentStaff)) return;
+
+    const curStaffLower = currentStaff.name.toLowerCase();
+    const pausedJobNumbers: string[] = [];
+    const pausedJobIds: string[] = [];
+
+    // Find and pause any active project timers for this employee
+    const updatedJobs = jobs.map(j => {
+      if (j.active_timer_start) {
+        const assigned = (j.assigned_drafter || '').toLowerCase();
+        const matchesStaff = assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0]);
+        if (matchesStaff) {
+          const startMs = new Date(j.active_timer_start).getTime();
+          const endMs = Date.now();
+          const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+          const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
+
+          pausedJobNumbers.push(j.job_number);
+          pausedJobIds.push(j.id);
+
+          const partialLog: TimeLog = {
+            id: `tl-break-${Date.now()}`,
+            drafterName: currentStaff.name,
+            startTime: j.active_timer_start,
+            endTime: new Date(endMs).toISOString(),
+            durationSeconds,
+            taskDescription: `${taskNote} (Paused for Break)`,
+            hourlyRate: j.hourly_rate || 85
+          };
+
+          return {
+            ...j,
+            active_timer_start: undefined,
+            active_timer_task: undefined,
+            paused_by_break: true,
+            paused_timer_task: taskNote,
+            time_logs: [...(j.time_logs || []), partialLog],
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Timer Auto-Paused (Break)',
+                performedBy: currentStaff.name,
+                timestamp: new Date().toISOString(),
+                details: `Drafting timer on ${j.job_number} auto-paused for break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }
+      }
+      return j;
+    });
+
+    if (pausedJobNumbers.length > 0) {
+      updateJobsState(updatedJobs);
+      setPausedJobsNotice({ jobNumbers: pausedJobNumbers, type: 'paused' });
+    }
+
+    // Update timecard shift status to on_break
+    const updatedCards = timeCards.map(s => {
+      if (s.staffId === currentStaff.id && (s.status === 'clocked_in' || !s.clockOutTime)) {
+        const newBreak: TimeCardBreak = {
+          id: `brk-${Date.now()}`,
+          startTime: new Date().toISOString()
+        };
+        return {
+          ...s,
+          status: 'on_break' as const,
+          breaks: [...(s.breaks || []), newBreak],
+          pausedProjectJobIds: pausedJobIds
+        };
+      }
+      return s;
+    });
+
+    setTimeCards(updatedCards);
+    saveStoredTimeCards(updatedCards);
+  };
+
+  const handleResumeFromBreak = () => {
+    if (isStaffExemptFromClock(currentStaff)) return;
+
+    const resumedJobNumbers: string[] = [];
+
+    // Find shift to get paused jobs
+    const activeShift = timeCards.find(s => s.staffId === currentStaff.id && s.status === 'on_break');
+    const pausedJobIds = activeShift?.pausedProjectJobIds || [];
+
+    // Automatically resume project timers
+    const updatedJobs = jobs.map(j => {
+      if (j.paused_by_break || pausedJobIds.includes(j.id)) {
+        resumedJobNumbers.push(j.job_number);
+        return {
+          ...j,
+          paused_by_break: undefined,
+          active_timer_start: new Date().toISOString(),
+          active_timer_task: j.paused_timer_task || `Drafting ${j.current_status}`,
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Timer Resumed from Break',
+              performedBy: currentStaff.name,
+              timestamp: new Date().toISOString(),
+              details: `Drafting timer on ${j.job_number} resumed upon returning from break.`
+            },
+            ...j.audit_logs
+          ]
+        };
+      }
+      return j;
+    });
+
+    if (resumedJobNumbers.length > 0) {
+      updateJobsState(updatedJobs);
+      setPausedJobsNotice({ jobNumbers: resumedJobNumbers, type: 'resumed' });
+    }
+
+    // Update timecard shift: close the open break and set status to clocked_in
+    const updatedCards = timeCards.map(s => {
+      if (s.staffId === currentStaff.id && s.status === 'on_break') {
+        const closedBreaks = (s.breaks || []).map(b => {
+          if (!b.endTime) {
+            const endMs = Date.now();
+            const startMs = new Date(b.startTime).getTime();
+            return {
+              ...b,
+              endTime: new Date(endMs).toISOString(),
+              durationSeconds: Math.max(0, Math.floor((endMs - startMs) / 1000))
+            };
+          }
+          return b;
+        });
+
+        return {
+          ...s,
+          status: 'clocked_in' as const,
+          breaks: closedBreaks,
+          pausedProjectJobIds: []
+        };
+      }
+      return s;
+    });
+
+    setTimeCards(updatedCards);
+    saveStoredTimeCards(updatedCards);
+  };
+
+  const handleClockOut = (notes?: string) => {
+    if (isStaffExemptFromClock(currentStaff)) return;
+
+    const curStaffLower = currentStaff.name.toLowerCase();
+
+    // If any project timer is still running for this user, stop it cleanly
+    const updatedJobs = jobs.map(j => {
+      if (j.active_timer_start) {
+        const assigned = (j.assigned_drafter || '').toLowerCase();
+        const matchesStaff = assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0]);
+        if (matchesStaff) {
+          const startMs = new Date(j.active_timer_start).getTime();
+          const endMs = Date.now();
+          const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+          const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
+
+          const newLog: TimeLog = {
+            id: `tl-${Date.now()}`,
+            drafterName: currentStaff.name,
+            startTime: j.active_timer_start,
+            endTime: new Date(endMs).toISOString(),
+            durationSeconds,
+            taskDescription: `${taskNote} (Clock-out auto-save)`,
+            hourlyRate: j.hourly_rate || 85
+          };
+
+          return {
+            ...j,
+            active_timer_start: undefined,
+            active_timer_task: undefined,
+            paused_by_break: undefined,
+            time_logs: [...(j.time_logs || []), newLog],
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Timer Stopped (Clock Out)',
+                performedBy: currentStaff.name,
+                timestamp: new Date().toISOString(),
+                details: `Drafting timer finalized on clock out (${Math.round(durationSeconds / 60)} mins logged).`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }
+      }
+      return j;
+    });
+
+    updateJobsState(updatedJobs);
+
+    // Finalize active timecard shift
+    const endMs = Date.now();
+    const updatedCards = timeCards.map(s => {
+      if (s.staffId === currentStaff.id && (s.status === 'clocked_in' || s.status === 'on_break')) {
+        // Close open break if on break
+        const finalBreaks = (s.breaks || []).map(b => {
+          if (!b.endTime) {
+            const bStartMs = new Date(b.startTime).getTime();
+            return {
+              ...b,
+              endTime: new Date(endMs).toISOString(),
+              durationSeconds: Math.max(0, Math.floor((endMs - bStartMs) / 1000))
+            };
+          }
+          return b;
+        });
+
+        const totalBreakSec = finalBreaks.reduce((sum, b) => sum + (b.durationSeconds || 0), 0);
+        const shiftGrossSec = Math.max(0, Math.floor((endMs - new Date(s.clockInTime).getTime()) / 1000));
+        const totalWorkSec = Math.max(0, shiftGrossSec - totalBreakSec);
+
+        return {
+          ...s,
+          clockOutTime: new Date(endMs).toISOString(),
+          status: 'clocked_out' as const,
+          breaks: finalBreaks,
+          totalWorkSeconds: totalWorkSec,
+          totalBreakSeconds: totalBreakSec,
+          notes: notes || s.notes || 'Completed shift',
+          pausedProjectJobIds: []
+        };
+      }
+      return s;
+    });
+
+    setTimeCards(updatedCards);
+    saveStoredTimeCards(updatedCards);
+    setPausedJobsNotice(null);
   };
 
   // Staff Management handlers
@@ -976,6 +1250,26 @@ export default function App() {
         unreadChatCount={unreadChatCount}
       />
 
+      {/* Clock-In, Break & Clock-Out Bar (Accessible to all employees, with special manager view for Jason) */}
+      {userRole !== 'customer' && (
+        <TimeClockBar
+          currentStaff={currentStaff}
+          staffList={staffList}
+          timeCards={timeCards}
+          jobs={jobs}
+          onClockIn={handleClockIn}
+          onStartBreak={handleStartBreak}
+          onResumeFromBreak={handleResumeFromBreak}
+          onClockOut={handleClockOut}
+          onOpenTimeCardModal={(staffId) => {
+            setTimeCardModalStaffId(staffId || currentStaff.id);
+            setIsTimeCardModalOpen(true);
+          }}
+          pausedJobsNotice={pausedJobsNotice}
+          onClearPausedNotice={() => setPausedJobsNotice(null)}
+        />
+      )}
+
       {/* Main OS View Switcher */}
       <main className="flex-1">
         {userRole === 'drafter' ? (
@@ -1145,6 +1439,17 @@ export default function App() {
         onUpdateStaff={handleUpdateStaff}
         onDeleteStaff={handleDeleteStaff}
         onResetStaff={handleResetStaff}
+      />
+
+      {/* MODAL 9: Employee Time Cards & Weekly Hours Modal (with CSV export) */}
+      <TimeCardModal
+        isOpen={isTimeCardModalOpen}
+        onClose={() => setIsTimeCardModalOpen(false)}
+        currentStaff={currentStaff}
+        staffList={staffList}
+        timeCards={timeCards}
+        jobs={jobs}
+        initialSelectedStaffId={timeCardModalStaffId}
       />
 
     </div>

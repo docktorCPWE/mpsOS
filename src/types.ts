@@ -114,6 +114,45 @@ export type StaffDepartment =
   | 'Operations'
   | 'Finance';
 
+export type ShiftStatus = 'clocked_out' | 'clocked_in' | 'on_break';
+
+export interface TimeCardBreak {
+  id: string;
+  startTime: string; // ISO string
+  endTime?: string;  // ISO string
+  durationSeconds?: number;
+}
+
+export interface TimeCardShift {
+  id: string;
+  staffId: string;
+  staffName: string;
+  date: string; // 'YYYY-MM-DD'
+  clockInTime: string; // ISO string
+  clockOutTime?: string; // ISO string
+  status: ShiftStatus;
+  breaks: TimeCardBreak[];
+  totalWorkSeconds: number;
+  totalBreakSeconds: number;
+  notes?: string;
+  pausedProjectJobIds?: string[];
+}
+
+export interface EmployeeWeeklySummary {
+  staffId: string;
+  staffName: string;
+  title: string;
+  department: string;
+  hourlyRate: number;
+  totalShiftHours: number;
+  totalBreakHours: number;
+  totalProjectHours: number;
+  regularHours: number;
+  overtimeHours: number;
+  estimatedGrossPay: number;
+  shifts: TimeCardShift[];
+}
+
 export interface StaffUser {
   id: string;
   name: string;
@@ -206,6 +245,8 @@ export interface Job {
   version_snapshots?: JobVersionSnapshot[];
   active_timer_start?: string; // ISO string if timer is currently running
   active_timer_task?: string;  // Note for current active session
+  paused_by_break?: boolean;   // Flagged if timer was auto-paused due to employee going on break
+  paused_timer_task?: string;  // Preserved task label while paused
   comments: JobComment[];
   deliverables: DeliverableFile[];
   audit_logs: AuditLog[];
