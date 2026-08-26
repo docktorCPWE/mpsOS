@@ -100,11 +100,22 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   const teamActiveCount = teamClockedIn + teamOnBreak;
 
   // Check if current user has any active project timer running on jobs
+  const curName = currentStaff.name.toLowerCase();
   const userRunningJobTimer = jobs.find(j => {
     if (!j.active_timer_start) return false;
+    if (j.active_timer_drafter_id === currentStaff.id) return true;
+    if (j.active_timer_drafter_name && j.active_timer_drafter_name.toLowerCase() === curName) return true;
     const assigned = (j.assigned_drafter || '').toLowerCase();
-    const curName = currentStaff.name.toLowerCase();
-    return assigned.includes(curName) || curName.includes(assigned.split(',')[0]);
+    return assigned.includes(curName) || curName.includes(assigned.split(',')[0].trim());
+  });
+
+  // Check if current user has any job timer paused on break
+  const userPausedJobTimer = jobs.find(j => {
+    if (!j.paused_by_break) return false;
+    if (j.paused_timer_drafter_id === currentStaff.id) return true;
+    if (j.paused_timer_drafter_name && j.paused_timer_drafter_name.toLowerCase() === curName) return true;
+    const assigned = (j.assigned_drafter || '').toLowerCase();
+    return assigned.includes(curName) || curName.includes(assigned.split(',')[0].trim());
   });
 
   return (
@@ -246,9 +257,16 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
               </div>
 
               {userRunningJobTimer && (
-                <div className="bg-blue-950/60 border border-blue-600/40 text-blue-300 px-2 py-1 rounded-lg text-[11px] flex items-center gap-1.5">
+                <div className="bg-blue-950/60 border border-blue-600/40 text-blue-300 px-2.5 py-1 rounded-lg text-[11px] flex items-center gap-1.5 animate-pulse">
                   <Clock className="w-3 h-3 text-blue-400 animate-spin" />
                   <span>Drafting Timer: <strong>{userRunningJobTimer.job_number}</strong></span>
+                </div>
+              )}
+
+              {userPausedJobTimer && currentStatus === 'on_break' && (
+                <div className="bg-amber-950/60 border border-amber-500/50 text-amber-300 px-2.5 py-1 rounded-lg text-[11px] flex items-center gap-1.5">
+                  <Coffee className="w-3 h-3 text-amber-400" />
+                  <span>Paused Timer: <strong>{userPausedJobTimer.job_number}</strong> (Resumes on return)</span>
                 </div>
               )}
             </div>

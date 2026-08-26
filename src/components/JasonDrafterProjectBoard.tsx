@@ -14,7 +14,8 @@ import {
   ListTodo,
   Shield,
   Search,
-  Filter
+  Filter,
+  Coffee
 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
 import { STAFF_USERS, isJobArchived } from '../data/mockData';
@@ -108,7 +109,16 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     const allInvolvedJobs = activeJobs.filter(j => allInvolvedJobIds.has(j.id));
 
     // Live timer check
-    const activeRunningJob = allInvolvedJobs.find(j => Boolean(j.active_timer_start));
+    const activeRunningJob = allInvolvedJobs.find(j => 
+      Boolean(j.active_timer_start) && 
+      (j.active_timer_drafter_name?.toLowerCase() === drafterLower || j.assigned_drafter.toLowerCase().includes(drafterLower))
+    );
+
+    // Paused by break timer check
+    const pausedBreakJob = allInvolvedJobs.find(j =>
+      Boolean(j.paused_by_break) &&
+      (j.paused_timer_drafter_name?.toLowerCase() === drafterLower || j.assigned_drafter.toLowerCase().includes(drafterLower))
+    );
 
     // Roadblock count
     const roadblockedJobs = allInvolvedJobs.filter(j => j.roadblock);
@@ -131,6 +141,7 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
       delegatedProjectsWithTasks,
       allInvolvedJobs,
       activeRunningJob,
+      pausedBreakJob,
       roadblockedJobs,
       totalSeconds
     };
@@ -250,7 +261,7 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
 
       {/* Drafters Workload Cards Grid */}
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredDrafterWorkloads.map(({ drafter, leadProjects, delegatedProjectsWithTasks, allInvolvedJobs, activeRunningJob, roadblockedJobs, totalSeconds }) => {
+        {filteredDrafterWorkloads.map(({ drafter, leadProjects, delegatedProjectsWithTasks, allInvolvedJobs, activeRunningJob, pausedBreakJob, roadblockedJobs, totalSeconds }) => {
           const hasProjects = allInvolvedJobs.length > 0;
 
           return (
@@ -279,13 +290,18 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
                     </div>
                   </div>
 
-                  {/* Active Timer Pill */}
-                  {activeRunningJob && (
+                  {/* Active Timer / Paused on Break Pill */}
+                  {activeRunningJob ? (
                     <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 animate-pulse">
                       <Clock className="w-3 h-3 text-emerald-400" />
                       <span>Timer On</span>
                     </span>
-                  )}
+                  ) : pausedBreakJob ? (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
+                      <Coffee className="w-3 h-3 text-amber-400" />
+                      <span>On Break (Paused)</span>
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Drafter Stats Bar */}

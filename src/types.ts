@@ -245,8 +245,13 @@ export interface Job {
   version_snapshots?: JobVersionSnapshot[];
   active_timer_start?: string; // ISO string if timer is currently running
   active_timer_task?: string;  // Note for current active session
+  active_timer_drafter_id?: string;
+  active_timer_drafter_name?: string;
   paused_by_break?: boolean;   // Flagged if timer was auto-paused due to employee going on break
   paused_timer_task?: string;  // Preserved task label while paused
+  paused_timer_drafter_id?: string;
+  paused_timer_drafter_name?: string;
+  paused_elapsed_seconds?: number;
   comments: JobComment[];
   deliverables: DeliverableFile[];
   audit_logs: AuditLog[];

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Eye, FileCheck, Layers, MessageSquare, ChevronRight, User, Sparkles, ShieldAlert, Play, Square, DollarSign, History, Share2, ListTodo, Paperclip, Archive } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Eye, FileCheck, Layers, MessageSquare, ChevronRight, User, Sparkles, ShieldAlert, Play, Square, DollarSign, History, Share2, ListTodo, Paperclip, Archive, Coffee, PauseCircle } from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
 import { isJobArchived } from '../data/mockData';
@@ -46,6 +46,7 @@ export const JobCard: React.FC<JobCardProps> = ({
   const [showLogs, setShowLogs] = useState(false);
 
   const isTimerRunning = Boolean(job.active_timer_start);
+  const isTimerPaused = Boolean(job.paused_by_break);
   const totalSeconds = calculateJobTotalSeconds(job, nowTimestamp);
   const totalBillable = calculateJobBillableAmount(job, nowTimestamp);
   const hourlyRate = job.hourly_rate || 85;
@@ -58,13 +59,13 @@ export const JobCard: React.FC<JobCardProps> = ({
 
   const handleStart = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onStartTimer(job.id, taskInput.trim());
+    onStartTimer(job.id, taskInput.trim() || job.paused_timer_task);
     setTaskInput('');
   };
 
   const handleStop = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onStopTimer(job.id, taskInput || job.active_timer_task);
+    onStopTimer(job.id, taskInput || job.active_timer_task || job.paused_timer_task);
     setTaskInput('');
   };
 
@@ -72,6 +73,8 @@ export const JobCard: React.FC<JobCardProps> = ({
     <div className={`bg-white rounded-xl border transition-all duration-200 shadow-sm hover:shadow-md flex flex-col justify-between overflow-hidden relative group font-sans ${
       isTimerRunning
         ? 'border-emerald-400 ring-2 ring-emerald-400/30'
+        : isTimerPaused
+        ? 'border-amber-400 ring-2 ring-amber-400/30 bg-amber-50/10'
         : job.roadblock
         ? 'border-red-300 ring-2 ring-red-400/20'
         : 'border-slate-200 hover:border-blue-400'
@@ -79,7 +82,13 @@ export const JobCard: React.FC<JobCardProps> = ({
       
       {/* Top Banner Stripe */}
       <div className={`h-1.5 w-full ${
-        isTimerRunning ? 'bg-emerald-500 animate-pulse' : job.roadblock ? 'bg-red-500 animate-pulse' : 'bg-blue-600'
+        isTimerRunning 
+          ? 'bg-emerald-500 animate-pulse' 
+          : isTimerPaused
+          ? 'bg-amber-500 animate-pulse'
+          : job.roadblock 
+          ? 'bg-red-500 animate-pulse' 
+          : 'bg-blue-600'
       }`} />
 
       <div className="p-5 flex-1 space-y-4">
@@ -156,16 +165,26 @@ export const JobCard: React.FC<JobCardProps> = ({
         <div className={`p-3.5 rounded-xl border transition-all ${
           isTimerRunning
             ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs'
+            : isTimerPaused
+            ? 'bg-amber-50/80 border-amber-300 shadow-2xs'
             : 'bg-slate-50 border-slate-200'
         }`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-              <Clock className={`w-4 h-4 ${isTimerRunning ? 'text-emerald-600 animate-spin' : 'text-slate-500'}`} />
+              <Clock className={`w-4 h-4 ${
+                isTimerRunning ? 'text-emerald-600 animate-spin' : isTimerPaused ? 'text-amber-600' : 'text-slate-500'
+              }`} />
               <span>Drafter Timer</span>
               {isTimerRunning && (
                 <span className="flex items-center gap-1 bg-emerald-600 text-white text-[10px] font-mono px-2 py-0.5 rounded-full animate-pulse">
                   <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
                   RUNNING
+                </span>
+              )}
+              {isTimerPaused && (
+                <span className="flex items-center gap-1 bg-amber-500 text-slate-950 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full animate-pulse">
+                  <Coffee className="w-3 h-3 text-slate-950" />
+                  PAUSED (ON BREAK)
                 </span>
               )}
             </div>
@@ -183,7 +202,9 @@ export const JobCard: React.FC<JobCardProps> = ({
           <div className="flex items-baseline justify-between bg-white p-2.5 rounded-lg border border-slate-200 mb-2.5">
             <div>
               <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Logged Time</div>
-              <div className={`text-base font-bold font-mono ${isTimerRunning ? 'text-emerald-700' : 'text-slate-800'}`}>
+              <div className={`text-base font-bold font-mono ${
+                isTimerRunning ? 'text-emerald-700' : isTimerPaused ? 'text-amber-700' : 'text-slate-800'
+              }`}>
                 {isTimerRunning ? formatSecondsToHHMMSS(activeSessionSeconds) : formatSecondsToReadable(totalSeconds)}
               </div>
             </div>
@@ -215,6 +236,14 @@ export const JobCard: React.FC<JobCardProps> = ({
                 <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold uppercase">Task:</span>
                 <span className="truncate">{job.active_timer_task || `Drafting ${job.current_status}`}</span>
               </div>
+            ) : isTimerPaused ? (
+              <div className="text-xs bg-amber-100/90 p-2 rounded border border-amber-300 text-amber-950 font-medium flex items-center justify-between gap-1.5">
+                <div className="truncate flex items-center gap-1">
+                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold uppercase">Paused Task:</span>
+                  <span className="truncate">{job.paused_timer_task || `Drafting ${job.current_status}`}</span>
+                </div>
+                <span className="text-[10px] text-amber-800 italic shrink-0">Resumes on return</span>
+              </div>
             ) : (
               <input
                 type="text"
@@ -237,6 +266,25 @@ export const JobCard: React.FC<JobCardProps> = ({
                 <Square className="w-3.5 h-3.5 fill-white" />
                 <span>Stop & Save Session</span>
               </button>
+            ) : isTimerPaused ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleStart}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-2.5 rounded-lg text-xs shadow-xs transition active:scale-98 cursor-pointer"
+                  title="Manually resume drafting timer now"
+                >
+                  <Play className="w-3.5 h-3.5 fill-white" />
+                  <span>Resume Timer</span>
+                </button>
+                <button
+                  onClick={handleStop}
+                  className="flex items-center justify-center gap-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-2.5 rounded-lg text-xs transition cursor-pointer"
+                  title="Clear paused state"
+                >
+                  <Square className="w-3 h-3 text-slate-600" />
+                  <span>Stop</span>
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleStart}
@@ -258,10 +306,10 @@ export const JobCard: React.FC<JobCardProps> = ({
                 job.time_logs.map((log) => (
                   <div key={log.id} className="bg-white p-1.5 rounded border border-slate-200 flex justify-between items-center text-slate-600">
                     <div className="truncate pr-2">
-                      <span className="font-semibold text-slate-800">{log.taskDescription || 'CAD Drafting'}</span>
-                      <span className="text-[10px] text-slate-400 block">{new Date(log.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="font-semibold text-slate-800">{log.taskDescription}</span>
+                      <span className="text-[10px] text-slate-400 block">{log.drafterName} &bull; {new Date(log.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <span className="font-mono font-bold text-slate-700 shrink-0">
+                    <span className="font-mono font-bold text-emerald-700 shrink-0">
                       {formatSecondsToReadable(log.durationSeconds)}
                     </span>
                   </div>

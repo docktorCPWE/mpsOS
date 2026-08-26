@@ -129,6 +129,12 @@ export default function App() {
           ...j,
           active_timer_start: new Date().toISOString(),
           active_timer_task: trimmed,
+          active_timer_drafter_id: currentStaff.id,
+          active_timer_drafter_name: currentStaff.name,
+          paused_by_break: false,
+          paused_timer_task: undefined,
+          paused_timer_drafter_id: undefined,
+          paused_timer_drafter_name: undefined,
           audit_logs: [
             {
               id: `a-${Date.now()}`,
@@ -151,34 +157,44 @@ export default function App() {
   // Timer Stop Handler
   const handleStopTimer = (jobId: string, taskNote?: string) => {
     const updatedJobs = jobs.map(j => {
-      if (j.id === jobId && j.active_timer_start) {
-        const startMs = new Date(j.active_timer_start).getTime();
+      if (j.id === jobId && (j.active_timer_start || j.paused_by_break)) {
+        const startMs = j.active_timer_start ? new Date(j.active_timer_start).getTime() : Date.now();
         const endMs = Date.now();
-        const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-        const finalTaskNote = taskNote || j.active_timer_task || `Drafting ${j.current_status}`;
+        const durationSeconds = j.active_timer_start 
+          ? Math.max(1, Math.floor((endMs - startMs) / 1000))
+          : 0;
+        const finalTaskNote = taskNote || j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
 
-        const newLog: TimeLog = {
+        const newLog: TimeLog | null = durationSeconds > 0 ? {
           id: `tl-${Date.now()}`,
-          drafterName: currentStaff.name || j.assigned_drafter.split(',')[0],
-          startTime: j.active_timer_start,
+          drafterName: j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0],
+          startTime: j.active_timer_start || new Date().toISOString(),
           endTime: new Date(endMs).toISOString(),
           durationSeconds,
           taskDescription: finalTaskNote,
           hourlyRate: j.hourly_rate || 85
-        };
+        } : null;
 
         return {
           ...j,
           active_timer_start: undefined,
           active_timer_task: undefined,
-          time_logs: [...(j.time_logs || []), newLog],
+          active_timer_drafter_id: undefined,
+          active_timer_drafter_name: undefined,
+          paused_by_break: false,
+          paused_timer_task: undefined,
+          paused_timer_drafter_id: undefined,
+          paused_timer_drafter_name: undefined,
+          time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
           audit_logs: [
             {
               id: `a-${Date.now()}`,
               action: 'Timer Stopped',
               performedBy: currentStaff.name || j.assigned_drafter.split(',')[0],
               timestamp: new Date().toISOString(),
-              details: `Logged ${Math.round(durationSeconds / 60)} mins for "${finalTaskNote}"`
+              details: durationSeconds > 0 
+                ? `Logged ${Math.round(durationSeconds / 60)} mins for "${finalTaskNote}"`
+                : `Session stopped for "${finalTaskNote}"`
             },
             ...j.audit_logs
           ]
@@ -239,49 +255,62 @@ export default function App() {
     const pausedJobNumbers: string[] = [];
     const pausedJobIds: string[] = [];
 
+    // Helper to determine if an active timer belongs to the current staff member
+    const isJobTimerForCurrentStaff = (j: Job) => {
+      if (!j.active_timer_start) return false;
+      if (j.active_timer_drafter_id && j.active_timer_drafter_id === currentStaff.id) return true;
+      if (j.active_timer_drafter_name && j.active_timer_drafter_name.toLowerCase() === curStaffLower) return true;
+      const assigned = (j.assigned_drafter || '').toLowerCase();
+      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      // Fallback: if only one job timer is running in the entire workspace
+      const allActiveTimers = jobs.filter(item => Boolean(item.active_timer_start));
+      if (allActiveTimers.length === 1 && allActiveTimers[0].id === j.id) return true;
+      return false;
+    };
+
     // Find and pause any active project timers for this employee
     const updatedJobs = jobs.map(j => {
-      if (j.active_timer_start) {
-        const assigned = (j.assigned_drafter || '').toLowerCase();
-        const matchesStaff = assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0]);
-        if (matchesStaff) {
-          const startMs = new Date(j.active_timer_start).getTime();
-          const endMs = Date.now();
-          const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-          const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
+      if (isJobTimerForCurrentStaff(j)) {
+        const startMs = new Date(j.active_timer_start!).getTime();
+        const endMs = Date.now();
+        const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+        const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
 
-          pausedJobNumbers.push(j.job_number);
-          pausedJobIds.push(j.id);
+        pausedJobNumbers.push(j.job_number);
+        pausedJobIds.push(j.id);
 
-          const partialLog: TimeLog = {
-            id: `tl-break-${Date.now()}`,
-            drafterName: currentStaff.name,
-            startTime: j.active_timer_start,
-            endTime: new Date(endMs).toISOString(),
-            durationSeconds,
-            taskDescription: `${taskNote} (Paused for Break)`,
-            hourlyRate: j.hourly_rate || 85
-          };
+        const partialLog: TimeLog = {
+          id: `tl-break-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          drafterName: currentStaff.name,
+          startTime: j.active_timer_start!,
+          endTime: new Date(endMs).toISOString(),
+          durationSeconds,
+          taskDescription: `${taskNote} (Pre-Break Segment)`,
+          hourlyRate: j.hourly_rate || 85
+        };
 
-          return {
-            ...j,
-            active_timer_start: undefined,
-            active_timer_task: undefined,
-            paused_by_break: true,
-            paused_timer_task: taskNote,
-            time_logs: [...(j.time_logs || []), partialLog],
-            audit_logs: [
-              {
-                id: `a-${Date.now()}`,
-                action: 'Timer Auto-Paused (Break)',
-                performedBy: currentStaff.name,
-                timestamp: new Date().toISOString(),
-                details: `Drafting timer on ${j.job_number} auto-paused for break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
-              },
-              ...j.audit_logs
-            ]
-          };
-        }
+        return {
+          ...j,
+          active_timer_start: undefined,
+          active_timer_task: undefined,
+          active_timer_drafter_id: undefined,
+          active_timer_drafter_name: undefined,
+          paused_by_break: true,
+          paused_timer_task: taskNote,
+          paused_timer_drafter_id: currentStaff.id,
+          paused_timer_drafter_name: currentStaff.name,
+          time_logs: [...(j.time_logs || []), partialLog],
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Timer Auto-Paused (Break)',
+              performedBy: currentStaff.name,
+              timestamp: new Date().toISOString(),
+              details: `Drafting timer on ${j.job_number} auto-paused for employee break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
+            },
+            ...j.audit_logs
+          ]
+        };
       }
       return j;
     });
@@ -292,21 +321,43 @@ export default function App() {
     }
 
     // Update timecard shift status to on_break
-    const updatedCards = timeCards.map(s => {
-      if (s.staffId === currentStaff.id && (s.status === 'clocked_in' || !s.clockOutTime)) {
-        const newBreak: TimeCardBreak = {
-          id: `brk-${Date.now()}`,
-          startTime: new Date().toISOString()
-        };
-        return {
-          ...s,
-          status: 'on_break' as const,
-          breaks: [...(s.breaks || []), newBreak],
-          pausedProjectJobIds: pausedJobIds
-        };
-      }
-      return s;
-    });
+    const existingActiveShift = timeCards.find(s => s.staffId === currentStaff.id && (s.status === 'clocked_in' || !s.clockOutTime));
+    
+    let updatedCards: TimeCardShift[];
+    if (existingActiveShift) {
+      updatedCards = timeCards.map(s => {
+        if (s.id === existingActiveShift.id) {
+          const newBreak: TimeCardBreak = {
+            id: `brk-${Date.now()}`,
+            startTime: new Date().toISOString()
+          };
+          return {
+            ...s,
+            status: 'on_break' as const,
+            breaks: [...(s.breaks || []), newBreak],
+            pausedProjectJobIds: pausedJobIds
+          };
+        }
+        return s;
+      });
+    } else {
+      // Auto-clock in and immediately start break if not already clocked in
+      const todayStr = new Date().toISOString().split('T')[0];
+      const newShift: TimeCardShift = {
+        id: `tc-${Date.now()}`,
+        staffId: currentStaff.id,
+        staffName: currentStaff.name,
+        date: todayStr,
+        clockInTime: new Date().toISOString(),
+        status: 'on_break',
+        breaks: [{ id: `brk-${Date.now()}`, startTime: new Date().toISOString() }],
+        totalWorkSeconds: 0,
+        totalBreakSeconds: 0,
+        notes: 'Break started',
+        pausedProjectJobIds: pausedJobIds
+      };
+      updatedCards = [newShift, ...timeCards];
+    }
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
@@ -315,28 +366,49 @@ export default function App() {
   const handleResumeFromBreak = () => {
     if (isStaffExemptFromClock(currentStaff)) return;
 
+    const curStaffLower = currentStaff.name.toLowerCase();
     const resumedJobNumbers: string[] = [];
 
     // Find shift to get paused jobs
     const activeShift = timeCards.find(s => s.staffId === currentStaff.id && s.status === 'on_break');
     const pausedJobIds = activeShift?.pausedProjectJobIds || [];
 
+    // Helper to determine if a paused job belongs to this returning staff member
+    const isJobPausedForCurrentStaff = (j: Job) => {
+      if (!j.paused_by_break && !pausedJobIds.includes(j.id)) return false;
+      if (pausedJobIds.includes(j.id)) return true;
+      if (j.paused_timer_drafter_id && j.paused_timer_drafter_id === currentStaff.id) return true;
+      if (j.paused_timer_drafter_name && j.paused_timer_drafter_name.toLowerCase() === curStaffLower) return true;
+      const assigned = (j.assigned_drafter || '').toLowerCase();
+      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      // Fallback: if only one job was paused across the system
+      const allPausedJobs = jobs.filter(item => Boolean(item.paused_by_break));
+      if (allPausedJobs.length === 1 && allPausedJobs[0].id === j.id) return true;
+      return false;
+    };
+
     // Automatically resume project timers
     const updatedJobs = jobs.map(j => {
-      if (j.paused_by_break || pausedJobIds.includes(j.id)) {
+      if (isJobPausedForCurrentStaff(j)) {
         resumedJobNumbers.push(j.job_number);
+        const taskToResume = j.paused_timer_task || `Drafting ${j.current_status}`;
         return {
           ...j,
-          paused_by_break: undefined,
+          paused_by_break: false,
+          paused_timer_task: undefined,
+          paused_timer_drafter_id: undefined,
+          paused_timer_drafter_name: undefined,
           active_timer_start: new Date().toISOString(),
-          active_timer_task: j.paused_timer_task || `Drafting ${j.current_status}`,
+          active_timer_task: taskToResume,
+          active_timer_drafter_id: currentStaff.id,
+          active_timer_drafter_name: currentStaff.name,
           audit_logs: [
             {
               id: `a-${Date.now()}`,
               action: 'Timer Resumed from Break',
               performedBy: currentStaff.name,
               timestamp: new Date().toISOString(),
-              details: `Drafting timer on ${j.job_number} resumed upon returning from break.`
+              details: `Drafting timer on ${j.job_number} automatically resumed upon returning from break (${taskToResume}).`
             },
             ...j.audit_logs
           ]
@@ -385,45 +457,62 @@ export default function App() {
 
     const curStaffLower = currentStaff.name.toLowerCase();
 
-    // If any project timer is still running for this user, stop it cleanly
+    // Helper to determine if an active or paused timer belongs to this clocking-out staff
+    const isJobTimerForCurrentStaff = (j: Job) => {
+      if (!j.active_timer_start && !j.paused_by_break) return false;
+      if (j.active_timer_drafter_id === currentStaff.id || j.paused_timer_drafter_id === currentStaff.id) return true;
+      if (j.active_timer_drafter_name?.toLowerCase() === curStaffLower || j.paused_timer_drafter_name?.toLowerCase() === curStaffLower) return true;
+      const assigned = (j.assigned_drafter || '').toLowerCase();
+      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      return false;
+    };
+
+    // If any project timer is still running or paused for this user, stop and save it cleanly
     const updatedJobs = jobs.map(j => {
-      if (j.active_timer_start) {
-        const assigned = (j.assigned_drafter || '').toLowerCase();
-        const matchesStaff = assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0]);
-        if (matchesStaff) {
+      if (isJobTimerForCurrentStaff(j)) {
+        let newLog: TimeLog | null = null;
+        let durationSeconds = 0;
+        const taskNote = j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
+
+        if (j.active_timer_start) {
           const startMs = new Date(j.active_timer_start).getTime();
           const endMs = Date.now();
-          const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-          const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
-
-          const newLog: TimeLog = {
+          durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+          newLog = {
             id: `tl-${Date.now()}`,
             drafterName: currentStaff.name,
             startTime: j.active_timer_start,
             endTime: new Date(endMs).toISOString(),
             durationSeconds,
-            taskDescription: `${taskNote} (Clock-out auto-save)`,
+            taskDescription: `${taskNote} (Shift End Auto-Save)`,
             hourlyRate: j.hourly_rate || 85
           };
-
-          return {
-            ...j,
-            active_timer_start: undefined,
-            active_timer_task: undefined,
-            paused_by_break: undefined,
-            time_logs: [...(j.time_logs || []), newLog],
-            audit_logs: [
-              {
-                id: `a-${Date.now()}`,
-                action: 'Timer Stopped (Clock Out)',
-                performedBy: currentStaff.name,
-                timestamp: new Date().toISOString(),
-                details: `Drafting timer finalized on clock out (${Math.round(durationSeconds / 60)} mins logged).`
-              },
-              ...j.audit_logs
-            ]
-          };
         }
+
+        return {
+          ...j,
+          active_timer_start: undefined,
+          active_timer_task: undefined,
+          active_timer_drafter_id: undefined,
+          active_timer_drafter_name: undefined,
+          paused_by_break: false,
+          paused_timer_task: undefined,
+          paused_timer_drafter_id: undefined,
+          paused_timer_drafter_name: undefined,
+          time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Timer Stopped (Clock Out)',
+              performedBy: currentStaff.name,
+              timestamp: new Date().toISOString(),
+              details: durationSeconds > 0 
+                ? `Drafting timer finalized on clock out (${Math.round(durationSeconds / 60)} mins logged).`
+                : `Drafting timer ended on clock out for "${taskNote}".`
+            },
+            ...j.audit_logs
+          ]
+        };
       }
       return j;
     });

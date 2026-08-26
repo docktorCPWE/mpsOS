@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
@@ -1931,41 +1931,85 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
               )}
 
               {/* Live Timer Controls for this Job */}
-              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className={`p-4 rounded-xl border space-y-3 ${
+                job.paused_by_break 
+                  ? 'bg-amber-50/60 border-amber-300' 
+                  : job.active_timer_start 
+                  ? 'bg-emerald-50/60 border-emerald-300' 
+                  : 'bg-white border-slate-200'
+              }`}>
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 flex items-center justify-between">
-                  <span>Live Timer Control</span>
+                  <span className="flex items-center gap-1.5">
+                    <Clock className={`w-4 h-4 ${
+                      job.active_timer_start ? 'text-emerald-600 animate-spin' : job.paused_by_break ? 'text-amber-600' : 'text-slate-500'
+                    }`} />
+                    <span>Live Timer Control</span>
+                  </span>
                   {job.active_timer_start && (
-                    <span className="bg-emerald-600 text-white text-[10px] px-2 py-0.5 rounded-full font-mono animate-pulse">
+                    <span className="bg-emerald-600 text-white text-[10px] px-2.5 py-0.5 rounded-full font-mono animate-pulse font-bold">
                       SESSION IN PROGRESS
+                    </span>
+                  )}
+                  {job.paused_by_break && (
+                    <span className="bg-amber-500 text-slate-950 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold animate-pulse flex items-center gap-1">
+                      <Coffee className="w-3 h-3 text-slate-950" />
+                      PAUSED (EMPLOYEE ON BREAK)
                     </span>
                   )}
                 </h4>
 
-                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div className={`flex items-center justify-between p-3 rounded-lg border ${
+                  job.paused_by_break ? 'bg-amber-100/70 border-amber-200' : 'bg-slate-50 border-slate-200'
+                }`}>
                   <div>
-                    <span className="text-xs text-slate-500 font-medium block">Current Active Task:</span>
-                    <span className="font-bold text-slate-800 text-xs">
-                      {job.active_timer_task || 'CAD Drafting & Revision Work'}
+                    <span className="text-xs text-slate-500 font-medium block">
+                      {job.paused_by_break ? 'Paused Active Task:' : 'Current Active Task:'}
                     </span>
+                    <span className="font-bold text-slate-800 text-xs">
+                      {job.paused_timer_task || job.active_timer_task || 'CAD Drafting & Revision Work'}
+                    </span>
+                    {job.paused_by_break && (
+                      <p className="text-[11px] text-amber-800 mt-0.5">
+                        Timer paused while on break. It will automatically resume when you click &quot;Return From Break&quot;.
+                      </p>
+                    )}
                   </div>
 
-                  {job.active_timer_start ? (
-                    <button
-                      onClick={() => onStopTimer && onStopTimer(job.id)}
-                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-xs"
-                    >
-                      <Square className="w-3.5 h-3.5 fill-white" />
-                      <span>Stop & Save Session</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => onStartTimer && onStartTimer(job.id)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      <span>Start Live Timer</span>
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {job.active_timer_start ? (
+                      <button
+                        onClick={() => onStopTimer && onStopTimer(job.id)}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <Square className="w-3.5 h-3.5 fill-white" />
+                        <span>Stop & Save Session</span>
+                      </button>
+                    ) : job.paused_by_break ? (
+                      <>
+                        <button
+                          onClick={() => onStartTimer && onStartTimer(job.id, job.paused_timer_task)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <span>Resume Timer</span>
+                        </button>
+                        <button
+                          onClick={() => onStopTimer && onStopTimer(job.id)}
+                          className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-3 py-2 rounded-lg text-xs cursor-pointer"
+                        >
+                          <span>Clear</span>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => onStartTimer && onStartTimer(job.id)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>Start Live Timer</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
