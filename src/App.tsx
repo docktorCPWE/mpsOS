@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
@@ -13,6 +13,7 @@ import { StartTimerModal } from './components/StartTimerModal';
 import { CompleteTaskModal, CompleteTaskPayload } from './components/CompleteTaskModal';
 import { KyleDelegationInboxModal } from './components/KyleDelegationInboxModal';
 import { GeneralChatWidget } from './components/GeneralChatWidget';
+import { StaffManagementModal } from './components/StaffManagementModal';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -31,6 +32,7 @@ export default function App() {
   const [nowTimestamp, setNowTimestamp] = useState<number>(Date.now());
   
   // Staff User and Notifications State
+  const [staffList, setStaffList] = useState<StaffUser[]>(STAFF_USERS);
   const [currentStaff, setCurrentStaff] = useState<StaffUser>(STAFF_USERS[0]); // Default: Greg Hyatt (Owner)
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -44,6 +46,7 @@ export default function App() {
   const [taskToComplete, setTaskToComplete] = useState<{ task: DelegatedWorkItem; job: Job } | null>(null);
   const [timerPromptJob, setTimerPromptJob] = useState<{ job: Job; initialNote?: string } | null>(null);
   const [isKyleInboxOpen, setIsKyleInboxOpen] = useState(false);
+  const [isStaffManagementOpen, setIsStaffManagementOpen] = useState(false);
 
   // Live ticker for active timers
   useEffect(() => {
@@ -53,7 +56,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Initialize jobs and chat from local storage or mock dataset
+  // Initialize jobs, staff and chat from local storage or mock dataset
   useEffect(() => {
     const loaded = getStoredJobs();
     setJobs(loaded);
@@ -61,6 +64,12 @@ export default function App() {
       setSelectedCustomerId(loaded[0].id);
     }
     setChatMessages(getStoredChatMessages());
+    const storedStaff = getStoredStaff();
+    setStaffList(storedStaff);
+    const matchingStaff = storedStaff.find(s => s.id === 'staff-greg') || storedStaff[0];
+    if (matchingStaff) {
+      setCurrentStaff(matchingStaff);
+    }
   }, []);
 
   // Sync jobs state to localStorage whenever modified
@@ -181,8 +190,42 @@ export default function App() {
       setJobs(reset);
       setNotifications(INITIAL_NOTIFICATIONS);
       setChatMessages(getStoredChatMessages());
+      const resetStaff = resetStoredStaff();
+      setStaffList(resetStaff);
       if (reset.length > 0) setSelectedCustomerId(reset[0].id);
     }
+  };
+
+  // Staff Management handlers
+  const handleAddStaff = (newStaff: StaffUser) => {
+    const updated = [...staffList, newStaff];
+    setStaffList(updated);
+    saveStoredStaff(updated);
+  };
+
+  const handleUpdateStaff = (updatedStaff: StaffUser) => {
+    const updated = staffList.map(s => s.id === updatedStaff.id ? updatedStaff : s);
+    setStaffList(updated);
+    saveStoredStaff(updated);
+    if (currentStaff.id === updatedStaff.id) {
+      setCurrentStaff(updatedStaff);
+    }
+  };
+
+  const handleDeleteStaff = (staffId: string) => {
+    const updated = staffList.filter(s => s.id !== staffId);
+    setStaffList(updated);
+    saveStoredStaff(updated);
+    if (currentStaff.id === staffId && updated.length > 0) {
+      setCurrentStaff(updated[0]);
+    }
+  };
+
+  const handleResetStaff = () => {
+    const reset = resetStoredStaff();
+    setStaffList(reset);
+    const matching = reset.find(s => s.id === currentStaff.id) || reset[0];
+    setCurrentStaff(matching);
   };
 
   // Chat message handlers
@@ -912,6 +955,7 @@ export default function App() {
         setUserRole={setUserRole}
         currentStaff={currentStaff}
         setCurrentStaff={setCurrentStaff}
+        staffList={staffList}
         selectedCustomerId={selectedCustomerId}
         setSelectedCustomerId={setSelectedCustomerId}
         jobs={jobs}
@@ -919,6 +963,7 @@ export default function App() {
         onMarkNotificationRead={handleMarkNotificationRead}
         onSelectJob={(job) => setSelectedJobForDetail(job)}
         onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
+        onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
         onResetData={handleResetData}
         onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
         onToggleChat={() => {
@@ -955,6 +1000,8 @@ export default function App() {
           <AdminBillingDashboard
             jobs={jobs}
             currentStaff={currentStaff}
+            staffList={staffList}
+            onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
             onUpdateStatus={handleUpdateJobStatus}
             onToggleRoadblock={handleToggleRoadblock}
             onSelectJob={(job) => setSelectedJobForDetail(job)}
@@ -1085,6 +1132,19 @@ export default function App() {
         onDeleteMessage={handleDeleteChatMessage}
         onSelectJob={(job) => setSelectedJobForDetail(job)}
         onMarkAsRead={handleMarkChatRead}
+      />
+
+      {/* MODAL 8: Staff & Permissions Management Modal */}
+      <StaffManagementModal
+        isOpen={isStaffManagementOpen}
+        onClose={() => setIsStaffManagementOpen(false)}
+        staffList={staffList}
+        currentStaff={currentStaff}
+        jobs={jobs}
+        onAddStaff={handleAddStaff}
+        onUpdateStaff={handleUpdateStaff}
+        onDeleteStaff={handleDeleteStaff}
+        onResetStaff={handleResetStaff}
       />
 
     </div>

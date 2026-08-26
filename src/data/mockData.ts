@@ -6,90 +6,190 @@ export const STAFF_USERS: StaffUser[] = [
     name: 'Greg Hyatt',
     email: 'greg.hyatt@myplanstore.com',
     title: 'Owner & Principal Architect',
+    phone: '(555) 234-5678',
     role: 'admin',
-    canAccessFinancials: true, // Jason, Greg Hyatt, Drew Lupkey
-    canDelegate: true          // Kyle, Jason, Greg Hyatt
+    department: 'Architecture',
+    hourlyRate: 150,
+    status: 'active',
+    joinedDate: '2021-01-15',
+    canAccessFinancials: true,
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: true,      // Superadmin / Owner
+    canManageInvoices: true,
+    canEditJobPhases: true,
+    canManageRoadblocks: true
   },
   {
     id: 'staff-jason',
     name: 'Jason',
     email: 'jason@myplanstore.com',
     title: 'Project Manager & Operations',
+    phone: '(555) 345-6789',
     role: 'admin',
-    canAccessFinancials: true, // Jason, Greg Hyatt, Drew Lupkey
-    canDelegate: true          // Kyle, Jason, Greg Hyatt
+    department: 'Management',
+    hourlyRate: 120,
+    status: 'active',
+    joinedDate: '2021-06-01',
+    canAccessFinancials: true,
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: false,
+    canManageInvoices: true,
+    canEditJobPhases: true,
+    canManageRoadblocks: true
   },
   {
     id: 'staff-drew',
     name: 'Drew Lupkey',
     email: 'drew.lupkey@myplanstore.com',
     title: 'Admin & Billing Specialist',
+    phone: '(555) 456-7890',
     role: 'admin',
-    canAccessFinancials: true, // Jason, Greg Hyatt, Drew Lupkey
-    canDelegate: false
+    department: 'Finance',
+    hourlyRate: 95,
+    status: 'active',
+    joinedDate: '2022-03-10',
+    canAccessFinancials: true,
+    canDelegate: false,
+    canViewAllProjects: true,
+    canManageStaff: false,
+    canManageInvoices: true,
+    canEditJobPhases: false,
+    canManageRoadblocks: false
   },
   {
     id: 'staff-kyle',
     name: 'Kyle',
     email: 'kyle@myplanstore.com',
     title: 'Lead Project Manager & Senior Drafter',
+    phone: '(555) 567-8901',
     role: 'drafter_lead',
-    canAccessFinancials: true,  // Kyle, Jason, Greg Hyatt, Drew Lupkey (full Admin & Ops overview access)
-    canDelegate: true           // Kyle, Jason, Greg Hyatt
+    department: 'Management',
+    hourlyRate: 110,
+    status: 'active',
+    joinedDate: '2021-09-15',
+    canAccessFinancials: true,
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: true,
+    canManageRoadblocks: true
   },
   {
     id: 'staff-sarah',
     name: 'Sarah Jenkins',
     email: 'sarah.jenkins@myplanstore.com',
     title: 'Senior Architect',
+    phone: '(555) 678-9012',
     role: 'drafter',
-    canAccessFinancials: false, // RESTRICTED from financials
-    canDelegate: false
+    department: 'Architecture',
+    hourlyRate: 90,
+    status: 'active',
+    joinedDate: '2022-08-01',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: true,
+    canManageRoadblocks: true
   },
   {
     id: 'staff-alex',
     name: 'Alex Rivers',
     email: 'alex.rivers@myplanstore.com',
-    title: 'CAD Designer',
+    title: 'CAD Designer & 3D Specialist',
+    phone: '(555) 789-0123',
     role: 'drafter',
-    canAccessFinancials: false, // RESTRICTED from financials
-    canDelegate: false
+    department: 'Drafting',
+    hourlyRate: 75,
+    status: 'active',
+    joinedDate: '2023-01-10',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false
   },
   {
     id: 'staff-elena',
     name: 'Elena Rostova',
     email: 'elena.rostova@myplanstore.com',
     title: 'Structural Specialist',
+    phone: '(555) 890-1234',
     role: 'drafter',
-    canAccessFinancials: false, // RESTRICTED from financials
-    canDelegate: false
+    department: 'Engineering',
+    hourlyRate: 85,
+    status: 'active',
+    joinedDate: '2023-04-18',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false
   },
   {
     id: 'staff-james',
     name: 'James',
     email: 'james@myplanstore.com',
     title: 'Architectural Drafter',
+    phone: '(555) 901-2345',
     role: 'drafter',
-    canAccessFinancials: false, // Drafter (only): STRICTLY NO access to financial, billing, or hourly rate data
-    canDelegate: false          // Drafter (only): No delegation authority
+    department: 'Drafting',
+    hourlyRate: 70,
+    status: 'active',
+    joinedDate: '2023-09-01',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false
   },
   {
     id: 'staff-aaron',
     name: 'Aaron',
     email: 'aaron@myplanstore.com',
     title: 'Architectural Drafter',
+    phone: '(555) 012-3456',
     role: 'drafter',
-    canAccessFinancials: false, // Drafter (only): STRICTLY NO access to financial, billing, or hourly rate data
-    canDelegate: false          // Drafter (only): No delegation authority
+    department: 'Drafting',
+    hourlyRate: 70,
+    status: 'active',
+    joinedDate: '2023-11-15',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false
   },
   {
     id: 'staff-ethan',
     name: 'Ethan',
     email: 'ethan@myplanstore.com',
     title: 'Operations & Project Manager',
+    phone: '(555) 123-4567',
     role: 'admin',
+    department: 'Operations',
+    hourlyRate: 115,
+    status: 'active',
+    joinedDate: '2023-02-01',
     canAccessFinancials: true,
-    canDelegate: true
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: false,
+    canManageInvoices: true,
+    canEditJobPhases: true,
+    canManageRoadblocks: true
   }
 ];
 
@@ -99,7 +199,14 @@ export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Kyle', 'Jason', 'Drew', 'Ethan', 
 
 export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
-  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canViewAllProjects === 'boolean') {
+      return userNameOrStaff.canViewAllProjects;
+    }
+    const name = userNameOrStaff.name;
+    return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+  }
+  const name = userNameOrStaff;
   return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
 }
 
@@ -109,14 +216,50 @@ export function isJobArchived(job: Job): boolean {
 
 export function canUserAccessFinancials(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
-  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canAccessFinancials === 'boolean') {
+      return userNameOrStaff.canAccessFinancials;
+    }
+    const name = userNameOrStaff.name;
+    return AUTHORIZED_FINANCIAL_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+  }
+  const name = userNameOrStaff;
   return AUTHORIZED_FINANCIAL_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
 }
 
 export function canUserDelegate(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
-  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canDelegate === 'boolean') {
+      return userNameOrStaff.canDelegate;
+    }
+    const name = userNameOrStaff.name;
+    return AUTHORIZED_DELEGATOR_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+  }
+  const name = userNameOrStaff;
   return AUTHORIZED_DELEGATOR_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+}
+
+export function canUserManageStaff(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canManageStaff === 'boolean') {
+      return userNameOrStaff.canManageStaff;
+    }
+    return userNameOrStaff.name.toLowerCase().includes('greg hyatt') || userNameOrStaff.role === 'admin';
+  }
+  return userNameOrStaff.toLowerCase().includes('greg hyatt');
+}
+
+export function canUserManageInvoices(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canManageInvoices === 'boolean') {
+      return userNameOrStaff.canManageInvoices;
+    }
+    return userNameOrStaff.canAccessFinancials;
+  }
+  return canUserAccessFinancials(userNameOrStaff);
 }
 
 /**
@@ -1208,6 +1351,38 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
 export const STORAGE_KEY = 'my_plan_store_os_jobs_v10';
 export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v10';
 export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v10';
+export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v10';
+
+export function getStoredStaff(): StaffUser[] {
+  try {
+    const raw = localStorage.getItem(STAFF_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(STAFF_USERS));
+      return STAFF_USERS;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return STAFF_USERS;
+  } catch (err) {
+    console.error('Failed to load stored staff:', err);
+    return STAFF_USERS;
+  }
+}
+
+export function saveStoredStaff(staff: StaffUser[]) {
+  try {
+    localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(staff));
+  } catch (err) {
+    console.error('Failed to save staff:', err);
+  }
+}
+
+export function resetStoredStaff(): StaffUser[] {
+  localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(STAFF_USERS));
+  return STAFF_USERS;
+}
 
 export function getStoredJobs(): Job[] {
   try {

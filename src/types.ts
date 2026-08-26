@@ -106,15 +106,35 @@ export interface DelegatedWorkItem {
   revisionCount?: number;
 }
 
+export type StaffDepartment = 
+  | 'Architecture'
+  | 'Drafting'
+  | 'Management'
+  | 'Engineering'
+  | 'Operations'
+  | 'Finance';
+
 export interface StaffUser {
   id: string;
   name: string;
   email: string;
   title: string;
+  phone?: string;
   avatar?: string;
   role: 'admin' | 'drafter_lead' | 'drafter';
-  canAccessFinancials: boolean; // restricted to Jason, Greg Hyatt, Drew Lupkey
-  canDelegate: boolean;         // Kyle, Jason, Greg Hyatt
+  department?: StaffDepartment;
+  hourlyRate?: number;
+  status?: 'active' | 'inactive';
+  joinedDate?: string;
+  
+  // Granular OS Permissions
+  canAccessFinancials: boolean;  // Access invoices, drafter rates, billing stats
+  canDelegate: boolean;          // Assign tasks, review completed tasks, QA signoff & revisions
+  canViewAllProjects?: boolean;  // View all projects across team vs only assigned board
+  canManageStaff?: boolean;      // Superadmin / Owner privilege: Add/Edit/Delete staff & adjust permissions
+  canManageInvoices?: boolean;   // Change invoice status (Uninvoiced, Pending, Invoiced, Paid/Archive)
+  canEditJobPhases?: boolean;    // Advance or rewind job workflow phases
+  canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
 }
 
 export interface ChatMessage {

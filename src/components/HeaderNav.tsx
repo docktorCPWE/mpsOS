@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff } from '../data/mockData';
 
 interface HeaderNavProps {
   userRole: 'drafter' | 'admin' | 'customer';
   setUserRole: (role: 'drafter' | 'admin' | 'customer') => void;
   currentStaff: StaffUser;
   setCurrentStaff: (staff: StaffUser) => void;
+  staffList?: StaffUser[];
   selectedCustomerId: string;
   setSelectedCustomerId: (id: string) => void;
   jobs: Job[];
@@ -15,6 +16,7 @@ interface HeaderNavProps {
   onMarkNotificationRead: (id: string) => void;
   onSelectJob: (job: Job) => void;
   onOpenNewJobModal: () => void;
+  onOpenStaffManagement?: () => void;
   onResetData: () => void;
   onOpenKyleInbox?: () => void;
   onToggleChat?: () => void;
@@ -27,6 +29,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   setUserRole,
   currentStaff,
   setCurrentStaff,
+  staffList = [],
   selectedCustomerId,
   setSelectedCustomerId,
   jobs,
@@ -34,6 +37,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onMarkNotificationRead,
   onSelectJob,
   onOpenNewJobModal,
+  onOpenStaffManagement,
   onResetData,
   onOpenKyleInbox,
   onToggleChat,
@@ -222,7 +226,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     </div>
 
                     <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
-                      {STAFF_USERS.map((staff) => {
+                      {(staffList.length > 0 ? staffList : [currentStaff]).map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
                         return (
                           <button
@@ -236,21 +240,31 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                               <div className="font-bold text-xs flex items-center gap-1.5 text-white">
                                 <span>{staff.name}</span>
                                 {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                {staff.name.toLowerCase().includes('greg hyatt') && (
+                                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono">
+                                    OWNER
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-slate-400">{staff.title}</div>
-                              <div className="flex items-center gap-1 pt-1">
+                              <div className="flex flex-wrap items-center gap-1 pt-1">
                                 {staff.canAccessFinancials ? (
                                   <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                    💰 Financial Access
+                                    💰 Financial
                                   </span>
                                 ) : (
                                   <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
-                                    🔒 Financial Restricted
+                                    🔒 No Financials
                                   </span>
                                 )}
                                 {staff.canDelegate && (
                                   <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
                                     ⚡ Delegator
+                                  </span>
+                                )}
+                                {staff.canManageStaff && (
+                                  <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
+                                    🛡️ Admin
                                   </span>
                                 )}
                               </div>
@@ -259,6 +273,22 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         );
                       })}
                     </div>
+
+                    {/* Manage Staff Action Button in Dropdown */}
+                    {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
+                      <div className="p-2 border-t border-slate-800 bg-slate-950">
+                        <button
+                          onClick={() => {
+                            setShowStaffDropdown(false);
+                            onOpenStaffManagement();
+                          }}
+                          className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Manage Staff & Permissions</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -392,6 +422,18 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     ))}
                   </select>
                 </div>
+              )}
+
+              {/* Staff Management Button for Greg Hyatt & Authorized Managers */}
+              {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
+                <button
+                  onClick={onOpenStaffManagement}
+                  className="flex items-center gap-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/40 text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-xs active:scale-95 cursor-pointer"
+                  title="Manage Staff Directory & Permission Levels"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="hidden sm:inline">Staff & Perms</span>
+                </button>
               )}
 
               {/* Drafter Action: New Job Button */}

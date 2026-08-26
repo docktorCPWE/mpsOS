@@ -45,6 +45,8 @@ import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 interface AdminBillingDashboardProps {
   jobs: Job[];
   currentStaff?: StaffUser;
+  staffList?: StaffUser[];
+  onOpenStaffManagement?: () => void;
   onUpdateStatus: (jobId: string, newStatus: JobPhase) => void;
   onToggleRoadblock: (jobId: string) => void;
   onSelectJob: (job: Job) => void;
@@ -146,6 +148,8 @@ export function getLastActivityDetails(job: Job): { timestamp: string; details: 
 export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   jobs,
   currentStaff,
+  staffList = [],
+  onOpenStaffManagement,
   onUpdateStatus,
   onToggleRoadblock,
   onSelectJob,
@@ -423,6 +427,16 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {onOpenStaffManagement && (
+            <button
+              onClick={onOpenStaffManagement}
+              className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer border border-purple-400/30"
+            >
+              <ShieldCheck className="w-4 h-4 text-purple-200" />
+              <span>Staff & Permissions</span>
+            </button>
+          )}
+
           <button
             onClick={() => exportInvoicingCSV(filteredJobs)}
             className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer"
