@@ -38,7 +38,7 @@ interface TimeClockBarProps {
   onResumeFromBreak: () => void;
   onClockOut: (notes?: string) => void;
   onOpenTimeCardModal: (initialStaffId?: string) => void;
-  pausedJobsNotice?: { jobNumbers: string[]; type: 'paused' | 'resumed' } | null;
+  pausedJobsNotice?: { jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null;
   onClearPausedNotice?: () => void;
 }
 
@@ -120,16 +120,20 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2 font-sans">
-      {/* Toast Notice for Project Timers Auto-Paused / Resumed on Break */}
+      {/* Toast Notice for Project Timers Auto-Paused / Resumed on Break / Stopped on Clock Out */}
       {pausedJobsNotice && (
         <div className={`mb-3 p-3 rounded-xl border flex items-center justify-between text-xs font-medium animate-fadeIn ${
           pausedJobsNotice.type === 'paused'
             ? 'bg-amber-50 border-amber-300 text-amber-900'
+            : pausedJobsNotice.type === 'clock_out_stopped'
+            ? 'bg-blue-50 border-blue-300 text-blue-950'
             : 'bg-emerald-50 border-emerald-300 text-emerald-900'
         }`}>
           <div className="flex items-center gap-2.5">
             {pausedJobsNotice.type === 'paused' ? (
               <PauseCircle className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
+            ) : pausedJobsNotice.type === 'clock_out_stopped' ? (
+              <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
             ) : (
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             )}
@@ -138,6 +142,11 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                 <>
                   <strong>Project Timer Auto-Paused:</strong> Running timer on plan(s){' '}
                   <span className="font-mono font-bold underline">{pausedJobsNotice.jobNumbers.join(', ')}</span> was automatically paused while you are on break.
+                </>
+              ) : pausedJobsNotice.type === 'clock_out_stopped' ? (
+                <>
+                  <strong>Shift Ended & Clocked Out:</strong> Active drafting timer on plan(s){' '}
+                  <span className="font-mono font-bold underline">{pausedJobsNotice.jobNumbers.join(', ')}</span> was automatically stopped & saved to job history.
                 </>
               ) : (
                 <>
@@ -339,7 +348,9 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
               {currentStatus !== 'clocked_out' && (
                 confirmClockOut ? (
                   <div className="flex items-center gap-1.5 bg-rose-950 border border-rose-600 px-2 py-1 rounded-xl animate-fadeIn">
-                    <span className="text-[11px] text-rose-300 font-semibold">End Shift?</span>
+                    <span className="text-[11px] text-rose-300 font-semibold">
+                      {userRunningJobTimer ? `Stop MPS #${userRunningJobTimer.job_number} & Clock Out?` : 'End Shift?'}
+                    </span>
                     <button
                       onClick={() => {
                         setConfirmClockOut(false);

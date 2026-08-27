@@ -46,6 +46,14 @@ export interface AuditLog {
   details: string;
 }
 
+export type AdditionalBillingCategory =
+  | 'Revisions Exceeded Plan Scope'
+  | '1-on-1 Consultation with Jason'
+  | '1-on-1 Consultation with Kyle'
+  | 'Out-of-Scope Custom Work'
+  | 'Standard Offline CAD Drafting'
+  | 'Other Additional Work';
+
 export interface TimeLog {
   id: string;
   drafterName: string;
@@ -54,6 +62,10 @@ export interface TimeLog {
   durationSeconds: number; // completed duration in seconds
   taskDescription?: string;
   hourlyRate?: number;
+  billingCategory?: string;
+  billableHours?: number;
+  billableAmount?: number;
+  rawInputHours?: number;
 }
 
 export interface JobVersionSnapshot {

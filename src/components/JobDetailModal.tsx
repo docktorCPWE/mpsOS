@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee } from 'lucide-react';
-import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser } from '../types';
+import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived } from '../data/mockData';
 
@@ -217,10 +217,222 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
     setIsEditingMpsNumber(false);
   };
 
-  // Manual Time Log Form State
+  // Manual Time Log / Additional Billing Form State
+  const [billingCategory, setBillingCategory] = useState<AdditionalBillingCategory>('Revisions Exceeded Plan Scope');
   const [manualTaskInput, setManualTaskInput] = useState('');
-  const [manualHoursInput, setManualHoursInput] = useState('');
+  const [manualHoursInput, setManualHoursInput] = useState('1.5');
+  const [manualRateInput, setManualRateInput] = useState<string>(String(job.hourly_rate || 85));
   const [hourlyRateInput, setHourlyRateInput] = useState<number>(job.hourly_rate || 85);
+
+  // Admin Adjust Total Time / Overcharge Correction Modal State
+  const [isAdjustTotalTimeModalOpen, setIsAdjustTotalTimeModalOpen] = useState(false);
+  const [adjustMode, setAdjustMode] = useState<'set_total' | 'subtract_hours'>('set_total');
+  const [newTotalHoursInput, setNewTotalHoursInput] = useState('');
+  const [hoursToSubtractInput, setHoursToSubtractInput] = useState('4.0');
+  const [adjustReasonCategory, setAdjustReasonCategory] = useState('Drafter Left Timer Running Overnight');
+  const [adjustCustomNotes, setAdjustCustomNotes] = useState('');
+  const [adjustMethod, setAdjustMethod] = useState<'trim_runaway_session' | 'add_correction_line'>('trim_runaway_session');
+
+  // Edit Individual Time Log Session Modal State
+  const [editingTimeLog, setEditingTimeLog] = useState<TimeLog | null>(null);
+  const [editLogDrafter, setEditLogDrafter] = useState('');
+  const [editLogTaskDesc, setEditLogTaskDesc] = useState('');
+  const [editLogBillingCategory, setEditLogBillingCategory] = useState<AdditionalBillingCategory | ''>('');
+  const [editLogHours, setEditLogHours] = useState('');
+  const [editLogRate, setEditLogRate] = useState('');
+
+  // Delete Individual Time Log Confirmation State
+  const [deletingTimeLogId, setDeletingTimeLogId] = useState<string | null>(null);
+
+  const handleOpenAdjustTotalTime = () => {
+    const totalSecs = calculateJobTotalSeconds(job, nowTimestamp);
+    const totalHrs = (totalSecs / 3600).toFixed(2);
+    setNewTotalHoursInput(totalHrs);
+    setHoursToSubtractInput('4.0');
+    setAdjustMode('set_total');
+    setAdjustReasonCategory('Drafter Left Timer Running Overnight');
+    setAdjustCustomNotes('');
+    setAdjustMethod('trim_runaway_session');
+    setIsAdjustTotalTimeModalOpen(true);
+  };
+
+  const handleApplyAdjustTotalTime = (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentTotalSecs = calculateJobTotalSeconds(job, nowTimestamp);
+    const currentTotalHours = currentTotalSecs / 3600;
+
+    let targetTotalHours = 0;
+    if (adjustMode === 'set_total') {
+      targetTotalHours = Math.max(0, parseFloat(newTotalHoursInput) || 0);
+    } else {
+      const sub = Math.max(0, parseFloat(hoursToSubtractInput) || 0);
+      targetTotalHours = Math.max(0, currentTotalHours - sub);
+    }
+
+    const deltaHours = targetTotalHours - currentTotalHours;
+    if (Math.abs(deltaHours) < 0.001) {
+      setIsAdjustTotalTimeModalOpen(false);
+      return;
+    }
+
+    const adminName = currentStaff?.name || 'Admin';
+    const rate = job.hourly_rate || 85;
+    const existingLogs = [...(job.time_logs || [])];
+
+    let updatedLogs: TimeLog[] = [];
+
+    if (adjustMethod === 'trim_runaway_session' && existingLogs.length > 0) {
+      // Find the largest duration session to trim from (or latest)
+      let maxIdx = 0;
+      let maxDuration = existingLogs[0].durationSeconds;
+      for (let i = 1; i < existingLogs.length; i++) {
+        if (existingLogs[i].durationSeconds > maxDuration) {
+          maxDuration = existingLogs[i].durationSeconds;
+          maxIdx = i;
+        }
+      }
+
+      const targetLog = { ...existingLogs[maxIdx] };
+      const newDurationSec = Math.max(0, Math.round(targetLog.durationSeconds + deltaHours * 3600));
+      const newBillableHours = Math.max(0, Number((newDurationSec / 3600).toFixed(2)));
+      const logRate = targetLog.hourlyRate || rate;
+
+      targetLog.durationSeconds = newDurationSec;
+      targetLog.billableHours = newBillableHours;
+      targetLog.billableAmount = Math.max(0, Math.round(newBillableHours * logRate * 100) / 100);
+      targetLog.taskDescription = `${targetLog.taskDescription || 'CAD Drafting'} (Adjusted by Admin: ${adjustReasonCategory}${adjustCustomNotes ? ` - ${adjustCustomNotes}` : ''})`;
+
+      updatedLogs = existingLogs.map((l, idx) => idx === maxIdx ? targetLog : l);
+    } else {
+      // Add explicit correction line item
+      const deltaSec = Math.round(deltaHours * 3600);
+      const correctionLog: TimeLog = {
+        id: `tl-adj-${Date.now()}`,
+        drafterName: adminName,
+        startTime: new Date().toISOString(),
+        endTime: new Date().toISOString(),
+        durationSeconds: deltaSec,
+        taskDescription: `Admin Time Adjustment: ${adjustReasonCategory}${adjustCustomNotes ? ` - ${adjustCustomNotes}` : ''}`,
+        billingCategory: 'Other Additional Work',
+        hourlyRate: rate,
+        billableHours: Number(deltaHours.toFixed(2)),
+        billableAmount: Math.round(deltaHours * rate * 100) / 100,
+        rawInputHours: Number(deltaHours.toFixed(2))
+      };
+      updatedLogs = [...existingLogs, correctionLog];
+    }
+
+    const updatedJob: Job = {
+      ...job,
+      time_logs: updatedLogs,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Total Time & Billing Adjusted',
+          performedBy: adminName,
+          timestamp: new Date().toISOString(),
+          details: `Admin adjusted total logged time from ${currentTotalHours.toFixed(2)} hrs to ${targetTotalHours.toFixed(2)} hrs (${deltaHours >= 0 ? '+' : ''}${deltaHours.toFixed(2)} hrs). Reason: ${adjustReasonCategory}${adjustCustomNotes ? ` (${adjustCustomNotes})` : ''}. Method: ${adjustMethod === 'trim_runaway_session' ? 'Trimmed longest session' : 'Itemized adjustment entry'}.`
+        },
+        ...job.audit_logs
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    setIsAdjustTotalTimeModalOpen(false);
+  };
+
+  const handleStartEditTimeLog = (log: TimeLog) => {
+    const hours = typeof log.billableHours === 'number' 
+      ? log.billableHours 
+      : log.durationSeconds / 3600;
+    const rate = log.hourlyRate || job.hourly_rate || 85;
+
+    setEditingTimeLog(log);
+    setEditLogDrafter(log.drafterName);
+    setEditLogTaskDesc(log.taskDescription || '');
+    setEditLogBillingCategory((log.billingCategory as AdditionalBillingCategory) || '');
+    setEditLogHours(String(hours));
+    setEditLogRate(String(rate));
+  };
+
+  const handleSaveEditTimeLog = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTimeLog) return;
+
+    const newHours = Math.max(0, parseFloat(editLogHours) || 0);
+    const newRate = Math.max(0, parseFloat(editLogRate) || job.hourly_rate || 85);
+    const newDurationSeconds = Math.round(newHours * 3600);
+    const newBillableAmount = Math.round(newHours * newRate * 100) / 100;
+    const adminName = currentStaff?.name || 'Admin';
+
+    const oldHours = typeof editingTimeLog.billableHours === 'number'
+      ? editingTimeLog.billableHours
+      : (editingTimeLog.durationSeconds / 3600);
+
+    const updatedLog: TimeLog = {
+      ...editingTimeLog,
+      drafterName: editLogDrafter.trim() || editingTimeLog.drafterName,
+      taskDescription: editLogTaskDesc.trim() || editingTimeLog.taskDescription,
+      billingCategory: (editLogBillingCategory as AdditionalBillingCategory) || editingTimeLog.billingCategory,
+      durationSeconds: newDurationSeconds,
+      hourlyRate: newRate,
+      billableHours: newHours,
+      billableAmount: newBillableAmount,
+      rawInputHours: newHours
+    };
+
+    const updatedLogs = (job.time_logs || []).map(l => l.id === editingTimeLog.id ? updatedLog : l);
+
+    const updatedJob: Job = {
+      ...job,
+      time_logs: updatedLogs,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Time Session Modified',
+          performedBy: adminName,
+          timestamp: new Date().toISOString(),
+          details: `Modified time session by ${updatedLog.drafterName}: changed from ${oldHours.toFixed(2)} hrs to ${newHours.toFixed(2)} hrs @ $${newRate}/hr ($${newBillableAmount.toFixed(2)}).`
+        },
+        ...job.audit_logs
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    setEditingTimeLog(null);
+  };
+
+  const handleConfirmDeleteTimeLog = (logId: string) => {
+    const targetLog = (job.time_logs || []).find(l => l.id === logId);
+    if (!targetLog) return;
+
+    const adminName = currentStaff?.name || 'Admin';
+    const hours = typeof targetLog.billableHours === 'number'
+      ? targetLog.billableHours
+      : (targetLog.durationSeconds / 3600);
+    const rate = targetLog.hourlyRate || job.hourly_rate || 85;
+    const amount = typeof targetLog.billableAmount === 'number' ? targetLog.billableAmount : hours * rate;
+
+    const updatedLogs = (job.time_logs || []).filter(l => l.id !== logId);
+
+    const updatedJob: Job = {
+      ...job,
+      time_logs: updatedLogs,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Time Session Deleted',
+          performedBy: adminName,
+          timestamp: new Date().toISOString(),
+          details: `Deleted time session of ${hours.toFixed(2)} hrs ($${amount.toFixed(2)}) by ${targetLog.drafterName} ("${targetLog.taskDescription || targetLog.billingCategory || 'CAD Drafting'}").`
+        },
+        ...job.audit_logs
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    setDeletingTimeLogId(null);
+  };
 
   const handleUpdateHourlyRate = (rate: number) => {
     setHourlyRateInput(rate);
@@ -243,18 +455,31 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
   const handleAddManualTimeLog = (e: React.FormEvent) => {
     e.preventDefault();
-    const hours = parseFloat(manualHoursInput);
-    if (!hours || hours <= 0 || !manualTaskInput.trim()) return;
+    const rawHours = parseFloat(manualHoursInput);
+    if (!rawHours || rawHours <= 0) return;
 
-    const seconds = Math.round(hours * 3600);
+    const rate = parseFloat(manualRateInput) || job.hourly_rate || 85;
+    const billableHours = calculateAdditionalBillableHours(rawHours);
+    const totalBillableAmount = Math.round(billableHours * rate * 100) / 100;
+    const rawDurationSeconds = Math.round(rawHours * 3600);
+
+    const drafterName = (currentStaff?.name) || job.assigned_drafter.split(',')[0];
+    const taskDesc = manualTaskInput.trim() 
+      ? `${billingCategory}: ${manualTaskInput.trim()}`
+      : billingCategory;
+
     const newLog: TimeLog = {
-      id: `tl-${Date.now()}`,
-      drafterName: job.assigned_drafter.split(',')[0],
-      startTime: new Date(Date.now() - seconds * 1000).toISOString(),
+      id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      drafterName,
+      startTime: new Date(Date.now() - rawDurationSeconds * 1000).toISOString(),
       endTime: new Date().toISOString(),
-      durationSeconds: seconds,
-      taskDescription: manualTaskInput.trim(),
-      hourlyRate: job.hourly_rate || 85
+      durationSeconds: rawDurationSeconds,
+      taskDescription: taskDesc,
+      billingCategory,
+      hourlyRate: rate,
+      billableHours,
+      billableAmount: totalBillableAmount,
+      rawInputHours: rawHours
     };
 
     const updated: Job = {
@@ -263,10 +488,10 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
       audit_logs: [
         {
           id: `a-${Date.now()}`,
-          action: 'Manual Time Log Added',
-          performedBy: job.assigned_drafter.split(',')[0],
+          action: 'Additional Billing Logged',
+          performedBy: drafterName,
           timestamp: new Date().toISOString(),
-          details: `Added ${hours} hrs for "${manualTaskInput.trim()}"`
+          details: `Logged ${billableHours} hrs for "${taskDesc}" @ $${rate}/hr (Total: $${totalBillableAmount.toFixed(2)}${rawHours < 1.0 ? ' - 1.0h min applied' : ''})`
         },
         ...job.audit_logs
       ]
@@ -274,7 +499,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
     onUpdateJob(updated);
     setManualTaskInput('');
-    setManualHoursInput('');
+    setManualHoursInput('1.5');
   };
 
   // Phase change handler
@@ -1801,11 +2026,31 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
               
               {/* Overview Metric Banner */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-800">
-                  <span className="text-[10px] font-mono uppercase text-slate-400 block font-semibold">Total Logged Time</span>
-                  <span className="text-xl font-bold font-mono text-emerald-400">
-                    {formatSecondsToReadable(calculateJobTotalSeconds(job, nowTimestamp))}
-                  </span>
+                <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono uppercase text-slate-400 block font-semibold">Total Logged Time</span>
+                    {canAccessFinancials && (
+                      <button
+                        type="button"
+                        onClick={handleOpenAdjustTotalTime}
+                        className="flex items-center gap-1 bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white text-[10px] font-mono font-bold px-2 py-1 rounded-md border border-slate-700 hover:border-blue-500 transition shadow-2xs"
+                        title="Adjust total hours & recalculate billable amount (e.g. correct runaway timer)"
+                      >
+                        <Edit3 className="w-3 h-3 text-blue-400 group-hover:text-white" />
+                        <span>Adjust Hours</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2 mt-2">
+                    <span className="text-xl font-bold font-mono text-emerald-400">
+                      {formatSecondsToReadable(calculateJobTotalSeconds(job, nowTimestamp))}
+                    </span>
+                    {canAccessFinancials && (
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {((calculateJobTotalSeconds(job, nowTimestamp)) / 3600).toFixed(2)} hrs total
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {canAccessFinancials ? (
@@ -2013,48 +2258,208 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Add Manual Time Log Entry Form */}
-              <form onSubmit={handleAddManualTimeLog} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
-                  Add Manual Time Entry (Offline Drafting / Consult)
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <input
-                    type="text"
-                    value={manualTaskInput}
-                    onChange={(e) => setManualTaskInput(e.target.value)}
-                    placeholder="Task Description (e.g. Redline revisions)"
-                    className="bg-white border p-2 rounded text-xs sm:col-span-2"
-                    required
-                  />
-
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={manualHoursInput}
-                    onChange={(e) => setManualHoursInput(e.target.value)}
-                    placeholder="Hours (e.g. 1.5)"
-                    className="bg-white border p-2 rounded text-xs font-mono font-bold"
-                    required
-                  />
+              {/* Add Manual Time & Additional Billing Entry Form */}
+              <form onSubmit={handleAddManualTimeLog} className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200 pb-2.5">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-emerald-600" />
+                      <span>Add Manual Time / Additional Billing Entry</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Log revisions exceeding plan scope, 1-on-1 consultations, or offline CAD time with custom rates and automatic quarter-hour billing calculation.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full self-start sm:self-auto shrink-0">
+                    1.0h Min • 0.25h Increments
+                  </span>
                 </div>
 
-                <button
-                  type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition"
-                >
-                  + Add Manual Time Log
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Category Dropdown */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono mb-1">
+                      Billing Reason / Category
+                    </label>
+                    <select
+                      value={billingCategory}
+                      onChange={(e) => {
+                        const newCat = e.target.value as AdditionalBillingCategory;
+                        setBillingCategory(newCat);
+                        if (newCat.includes('Kyle') || newCat.includes('Jason')) {
+                          if (manualRateInput === '85' || !manualRateInput) {
+                            setManualRateInput('125');
+                          }
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-300 p-2 rounded-lg text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    >
+                      <option value="Revisions Exceeded Plan Scope">Revisions Exceeded Plan Scope (Client Extra Changes)</option>
+                      <option value="1-on-1 Consultation with Jason">1-on-1 Consultation with Jason (Architecture & Operations)</option>
+                      <option value="1-on-1 Consultation with Kyle">1-on-1 Consultation with Kyle (Executive / Planning Review)</option>
+                      <option value="Out-of-Scope Custom Work">Out-of-Scope Custom Work (Structural / Specialty)</option>
+                      <option value="Standard Offline CAD Drafting">Standard Offline CAD Drafting (Redlines & Sheet Drafting)</option>
+                      <option value="Other Additional Work">Other Additional Work (Miscellaneous Consult / Research)</option>
+                    </select>
+                  </div>
+
+                  {/* Hourly Rate Input */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono mb-1">
+                      Hourly Rate ($/hr)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-xs font-mono font-bold text-slate-400">$</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        value={manualRateInput}
+                        onChange={(e) => setManualRateInput(e.target.value)}
+                        placeholder="85"
+                        className="w-full bg-white border border-slate-300 p-2 pl-6 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Rate Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <span className="text-slate-400 font-mono">Rate Presets:</span>
+                  {[
+                    { label: '$85/hr (Standard)', rate: '85' },
+                    { label: '$95/hr', rate: '95' },
+                    { label: '$125/hr (1-on-1 Consult)', rate: '125' },
+                    { label: '$150/hr', rate: '150' }
+                  ].map((preset) => (
+                    <button
+                      key={preset.rate}
+                      type="button"
+                      onClick={() => setManualRateInput(preset.rate)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition ${
+                        manualRateInput === preset.rate
+                          ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Task Notes / Description */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono mb-1">
+                      Task Description / Meeting Notes
+                    </label>
+                    <input
+                      type="text"
+                      value={manualTaskInput}
+                      onChange={(e) => setManualTaskInput(e.target.value)}
+                      placeholder="e.g. Master bath layout redesign & plumbing relocated via Zoom session"
+                      className="w-full bg-white border border-slate-300 p-2 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Hours Input */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono mb-1">
+                      Hours Worked (e.g. 1.5)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        value={manualHoursInput}
+                        onChange={(e) => setManualHoursInput(e.target.value)}
+                        placeholder="1.5"
+                        className="w-full bg-white border border-slate-300 p-2 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Hours Increment Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <span className="text-slate-400 font-mono">Quick Select:</span>
+                  {['1.0', '1.25', '1.5', '1.75', '2.0', '2.5', '3.0', '4.0'].map((h) => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => setManualHoursInput(h)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition ${
+                        manualHoursInput === h
+                          ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {h === '1.0' ? '1.0 hr (Min)' : `${h} hrs`}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = parseFloat(manualHoursInput) || 1.0;
+                      const next = (cur + 0.25).toFixed(2);
+                      setManualHoursInput(next.endsWith('.00') ? next.slice(0, -3) : next);
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 font-semibold"
+                  >
+                    +0.25 hr
+                  </button>
+                </div>
+
+                {/* Live Billing Calculation Summary Box */}
+                {(() => {
+                  const rawH = parseFloat(manualHoursInput) || 0;
+                  const billableH = calculateAdditionalBillableHours(rawH);
+                  const curRate = parseFloat(manualRateInput) || job.hourly_rate || 85;
+                  const total = billableH * curRate;
+
+                  return (
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-semibold text-slate-800 flex items-center gap-2">
+                          <span className="text-slate-500">Calculation:</span>
+                          <span className="font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-800">
+                            {billableH.toFixed(2)} hrs × ${curRate.toFixed(2)}/hr = <strong className="text-emerald-700">${total.toFixed(2)}</strong>
+                          </span>
+                        </div>
+
+                        {rawH > 0 && rawH < 1.0 && (
+                          <p className="text-[11px] text-amber-700 font-medium">
+                            • 1.0 hr minimum threshold applied ({rawH}h entered → billed as 1.00 hr).
+                          </p>
+                        )}
+                        {rawH > 1.0 && (rawH % 0.25 !== 0) && (
+                          <p className="text-[11px] text-blue-700 font-medium">
+                            • Quarter-hour increment applied ({rawH}h entered → rounded to {billableH.toFixed(2)} hrs).
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg transition shrink-0 shadow-xs flex items-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Log Additional Billing (${total.toFixed(2)})</span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </form>
 
               {/* Complete Time Log Session History Table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-3 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-800 flex justify-between items-center">
-                  <span>Logged Time Sessions ({ (job.time_logs || []).length })</span>
+                  <span>Logged Time & Billing Sessions ({ (job.time_logs || []).length })</span>
                   {canAccessFinancials ? (
-                    <span className="text-[10px] text-slate-400 font-mono">Drafter Rate: ${job.hourly_rate || 85}/hr</span>
+                    <span className="text-[10px] text-slate-400 font-mono">Standard Drafter Rate: ${job.hourly_rate || 85}/hr</span>
                   ) : (
                     <span className="text-[10px] text-slate-400 font-mono">CAD Session Logs</span>
                   )}
@@ -2068,31 +2473,93 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50 uppercase text-[10px] font-mono text-slate-400 border-b">
                       <tr>
-                        <th className="p-3">Drafter</th>
-                        <th className="p-3">Task Description</th>
+                        <th className="p-3">Drafter / Staff</th>
+                        <th className="p-3">Category & Details</th>
                         <th className="p-3">Logged Date</th>
-                        <th className="p-3">Duration</th>
+                        <th className="p-3">Duration & Billable Hrs</th>
                         {canAccessFinancials && <th className="p-3 text-right">Billable Amount</th>}
+                        {canAccessFinancials && <th className="p-3 text-center">Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans">
                       {job.time_logs.map((log) => {
                         const rate = log.hourlyRate || job.hourly_rate || 85;
-                        const billableSession = (log.durationSeconds / 3600) * rate;
+                        const rawHours = log.durationSeconds / 3600;
+                        const billableHrs = typeof log.billableHours === 'number' ? log.billableHours : rawHours;
+                        const billableSession = typeof log.billableAmount === 'number' 
+                          ? log.billableAmount 
+                          : billableHrs * rate;
+
+                        const isKyleOrJason = (log.billingCategory || '').includes('Jason') || (log.billingCategory || '').includes('Kyle');
+                        const isRevisions = (log.billingCategory || '').includes('Revisions');
+                        const isOutOfScope = (log.billingCategory || '').includes('Out-of-Scope');
 
                         return (
                           <tr key={log.id} className="hover:bg-slate-50">
-                            <td className="p-3 font-semibold text-slate-800">{log.drafterName}</td>
-                            <td className="p-3 text-slate-700">{log.taskDescription || 'CAD Drafting'}</td>
-                            <td className="p-3 text-slate-500 text-[11px]">
+                            <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">
+                              {log.drafterName}
+                            </td>
+                            <td className="p-3 text-slate-700">
+                              {log.billingCategory ? (
+                                <div className="space-y-0.5">
+                                  <span className={`inline-block text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border ${
+                                    isKyleOrJason 
+                                      ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                      : isRevisions
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                      : isOutOfScope
+                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                      : 'bg-slate-100 text-slate-700 border-slate-200'
+                                  }`}>
+                                    {log.billingCategory}
+                                  </span>
+                                  {log.taskDescription && log.taskDescription !== log.billingCategory && (
+                                    <p className="text-xs text-slate-600 mt-0.5">{log.taskDescription.replace(`${log.billingCategory}: `, '')}</p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span>{log.taskDescription || 'CAD Drafting'}</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-500 text-[11px] whitespace-nowrap">
                               {new Date(log.startTime).toLocaleDateString()} {new Date(log.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </td>
-                            <td className="p-3 font-mono font-bold text-slate-800">
-                              {formatSecondsToReadable(log.durationSeconds)}
+                            <td className="p-3 font-mono text-slate-800 whitespace-nowrap">
+                              <div className="font-bold text-xs">
+                                {typeof log.billableHours === 'number' ? `${log.billableHours.toFixed(2)} hrs billable` : formatSecondsToReadable(log.durationSeconds)}
+                              </div>
+                              {typeof log.rawInputHours === 'number' && log.rawInputHours !== log.billableHours && (
+                                <div className="text-[10px] text-slate-400 font-normal">
+                                  (raw: {log.rawInputHours}h)
+                                </div>
+                              )}
                             </td>
                             {canAccessFinancials && (
-                              <td className="p-3 font-mono font-bold text-emerald-700 text-right">
-                                ${billableSession.toFixed(2)}
+                              <td className="p-3 font-mono text-right whitespace-nowrap">
+                                <div className="font-bold text-emerald-700">${billableSession.toFixed(2)}</div>
+                                <div className="text-[10px] text-slate-400">@${rate.toFixed(2)}/hr</div>
+                              </td>
+                            )}
+                            {canAccessFinancials && (
+                              <td className="p-3 text-center whitespace-nowrap">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditTimeLog(log)}
+                                    className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 rounded-lg transition"
+                                    title="Edit this time session (hours, rate, description)"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeletingTimeLogId(log.id)}
+                                    className="p-1.5 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 rounded-lg transition"
+                                    title="Delete this time session"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -2362,6 +2829,467 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
           }}
         />
       )}
+
+      {/* MODAL: ADJUST TOTAL TIME & OVERCHARGE CORRECTION */}
+      {isAdjustTotalTimeModalOpen && (() => {
+        const currentTotalSecs = calculateJobTotalSeconds(job, nowTimestamp);
+        const currentTotalHrs = currentTotalSecs / 3600;
+        const currentBillable = calculateJobBillableAmount(job, nowTimestamp);
+        const rate = job.hourly_rate || 85;
+
+        let targetTotalHrs = 0;
+        if (adjustMode === 'set_total') {
+          targetTotalHrs = Math.max(0, parseFloat(newTotalHoursInput) || 0);
+        } else {
+          const sub = Math.max(0, parseFloat(hoursToSubtractInput) || 0);
+          targetTotalHrs = Math.max(0, currentTotalHrs - sub);
+        }
+
+        const deltaHrs = targetTotalHrs - currentTotalHrs;
+        const recalculatedBillable = Math.max(0, currentBillable + deltaHrs * rate);
+        const deltaBillable = recalculatedBillable - currentBillable;
+
+        return (
+          <div className="fixed inset-0 z-60 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-lg w-full space-y-4 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Adjust Total Logged Time</h3>
+                    <p className="text-xs text-slate-500">Correct overcharged hours or runaway timers and recalculate billing</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAdjustTotalTimeModalOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Current Job Status Header */}
+              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                <div>
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block">Current Total Time</span>
+                  <span className="font-mono font-bold text-slate-900 text-sm">
+                    {formatSecondsToReadable(currentTotalSecs)}
+                  </span>
+                  <span className="text-[11px] text-slate-500 block font-mono">
+                    ({currentTotalHrs.toFixed(2)} hrs raw)
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block">Current Billable</span>
+                  <span className="font-mono font-bold text-emerald-700 text-sm">
+                    ${currentBillable.toFixed(2)}
+                  </span>
+                  <span className="text-[11px] text-slate-500 block font-mono">
+                    @ ${rate.toFixed(2)}/hr rate
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleApplyAdjustTotalTime} className="space-y-4">
+                {/* Mode Selector Tabs */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 font-mono uppercase">
+                    Adjustment Method
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustMode('set_total')}
+                      className={`py-1.5 text-xs font-semibold rounded-md transition ${
+                        adjustMode === 'set_total'
+                          ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Set Exact Total Hours
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustMode('subtract_hours')}
+                      className={`py-1.5 text-xs font-semibold rounded-md transition ${
+                        adjustMode === 'subtract_hours'
+                          ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Deduct Runaway Hours
+                    </button>
+                  </div>
+                </div>
+
+                {/* Input Fields according to Mode */}
+                {adjustMode === 'set_total' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      New Corrected Total Hours (hrs)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={newTotalHoursInput}
+                      onChange={(e) => setNewTotalHoursInput(e.target.value)}
+                      placeholder="e.g. 20.0"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Enter the exact total number of billable hours this project should have.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Hours to Deduct / Subtract (hrs)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      value={hoursToSubtractInput}
+                      onChange={(e) => setHoursToSubtractInput(e.target.value)}
+                      placeholder="e.g. 4.0"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                    />
+                    {/* Quick Preset Deductions */}
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-400 font-mono">Quick Deduct:</span>
+                      {[
+                        { label: '-1.0 hr', val: '1.0' },
+                        { label: '-2.0 hrs', val: '2.0' },
+                        { label: '-4.0 hrs', val: '4.0' },
+                        { label: '-8.0 hrs (Overnight)', val: '8.0' },
+                        { label: '-12.0 hrs', val: '12.0' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.val}
+                          type="button"
+                          onClick={() => setHoursToSubtractInput(preset.val)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition ${
+                            hoursToSubtractInput === preset.val
+                              ? 'bg-rose-600 text-white border-rose-600 font-bold'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Reason Selection */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    Reason for Adjustment / Overcharge Correction
+                  </label>
+                  <select
+                    value={adjustReasonCategory}
+                    onChange={(e) => setAdjustReasonCategory(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="Drafter Left Timer Running Overnight">Drafter Left Timer Running Overnight / Overcharged</option>
+                    <option value="Drafter Forgot to Stop Timer on Break/Lunch">Drafter Forgot to Stop Timer on Break/Lunch</option>
+                    <option value="Client Courtesy / Revision Scope Adjustment">Client Courtesy / Revision Scope Adjustment</option>
+                    <option value="Admin Invoicing Audit Correction">Admin Invoicing Audit Correction</option>
+                    <option value="Duplicate Timer Session Logged">Duplicate Timer Session Logged</option>
+                    <option value="Other Manual Time Correction">Other Manual Time Correction</option>
+                  </select>
+                </div>
+
+                {/* Optional Custom Notes */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Additional Notes (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={adjustCustomNotes}
+                    onChange={(e) => setAdjustCustomNotes(e.target.value)}
+                    placeholder="e.g. Drafter forgot to pause CAD timer at 6 PM, corrected down to 2.5 hrs"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Application Method */}
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono">
+                    How should this be applied?
+                  </label>
+                  <div className="space-y-1.5 text-xs text-slate-700">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="adjustMethod"
+                        checked={adjustMethod === 'trim_runaway_session'}
+                        onChange={() => setAdjustMethod('trim_runaway_session')}
+                        className="text-blue-600"
+                      />
+                      <span><strong>Trim Longest / Runaway Session</strong> (Updates drafter's excessive log to match true hours)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="adjustMethod"
+                        checked={adjustMethod === 'add_correction_line'}
+                        onChange={() => setAdjustMethod('add_correction_line')}
+                        className="text-blue-600"
+                      />
+                      <span><strong>Add Itemized Audit Adjustment Line</strong> (Keeps existing records and inserts dedicated correction line)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Real-time Recalculation Impact Preview */}
+                <div className="bg-blue-50/80 border border-blue-200 p-3.5 rounded-xl space-y-2">
+                  <div className="text-xs font-bold text-blue-950 flex items-center justify-between">
+                    <span>Recalculation Preview:</span>
+                    <span className="font-mono text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded text-[11px] font-bold">
+                      {deltaHrs <= 0 ? `${deltaHrs.toFixed(2)} hrs` : `+${deltaHrs.toFixed(2)} hrs`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded-lg border border-blue-100">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase block">New Total Hours</span>
+                      <span className="font-mono font-bold text-slate-900 text-sm">
+                        {targetTotalHrs.toFixed(2)} hrs
+                      </span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase block">New Billable Total</span>
+                      <span className="font-mono font-bold text-emerald-700 text-sm">
+                        ${recalculatedBillable.toFixed(2)}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono block">
+                        ({deltaBillable >= 0 ? '+' : ''}${deltaBillable.toFixed(2)})
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdjustTotalTimeModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition shadow-xs flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Apply Adjusted Hours & Recalculate</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: EDIT INDIVIDUAL TIME LOG SESSION */}
+      {editingTimeLog && (() => {
+        const rawH = parseFloat(editLogHours) || 0;
+        const rate = parseFloat(editLogRate) || job.hourly_rate || 85;
+        const total = rawH * rate;
+
+        return (
+          <div className="fixed inset-0 z-60 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-md w-full space-y-4 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-bold text-base text-slate-900">Edit Time Session</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingTimeLog(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditTimeLog} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Drafter / Staff Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editLogDrafter}
+                    onChange={(e) => setEditLogDrafter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Billing Reason / Category
+                  </label>
+                  <select
+                    value={editLogBillingCategory}
+                    onChange={(e) => setEditLogBillingCategory(e.target.value as AdditionalBillingCategory)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="">Standard CAD Drafting</option>
+                    <option value="Revisions Exceeded Plan Scope">Revisions Exceeded Plan Scope (Client Extra Changes)</option>
+                    <option value="1-on-1 Consultation with Jason">1-on-1 Consultation with Jason (Architecture & Operations)</option>
+                    <option value="1-on-1 Consultation with Kyle">1-on-1 Consultation with Kyle (Executive / Planning Review)</option>
+                    <option value="Out-of-Scope Custom Work">Out-of-Scope Custom Work (Structural / Specialty)</option>
+                    <option value="Standard Offline CAD Drafting">Standard Offline CAD Drafting (Redlines & Sheet Drafting)</option>
+                    <option value="Other Additional Work">Other Additional Work (Miscellaneous Consult / Research)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Task Description / Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={editLogTaskDesc}
+                    onChange={(e) => setEditLogTaskDesc(e.target.value)}
+                    placeholder="e.g. Floor plan wall adjustments"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Duration / Hours (hrs)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editLogHours}
+                      onChange={(e) => setEditLogHours(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Hourly Rate ($/hr)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="1"
+                      value={editLogRate}
+                      onChange={(e) => setEditLogRate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Session Calculation Summary */}
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs flex items-center justify-between">
+                  <span className="text-slate-500">Recalculated Session:</span>
+                  <span className="font-mono font-bold text-emerald-700">
+                    {rawH.toFixed(2)} hrs × ${rate.toFixed(2)}/hr = ${total.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTimeLog(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition shadow-xs"
+                  >
+                    Save & Recalculate
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: DELETE TIME LOG CONFIRMATION */}
+      {deletingTimeLogId && (() => {
+        const targetLog = (job.time_logs || []).find(l => l.id === deletingTimeLogId);
+        if (!targetLog) return null;
+
+        const hours = typeof targetLog.billableHours === 'number'
+          ? targetLog.billableHours
+          : (targetLog.durationSeconds / 3600);
+        const rate = targetLog.hourlyRate || job.hourly_rate || 85;
+        const amount = typeof targetLog.billableAmount === 'number' ? targetLog.billableAmount : hours * rate;
+
+        return (
+          <div className="fixed inset-0 z-60 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-md w-full space-y-4 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3 text-rose-600 border-b pb-3">
+                <div className="p-2 bg-rose-50 rounded-xl">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Delete Time Session?</h3>
+                  <p className="text-xs text-slate-500">This will remove this entry and recalculate project billings</p>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/70 border border-rose-200 p-3 rounded-xl text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Drafter / Staff:</span>
+                  <span className="font-bold text-slate-900">{targetLog.drafterName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Task / Category:</span>
+                  <span className="font-medium text-slate-800">{targetLog.taskDescription || targetLog.billingCategory || 'CAD Drafting'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Logged Duration:</span>
+                  <span className="font-mono font-bold text-slate-900">{hours.toFixed(2)} hrs ({formatSecondsToReadable(targetLog.durationSeconds)})</span>
+                </div>
+                <div className="flex justify-between border-t border-rose-200/80 pt-1">
+                  <span className="text-slate-600">Billable Amount to Deduct:</span>
+                  <span className="font-mono font-bold text-rose-700">-${amount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingTimeLogId(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmDeleteTimeLog(deletingTimeLogId)}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition shadow-xs flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Confirm Delete & Recalculate</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -499,7 +499,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
       )}
 
-      {/* METRICS SUMMARY BAR (Respects Financial Permissions) */}
+      {/* METRICS SUMMARY BAR */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
         {/* Metric 1: Total Logged Time */}
@@ -515,34 +515,20 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           </div>
         </div>
 
-        {/* Metric 2: Financial Card OR Delegated Tasks Card */}
-        {canAccessFinancials ? (
-          <div className="bg-gradient-to-br from-emerald-900 to-emerald-800 text-white p-4 rounded-xl shadow-xs flex items-center justify-between border border-emerald-700">
-            <div>
-              <div className="text-[10px] font-mono uppercase text-emerald-200/80 font-semibold">Billable Invoicing Total</div>
-              <div className="text-xl font-bold font-mono mt-0.5 text-white">
-                ${totalInvoicingValue.toFixed(2)}
-              </div>
-            </div>
-            <div className="bg-emerald-700/60 p-2.5 rounded-lg border border-emerald-600">
-              <DollarSign className="w-5 h-5 text-emerald-200" />
+        {/* Metric 2: Delegated Tasks & Work Queue Card */}
+        <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 text-white p-4 rounded-xl shadow-xs flex items-center justify-between border border-indigo-700">
+          <div>
+            <div className="text-[10px] font-mono uppercase text-indigo-200/80 font-semibold">Delegated Work Queue</div>
+            <div className="text-xl font-bold font-mono mt-0.5 text-white">
+              {myAssignedTasks.length > 0 ? `${myAssignedTasks.length} Assigned To Me` : `${allDelegatedTasks.length} Active in Queue`}
             </div>
           </div>
-        ) : (
-          <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 text-white p-4 rounded-xl shadow-xs flex items-center justify-between border border-indigo-700">
-            <div>
-              <div className="text-[10px] font-mono uppercase text-indigo-200/80 font-semibold">Delegated Work Queue</div>
-              <div className="text-xl font-bold font-mono mt-0.5 text-white">
-                {myAssignedTasks.length} Assigned To Me
-              </div>
-            </div>
-            <div className="bg-indigo-700/60 p-2.5 rounded-lg border border-indigo-600">
-              <ListTodo className="w-5 h-5 text-indigo-200" />
-            </div>
+          <div className="bg-indigo-700/60 p-2.5 rounded-lg border border-indigo-600">
+            <ListTodo className="w-5 h-5 text-indigo-200" />
           </div>
-        )}
+        </div>
 
-        {/* Metric 3: Active Live Timers & Quick Report */}
+        {/* Metric 3: Active Live Timers & Projects */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-[10px] font-mono uppercase text-slate-400 font-semibold">Active Live Timers</div>
@@ -555,9 +541,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           </div>
           
           <div className="text-right">
-            <span className="text-[10px] text-slate-400 font-mono block">Delegated Tasks</span>
-            <span className="text-xs font-bold text-indigo-700 font-mono">
-              {allDelegatedTasks.length} Active Total
+            <span className="text-[10px] text-slate-400 font-mono block">Filtered Plans</span>
+            <span className="text-xs font-bold text-blue-700 font-mono">
+              {filteredJobs.length} Active
             </span>
           </div>
         </div>

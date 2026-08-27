@@ -42,17 +42,50 @@ export function calculateJobTotalSeconds(job: Job, nowTimestamp?: number): numbe
     activeSeconds = Math.max(0, Math.floor((currentMs - startMs) / 1000));
   }
 
-  return completedSeconds + activeSeconds;
+  return Math.max(0, completedSeconds + activeSeconds);
 }
 
 /**
- * Calculate billable total for a job.
+ * Calculate billable hours for additional work / offline drafting / 1-on-1s.
+ * Rules:
+ * 1. Minimum 1.0 hour for all additional billing entries.
+ * 2. After the first hour, calculate in quarter-hour (0.25h) increments (e.g. 1.0, 1.25, 1.5, 1.75, 2.0...).
+ */
+export function calculateAdditionalBillableHours(rawHours: number): number {
+  if (!rawHours || rawHours <= 0) return 0;
+  if (rawHours <= 1.0) return 1.0;
+  const extra = rawHours - 1.0;
+  const roundedExtra = Math.ceil(extra * 4) / 4;
+  return Number((1.0 + roundedExtra).toFixed(2));
+}
+
+/**
+ * Calculate billable total for a job based on all logs (with individual rates & billable hours) and any active timer.
  */
 export function calculateJobBillableAmount(job: Job, nowTimestamp?: number): number {
-  const totalSeconds = calculateJobTotalSeconds(job, nowTimestamp);
-  const rate = job.hourly_rate || 85; // Default $85/hr rate for CAD drafting
-  const hours = totalSeconds / 3600;
-  return Math.round(hours * rate * 100) / 100;
+  let completedBillable = 0;
+  for (const log of (job.time_logs || [])) {
+    const rate = log.hourlyRate || job.hourly_rate || 85;
+    if (typeof log.billableAmount === 'number') {
+      completedBillable += log.billableAmount;
+    } else if (typeof log.billableHours === 'number') {
+      completedBillable += log.billableHours * rate;
+    } else {
+      const hours = (log.durationSeconds || 0) / 3600;
+      completedBillable += hours * rate;
+    }
+  }
+
+  let activeBillable = 0;
+  if (job.active_timer_start) {
+    const startMs = new Date(job.active_timer_start).getTime();
+    const currentMs = nowTimestamp || Date.now();
+    const activeSec = Math.max(0, Math.floor((currentMs - startMs) / 1000));
+    const rate = job.hourly_rate || 85;
+    activeBillable = (activeSec / 3600) * rate;
+  }
+
+  return Math.max(0, Math.round((completedBillable + activeBillable) * 100) / 100);
 }
 
 /**
@@ -115,6 +148,7 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     '',
     '',
     '',
+    '',
     ''
   ];
 
@@ -122,32 +156,38 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     'Job Number',
     'Customer Name',
     'Drafter Name',
-    'Task Description',
+    'Billing Category',
+    'Task Description / Notes',
     'Start Time',
     'End Time',
-    'Duration (HH:MM:SS)',
-    'Duration (Hours)',
+    'Raw Duration (HH:MM:SS)',
+    'Billable Hours',
     'Hourly Rate ($)',
     'Session Total ($)'
   ];
 
   const sessionRows: string[][] = [];
   jobsToExport.forEach(job => {
-    const rate = job.hourly_rate || 85;
+    const defaultRate = job.hourly_rate || 85;
     (job.time_logs || []).forEach(log => {
-      const durHours = (log.durationSeconds / 3600).toFixed(2);
-      const sessionTotal = ((log.durationSeconds / 3600) * (log.hourlyRate || rate)).toFixed(2);
+      const rate = log.hourlyRate || defaultRate;
+      const rawHours = (log.durationSeconds / 3600);
+      const billableHrs = typeof log.billableHours === 'number' ? log.billableHours : Number(rawHours.toFixed(2));
+      const sessionTotal = typeof log.billableAmount === 'number' 
+        ? log.billableAmount.toFixed(2) 
+        : (billableHrs * rate).toFixed(2);
 
       sessionRows.push([
         `"${job.job_number}"`,
         `"${job.customer_name.replace(/"/g, '""')}"`,
         `"${log.drafterName.replace(/"/g, '""')}"`,
+        `"${(log.billingCategory || 'Standard CAD Drafting').replace(/"/g, '""')}"`,
         `"${(log.taskDescription || 'CAD Drafting & Revisions').replace(/"/g, '""')}"`,
         `"${new Date(log.startTime).toLocaleString()}"`,
         log.endTime ? `"${new Date(log.endTime).toLocaleString()}"` : '"IN PROGRESS"',
         `"${formatSecondsToHHMMSS(log.durationSeconds)}"`,
-        durHours,
-        (log.hourlyRate || rate).toFixed(2),
+        billableHrs.toFixed(2),
+        rate.toFixed(2),
         sessionTotal
       ]);
     });

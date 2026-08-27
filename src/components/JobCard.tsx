@@ -210,22 +210,10 @@ export const JobCard: React.FC<JobCardProps> = ({
             </div>
 
             <div className="text-right">
-              {canAccessFinancials ? (
-                <>
-                  <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Invoicing Value</div>
-                  <div className="text-sm font-bold font-mono text-emerald-700 flex items-center justify-end">
-                    <span>${totalBillable.toFixed(2)}</span>
-                    <span className="text-[10px] text-slate-400 font-normal ml-1">(@${hourlyRate}/h)</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Sessions Logged</div>
-                  <div className="text-sm font-bold font-mono text-slate-700">
-                    {(job.time_logs || []).length} Recorded
-                  </div>
-                </>
-              )}
+              <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Sessions Logged</div>
+              <div className="text-sm font-bold font-mono text-slate-700">
+                {(job.time_logs || []).length} Recorded
+              </div>
             </div>
           </div>
 

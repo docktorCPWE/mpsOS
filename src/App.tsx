@@ -40,7 +40,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
-  const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' } | null>(null);
+  const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
 
   // Modals state
   const [selectedJobForDetail, setSelectedJobForDetail] = useState<Job | null>(null);
@@ -456,6 +456,7 @@ export default function App() {
     if (isStaffExemptFromClock(currentStaff)) return;
 
     const curStaffLower = currentStaff.name.toLowerCase();
+    const stoppedJobNumbers: string[] = [];
 
     // Helper to determine if an active or paused timer belongs to this clocking-out staff
     const isJobTimerForCurrentStaff = (j: Job) => {
@@ -464,12 +465,15 @@ export default function App() {
       if (j.active_timer_drafter_name?.toLowerCase() === curStaffLower || j.paused_timer_drafter_name?.toLowerCase() === curStaffLower) return true;
       const assigned = (j.assigned_drafter || '').toLowerCase();
       if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      // If timer is running without an explicit drafter ID and current user is an individual drafter
+      if (!j.active_timer_drafter_id && !j.paused_timer_drafter_id) return true;
       return false;
     };
 
     // If any project timer is still running or paused for this user, stop and save it cleanly
     const updatedJobs = jobs.map(j => {
       if (isJobTimerForCurrentStaff(j)) {
+        stoppedJobNumbers.push(j.job_number);
         let newLog: TimeLog | null = null;
         let durationSeconds = 0;
         const taskNote = j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
@@ -479,12 +483,12 @@ export default function App() {
           const endMs = Date.now();
           durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
           newLog = {
-            id: `tl-${Date.now()}`,
+            id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             drafterName: currentStaff.name,
             startTime: j.active_timer_start,
             endTime: new Date(endMs).toISOString(),
             durationSeconds,
-            taskDescription: `${taskNote} (Shift End Auto-Save)`,
+            taskDescription: `${taskNote} (Shift End Auto-Stop)`,
             hourlyRate: j.hourly_rate || 85
           };
         }
@@ -502,13 +506,13 @@ export default function App() {
           time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
           audit_logs: [
             {
-              id: `a-${Date.now()}`,
+              id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               action: 'Timer Stopped (Clock Out)',
               performedBy: currentStaff.name,
               timestamp: new Date().toISOString(),
               details: durationSeconds > 0 
-                ? `Drafting timer finalized on clock out (${Math.round(durationSeconds / 60)} mins logged).`
-                : `Drafting timer ended on clock out for "${taskNote}".`
+                ? `Drafting timer on ${j.job_number} automatically stopped & finalized upon shift clock-out (${Math.round(durationSeconds / 60)} mins logged).`
+                : `Drafting timer ended upon shift clock-out for "${taskNote}".`
             },
             ...j.audit_logs
           ]
@@ -556,7 +560,12 @@ export default function App() {
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
-    setPausedJobsNotice(null);
+
+    if (stoppedJobNumbers.length > 0) {
+      setPausedJobsNotice({ jobNumbers: stoppedJobNumbers, type: 'clock_out_stopped' });
+    } else {
+      setPausedJobsNotice(null);
+    }
   };
 
   // Staff Management handlers
