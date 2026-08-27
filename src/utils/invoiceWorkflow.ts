@@ -18,6 +18,51 @@ export function canUserApproveAsJason(staff?: StaffUser): boolean {
 }
 
 /**
+ * Checks if the user or staff member has permissions to generate, view, and export official invoices.
+ * Granted to admin, billing specialists, finance department, and staff with invoice management or financial access privileges.
+ */
+export function canGenerateInvoice(staff?: StaffUser | null, userRole?: string): boolean {
+  if (userRole === 'admin') return true;
+  if (!staff) return false;
+  if (staff.role === 'admin') return true;
+  if (staff.canManageInvoices || staff.canAccessFinancials) return true;
+  if (staff.department === 'Finance' || staff.department === 'Management' || staff.department === 'Operations') return true;
+  const name = staff.name.toLowerCase();
+  return (
+    name.includes('jason') ||
+    name.includes('kyle') ||
+    name.includes('drew') ||
+    name.includes('ethan') ||
+    name.includes('greg') ||
+    name.includes('admin')
+  );
+}
+
+/**
+ * Calculates a due date that is N business days (skipping weekends) from the start date
+ */
+export function calculateBusinessDueDate(startDateStr?: string, businessDays: number = 7): string {
+  const date = startDateStr ? new Date(startDateStr) : new Date();
+  if (isNaN(date.getTime())) {
+    const today = new Date();
+    return calculateBusinessDueDate(today.toISOString().split('T')[0], businessDays);
+  }
+
+  let addedDays = 0;
+  const cur = new Date(date);
+  while (addedDays < businessDays) {
+    cur.setDate(cur.getDate() + 1);
+    const dayOfWeek = cur.getDay();
+    // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      addedDays++;
+    }
+  }
+
+  return cur.toISOString().split('T')[0];
+}
+
+/**
  * Centralized invoice status state-machine & notification dispatcher:
  * - When set to "Pending Invoicing": Dispatches notification to Jason for approval.
  * - When set to "Jason Approved": Sets jason_approved to true (checkmark appears) & dispatches notifications to Ethan & Drew.

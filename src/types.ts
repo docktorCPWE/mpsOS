@@ -253,6 +253,11 @@ export interface Job {
   deposit_notes?: string; // Payment reference or notes (e.g. "Check #1042 / Stripe 50% retainer")
   invoice_status?: InvoiceStatus;
   invoice_number?: string;
+  invoice_date?: string; // e.g. "2026-08-27"
+  invoice_due_date?: string; // e.g. "2026-09-08"
+  online_payment_link?: string; // Custom or default URL e.g. "https://pay.myplanstore.com/inv/MPS-1042"
+  invoice_terms?: string; // e.g. "Net 7 Business Days"
+  invoice_notes?: string;
   jason_approved?: boolean; // True when Jason has approved the item for invoicing
   jason_approved_at?: string; // Timestamp when Jason approved
   jason_approved_by?: string; // Staff member who approved as/for Jason
@@ -278,6 +283,14 @@ export interface Job {
   audit_logs: AuditLog[];
 }
 
+export interface EmailAttachment {
+  name: string;
+  type: string; // e.g. "application/pdf"
+  sizeBytes?: number;
+  dataUrl?: string; // base64 or blob URL
+  downloadUrl?: string;
+}
+
 export interface EmailTemplate {
   recipientEmail: string;
   recipientName: string;
@@ -286,4 +299,5 @@ export interface EmailTemplate {
   timestamp: string;
   jobId: string;
   jobNumber: string;
+  attachments?: EmailAttachment[];
 }

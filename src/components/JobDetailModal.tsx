@@ -5,7 +5,8 @@ import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived } from '../data/mockData';
-import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason } from '../utils/invoiceWorkflow';
+import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
+import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 
 interface JobDetailModalProps {
   job: Job | null;
@@ -67,6 +68,9 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   
   // Delegated Task Revision Modal State
   const [revisionModalTask, setRevisionModalTask] = useState<DelegatedWorkItem | null>(null);
+
+  // Official Invoice Generator Modal State
+  const [isOfficialInvoiceModalOpen, setIsOfficialInvoiceModalOpen] = useState(false);
 
   // Completed status authorization (Kyle or Jason only)
   const canMarkProjectCompleted = Boolean(
@@ -2472,20 +2476,34 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                     <div>
                       <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
                         <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                        <span>Invoicing Team Report</span>
+                        <span>Official Invoicing & Client Reporting</span>
                       </h4>
                       <p className="text-xs text-emerald-800 mt-0.5">
-                        Generate an itemized CSV breakdown of all drafting hours for this specific job.
+                        Generate official My Plan Store branded PDF invoices (Net 7 days / Online payment link) or download itemized CSV reports.
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => exportInvoicingCSV([job], job.id)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Job Invoice CSV</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {canGenerateInvoice(currentStaff) && (
+                        <button
+                          type="button"
+                          onClick={() => setIsOfficialInvoiceModalOpen(true)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span>Generate Official Invoice</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => exportInvoicingCSV([job], job.id)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download Job Invoice CSV</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -3605,6 +3623,20 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
           </div>
         );
       })()}
+
+      {/* Official Invoice Modal */}
+      {isOfficialInvoiceModalOpen && (
+        <OfficialInvoiceModal
+          job={job}
+          isOpen={isOfficialInvoiceModalOpen}
+          onClose={() => setIsOfficialInvoiceModalOpen(false)}
+          onUpdateJob={onUpdateJob}
+          onTriggerEmail={onTriggerEmail}
+          onDispatchNotifications={onDispatchNotifications}
+          currentStaff={currentStaff}
+          nowTimestamp={nowTimestamp}
+        />
+      )}
     </div>
   );
 };

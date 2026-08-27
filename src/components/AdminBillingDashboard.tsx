@@ -41,7 +41,8 @@ import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepos
 import { Lock, ShieldCheck } from 'lucide-react';
 import { STAFF_USERS } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
-import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason } from '../utils/invoiceWorkflow';
+import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
+import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 
 interface AdminBillingDashboardProps {
   jobs: Job[];
@@ -229,6 +230,9 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   // Roadblock note editor popup state
   const [editingRoadblockJob, setEditingRoadblockJob] = useState<Job | null>(null);
   const [roadblockNoteText, setRoadblockNoteText] = useState('');
+
+  // Official Invoice Generator Modal State
+  const [invoiceModalJob, setInvoiceModalJob] = useState<Job | null>(null);
 
   // Update job invoice status handler with Jason Approval workflow
   const handleUpdateInvoiceStatus = (job: Job, newInvoiceStatus: InvoiceStatus) => {
@@ -1090,15 +1094,29 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                           </div>
                         </td>
 
-                        {/* 7. Action Button */}
+                        {/* 7. Action Buttons */}
                         <td className="p-3.5 text-right">
-                          <button
-                            onClick={() => onSelectJob(job)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1 ml-auto"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Open Client Project</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {canGenerateInvoice(currentStaff) && (
+                              <button
+                                type="button"
+                                onClick={() => setInvoiceModalJob(job)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                title="Generate Branded PDF Invoice (Net 7 days / Online payment link)"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Invoice</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => onSelectJob(job)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </button>
+                          </div>
                         </td>
 
                       </tr>
@@ -1215,6 +1233,18 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                       <option value="Paid">Paid</option>
                     </select>
 
+                    {canGenerateInvoice(currentStaff) && (
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceModalJob(job)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-2.5 py-2 rounded-lg flex items-center gap-1 shadow-2xs cursor-pointer"
+                        title="Generate Branded PDF Invoice"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Invoice</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => onSelectJob(job)}
                       className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs p-2 rounded-lg flex items-center gap-1"
@@ -1295,6 +1325,22 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* MODAL: OFFICIAL INVOICE GENERATOR */}
+      {invoiceModalJob && (
+        <OfficialInvoiceModal
+          job={invoiceModalJob}
+          isOpen={Boolean(invoiceModalJob)}
+          onClose={() => setInvoiceModalJob(null)}
+          onUpdateJob={(updatedJob) => {
+            onUpdateJob(updatedJob);
+            setInvoiceModalJob(updatedJob);
+          }}
+          onDispatchNotifications={onDispatchNotifications}
+          currentStaff={currentStaff}
+          nowTimestamp={nowTimestamp}
+        />
       )}
 
     </div>

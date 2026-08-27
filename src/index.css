@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 10mm 12mm;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  header, nav, aside, footer:not(#official-invoice-sheet footer) {
+    display: none !important;
+  }
+
+  #official-invoice-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
