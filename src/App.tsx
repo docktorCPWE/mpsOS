@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
@@ -36,7 +36,7 @@ export default function App() {
   // Staff User, Notifications & Time Cards State
   const [staffList, setStaffList] = useState<StaffUser[]>(STAFF_USERS);
   const [currentStaff, setCurrentStaff] = useState<StaffUser>(STAFF_USERS[0]); // Default: Greg Hyatt (Owner)
-  const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => getStoredNotifications());
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
@@ -108,6 +108,16 @@ export default function App() {
     setNotifications(prev =>
       prev.map(n => (n.id === notificationId ? { ...n, read: true } : n))
     );
+  };
+
+  // Dispatch new app notifications and persist to storage
+  const handleDispatchNotifications = (newNotifs: AppNotification[]) => {
+    if (!newNotifs || newNotifs.length === 0) return;
+    setNotifications(prev => {
+      const combined = [...newNotifs, ...prev];
+      saveStoredNotifications(combined);
+      return combined;
+    });
   };
 
   // Timer Start Handler (prompts for required note if not provided)
@@ -1401,6 +1411,7 @@ export default function App() {
               const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
               updateJobsState(updatedList);
             }}
+            onDispatchNotifications={handleDispatchNotifications}
             nowTimestamp={nowTimestamp}
           />
         ) : (
@@ -1426,6 +1437,7 @@ export default function App() {
             const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
             updateJobsState(updatedList);
           }}
+          onDispatchNotifications={handleDispatchNotifications}
           onTriggerEmail={(email) => setEmailModalData(email)}
           onStartTimer={handleStartTimer}
           onStopTimer={handleStopTimer}
@@ -1456,6 +1468,7 @@ export default function App() {
         isOpen={isNewJobModalOpen}
         onClose={() => setIsNewJobModalOpen(false)}
         onCreateJob={handleCreateJob}
+        staffList={staffList}
       />
 
       {/* MODAL 4: Delegate Work Modal */}

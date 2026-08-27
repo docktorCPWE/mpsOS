@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee } from 'lucide-react';
-import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory } from '../types';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt } from 'lucide-react';
+import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived } from '../data/mockData';
+import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason } from '../utils/invoiceWorkflow';
 
 interface JobDetailModalProps {
   job: Job | null;
   onClose: () => void;
   onUpdateJob: (updatedJob: Job) => void;
+  onDispatchNotifications?: (notifs: AppNotification[]) => void;
   onTriggerEmail: (email: EmailTemplate) => void;
   onStartTimer?: (jobId: string, taskNote?: string) => void;
   onStopTimer?: (jobId: string, taskNote?: string) => void;
@@ -38,6 +40,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   job,
   onClose,
   onUpdateJob,
+  onDispatchNotifications,
   onTriggerEmail,
   onStartTimer,
   onStopTimer,
@@ -223,6 +226,46 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   const [manualHoursInput, setManualHoursInput] = useState('1.5');
   const [manualRateInput, setManualRateInput] = useState<string>(String(job.hourly_rate || 85));
   const [hourlyRateInput, setHourlyRateInput] = useState<number>(job.hourly_rate || 85);
+
+  // Upfront Deposit & Retainer Collection State
+  const [isEditingDeposit, setIsEditingDeposit] = useState(false);
+  const [depositCollectedInput, setDepositCollectedInput] = useState<boolean>(job.deposit_collected || false);
+  const [depositAmountInput, setDepositAmountInput] = useState<string>(
+    job.deposit_amount !== undefined && job.deposit_amount !== null ? String(job.deposit_amount) : ''
+  );
+  const [depositDateInput, setDepositDateInput] = useState<string>(
+    job.deposit_date || new Date().toISOString().split('T')[0]
+  );
+  const [depositNotesInput, setDepositNotesInput] = useState<string>(job.deposit_notes || '');
+
+  const handleSaveDepositInfo = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const numAmt = Number(depositAmountInput) || 0;
+    const isCollected = depositCollectedInput && numAmt > 0;
+
+    const updatedJob: Job = {
+      ...job,
+      deposit_collected: isCollected,
+      deposit_amount: isCollected ? numAmt : 0,
+      deposit_date: isCollected ? depositDateInput : undefined,
+      deposit_notes: isCollected ? (depositNotesInput.trim() || 'Upfront retainer deposit') : undefined,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Deposit Info Updated',
+          performedBy: currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Billing Admin',
+          timestamp: new Date().toISOString(),
+          details: isCollected
+            ? `Updated deposit to $${numAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} (Ref: ${depositNotesInput || 'Retainer'}, Date: ${depositDateInput})`
+            : `Cleared upfront deposit on project #${job.job_number}.`
+        },
+        ...job.audit_logs
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    setIsEditingDeposit(false);
+  };
 
   // Admin Adjust Total Time / Overcharge Correction Modal State
   const [isAdjustTotalTimeModalOpen, setIsAdjustTotalTimeModalOpen] = useState(false);
@@ -2025,7 +2068,8 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
             <div className="space-y-6">
               
               {/* Overview Metric Banner */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Total Logged Time */}
                 <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-mono uppercase text-slate-400 block font-semibold">Total Logged Time</span>
@@ -2055,24 +2099,86 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
 
                 {canAccessFinancials ? (
                   <>
-                    <div className="bg-emerald-900 text-white p-4 rounded-xl border border-emerald-800">
-                      <span className="text-[10px] font-mono uppercase text-emerald-200 block font-semibold">Total Billable Amount</span>
-                      <span className="text-xl font-bold font-mono text-white">
-                        ${calculateJobBillableAmount(job, nowTimestamp).toFixed(2)}
-                      </span>
+                    {/* 2. Gross Billable Amount */}
+                    <div className="bg-slate-800 text-white p-4 rounded-xl border border-slate-700 flex flex-col justify-between">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono uppercase text-slate-300 block font-semibold">Gross Billable Total</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          @ ${hourlyRateInput}/hr
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2 mt-2">
+                        <span className="text-xl font-bold font-mono text-white">
+                          ${calculateJobBillableAmount(job, nowTimestamp).toFixed(2)}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-slate-400">$</span>
+                          <input
+                            type="number"
+                            value={hourlyRateInput}
+                            onChange={(e) => handleUpdateHourlyRate(parseFloat(e.target.value) || 0)}
+                            className="w-14 font-mono font-bold text-xs bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-white"
+                            title="Hourly rate"
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
-                      <span className="text-[10px] font-mono uppercase text-slate-400 block font-semibold">Invoicing Rate</span>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-sm font-bold">$</span>
-                        <input
-                          type="number"
-                          value={hourlyRateInput}
-                          onChange={(e) => handleUpdateHourlyRate(parseFloat(e.target.value) || 0)}
-                          className="w-20 font-mono font-bold text-sm bg-slate-50 border border-slate-300 rounded p-1 text-slate-900"
-                        />
-                        <span className="text-xs text-slate-500 font-medium">/ hour</span>
+                    {/* 3. Deposit Collected */}
+                    <div className={`p-4 rounded-xl border flex flex-col justify-between ${
+                      job.deposit_collected && (job.deposit_amount || 0) > 0
+                        ? 'bg-emerald-950 text-white border-emerald-800'
+                        : 'bg-slate-100 text-slate-800 border-slate-200'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[10px] font-mono uppercase font-semibold block ${
+                          job.deposit_collected && (job.deposit_amount || 0) > 0 ? 'text-emerald-300' : 'text-slate-500'
+                        }`}>
+                          Deposit Collected
+                        </span>
+                        {job.deposit_collected && (job.deposit_amount || 0) > 0 ? (
+                          <span className="text-[9px] bg-emerald-500/30 text-emerald-200 font-mono font-bold px-1.5 py-0.5 rounded border border-emerald-400/40">
+                            Upfront Paid
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-slate-200 text-slate-600 font-mono font-bold px-1.5 py-0.5 rounded">
+                            $0 Deposit
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2 mt-2">
+                        <span className={`text-xl font-bold font-mono ${
+                          job.deposit_collected && (job.deposit_amount || 0) > 0 ? 'text-emerald-300' : 'text-slate-600'
+                        }`}>
+                          {job.deposit_collected && (job.deposit_amount || 0) > 0
+                            ? `-$${calculateJobDepositAmount(job).toFixed(2)}`
+                            : '$0.00'}
+                        </span>
+                        {job.deposit_date && (
+                          <span className="text-[10px] text-emerald-400 font-mono">
+                            {job.deposit_date}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 4. Net Amount Due to Invoice */}
+                    <div className="bg-emerald-900 text-white p-4 rounded-xl border border-emerald-700 shadow-xs flex flex-col justify-between">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono uppercase text-emerald-200 block font-bold">
+                          Net Amount to Invoice
+                        </span>
+                        <span className="text-[9px] bg-emerald-800 text-emerald-100 font-mono font-bold px-1.5 py-0.5 rounded">
+                          Total - Deposit
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2 mt-2">
+                        <span className="text-2xl font-black font-mono text-white tracking-tight">
+                          ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-emerald-200 font-mono">
+                          Balance Due
+                        </span>
                       </div>
                     </div>
                   </>
@@ -2096,61 +2202,270 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
               {/* Action Controls & Invoice Export Button */}
               {canAccessFinancials && (
                 <div className="space-y-4">
-                  {/* Invoice Status & Auto-Archive Control */}
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div>
+                  {/* Upfront Deposit & Retainer Management Panel */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-emerald-600" />
-                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
-                          Invoice & Archive Status
-                        </h4>
-                        {isJobArchived(job) && (
-                          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
-                            <Archive className="w-3 h-3 text-emerald-600" />
-                            <span>Paid & Archived</span>
-                          </span>
-                        )}
+                        <div className="p-2 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100 shrink-0">
+                          <Receipt className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                              Deposit & Upfront Retainer
+                            </h4>
+                            {job.deposit_collected && (job.deposit_amount || 0) > 0 ? (
+                              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>${calculateJobDepositAmount(job).toFixed(2)} Collected</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300 px-2 py-0.5 rounded">
+                                No Deposit Collected
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Any upfront deposit collected is automatically subtracted from the gross billable amount to calculate the net balance due for invoicing.
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Setting invoice status to <strong>"Paid"</strong> automatically archives the project, removes it from active drafter boards, and keeps it searchable by Kyle, Jason, Drew, and Ethan for notes.
-                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDepositCollectedInput(job.deposit_collected || false);
+                          setDepositAmountInput(job.deposit_amount ? String(job.deposit_amount) : '');
+                          setDepositDateInput(job.deposit_date || new Date().toISOString().split('T')[0]);
+                          setDepositNotesInput(job.deposit_notes || '');
+                          setIsEditingDeposit(!isEditingDeposit);
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-lg transition border border-slate-300 flex items-center gap-1.5 shrink-0 cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+                        <span>{isEditingDeposit ? 'Cancel Editing' : 'Edit Deposit Info'}</span>
+                      </button>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                      <select
-                        value={job.invoice_status || 'Uninvoiced'}
-                        onChange={(e) => {
-                          const newStatus = e.target.value as Job['invoice_status'];
-                          const isPaid = newStatus === 'Paid';
-                          const updated: Job = {
-                            ...job,
-                            invoice_status: newStatus,
-                            is_archived: isPaid,
-                            archived_at: isPaid ? (job.archived_at || new Date().toISOString()) : undefined,
-                            archived_by: isPaid ? (job.archived_by || currentStaff?.name || 'Operations') : undefined,
-                            audit_logs: [
-                              {
-                                id: `a-${Date.now()}`,
-                                action: isPaid ? 'Project Paid & Archived' : 'Invoice Status Updated',
-                                performedBy: currentStaff?.name || 'Admin',
-                                timestamp: new Date().toISOString(),
-                                details: isPaid
-                                  ? `Marked as Paid. Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`
-                                  : `Changed invoice status to "${newStatus}"`
-                              },
-                              ...job.audit_logs
-                            ]
-                          };
-                          onUpdateJob(updated);
-                        }}
-                        className="w-full sm:w-auto bg-slate-50 border border-slate-300 font-mono font-bold text-xs rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                      >
-                        <option value="Uninvoiced">Uninvoiced</option>
-                        <option value="Pending Invoicing">Pending Invoicing</option>
-                        <option value="Invoiced">Invoiced</option>
-                        <option value="Paid">Paid (Auto-Archive)</option>
-                      </select>
+                    {/* Live Calculation Formula Banner */}
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div className="flex items-center justify-between sm:justify-start sm:gap-2">
+                        <span className="text-slate-500 font-medium">Gross Billable:</span>
+                        <strong className="font-mono text-slate-900">${calculateJobBillableAmount(job, nowTimestamp).toFixed(2)}</strong>
+                      </div>
+                      <div className="flex items-center justify-between sm:justify-start sm:gap-2 text-emerald-700">
+                        <span className="text-slate-500 font-medium">Less Deposit:</span>
+                        <strong className="font-mono">-${calculateJobDepositAmount(job).toFixed(2)}</strong>
+                      </div>
+                      <div className="flex items-center justify-between sm:justify-start sm:gap-2 text-emerald-900 font-bold bg-emerald-100/60 px-2 py-1 rounded border border-emerald-200">
+                        <span>Net Invoice Amount:</span>
+                        <strong className="font-mono text-sm">${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}</strong>
+                      </div>
                     </div>
+
+                    {/* Inline Deposit Editor Form */}
+                    {isEditingDeposit && (
+                      <form onSubmit={handleSaveDepositInfo} className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-200 space-y-3 animate-in fade-in duration-150">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="modal_deposit_collected"
+                            checked={depositCollectedInput}
+                            onChange={(e) => setDepositCollectedInput(e.target.checked)}
+                            className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <label htmlFor="modal_deposit_collected" className="text-xs font-bold text-slate-900 cursor-pointer">
+                            Deposit / Upfront Retainer has been collected for this project
+                          </label>
+                        </div>
+
+                        {depositCollectedInput && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Deposit Amount ($) *
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-2 text-slate-400 font-bold text-sm">$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  placeholder="0.00"
+                                  value={depositAmountInput}
+                                  onChange={(e) => setDepositAmountInput(e.target.value)}
+                                  className="w-full pl-7 pr-3 py-1.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  required={depositCollectedInput}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Date Collected
+                              </label>
+                              <input
+                                type="date"
+                                value={depositDateInput}
+                                onChange={(e) => setDepositDateInput(e.target.value)}
+                                className="w-full px-3 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Payment Ref / Notes
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. Check #1042, Stripe 50% retainer"
+                                value={depositNotesInput}
+                                onChange={(e) => setDepositNotesInput(e.target.value)}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-200">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingDeposit(false)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-200 transition"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Save Deposit Info</span>
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                  {/* Invoice Status & Auto-Archive Control */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-emerald-600" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                            Invoice & Approval Status
+                          </h4>
+                          {isJobArchived(job) && (
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
+                              <Archive className="w-3 h-3 text-emerald-600" />
+                              <span>Paid & Archived</span>
+                            </span>
+                          )}
+                          {isJasonApproved(job) && (
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" />
+                              <span>Jason Approved</span>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Items set to <strong>"Pending Invoicing"</strong> are routed to Jason for approval. Once Jason approves (<strong>"✓ Jason Approved"</strong>), Ethan and Drew are automatically notified to begin invoicing.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                        <select
+                          value={job.invoice_status || 'Uninvoiced'}
+                          onChange={(e) => {
+                            const newStatus = e.target.value as InvoiceStatus;
+                            const { updatedJob, newNotifications } = applyInvoiceStatusTransition(job, newStatus, currentStaff);
+                            onUpdateJob(updatedJob);
+                            if (onDispatchNotifications && newNotifications.length > 0) {
+                              onDispatchNotifications(newNotifications);
+                            }
+                          }}
+                          className={`w-full sm:w-auto border font-mono font-bold text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition ${
+                            job.invoice_status === 'Paid' ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
+                            job.invoice_status === 'Invoiced' ? 'bg-blue-100 text-blue-900 border-blue-300' :
+                            job.invoice_status === 'Jason Approved' ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-bold' :
+                            job.invoice_status === 'Pending Invoicing' ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold' :
+                            'bg-slate-50 text-slate-900 border-slate-300'
+                          }`}
+                        >
+                          <option value="Uninvoiced">Uninvoiced</option>
+                          <option value="Pending Invoicing">Pending Invoicing</option>
+                          <option value="Jason Approved">
+                            {isJasonApproved(job) ? '✓ Jason Approved' : 'Jason Approved'}
+                          </option>
+                          <option value="Invoiced">Invoiced</option>
+                          <option value="Paid">Paid (Auto-Archive)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Dynamic Approval Alert Banner: Awaiting Jason */}
+                    {job.invoice_status === 'Pending Invoicing' && !isJasonApproved(job) && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-amber-100 text-amber-800 rounded-lg shrink-0">
+                            <Clock className="w-4 h-4 text-amber-700" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-amber-950 block">
+                              Awaiting Jason's Invoicing Sign-Off
+                            </span>
+                            <span className="text-[11px] text-amber-800 block">
+                              This project is queued for Jason. When approved, Ethan and Drew will receive alerts to start invoicing.
+                            </span>
+                          </div>
+                        </div>
+
+                        {canUserApproveAsJason(currentStaff) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { updatedJob, newNotifications } = applyInvoiceStatusTransition(job, 'Jason Approved', currentStaff);
+                              onUpdateJob(updatedJob);
+                              if (onDispatchNotifications && newNotifications.length > 0) {
+                                onDispatchNotifications(newNotifications);
+                              }
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition shrink-0"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Approve for Invoicing</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Dynamic Approval Banner: Jason Approved */}
+                    {isJasonApproved(job) && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-emerald-100 text-emerald-800 rounded-lg shrink-0">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                              <span>✓ Jason Approved for Invoicing</span>
+                              {job.jason_approved_at && (
+                                <span className="text-[10px] text-emerald-700 font-mono font-normal">
+                                  ({new Date(job.jason_approved_at).toLocaleDateString()}{job.jason_approved_by ? ` by ${job.jason_approved_by}` : ''})
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-[11px] text-emerald-800 block">
+                              Sign-off confirmed. Automated alerts dispatched to Ethan and Drew to begin invoicing.
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono text-[10px] font-bold px-2.5 py-1 rounded-md shrink-0">
+                          Invoicing Active (Ethan & Drew)
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex flex-col sm:flex-row items-center justify-between gap-3">

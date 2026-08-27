@@ -89,6 +89,27 @@ export function calculateJobBillableAmount(job: Job, nowTimestamp?: number): num
 }
 
 /**
+ * Get the effective deposit collected amount for a job.
+ */
+export function calculateJobDepositAmount(job: Job): number {
+  if (job.deposit_collected && typeof job.deposit_amount === 'number' && job.deposit_amount > 0) {
+    return Math.round(job.deposit_amount * 100) / 100;
+  }
+  return 0;
+}
+
+/**
+ * Calculate net amount due for invoicing (Total Billable Amount minus Deposit Collected).
+ * If billable time is 0 but estimated_cost exists, it uses estimated_cost as the baseline project total.
+ */
+export function calculateJobNetInvoiceAmount(job: Job, nowTimestamp?: number): number {
+  const loggedBillable = calculateJobBillableAmount(job, nowTimestamp);
+  const grossTotal = loggedBillable > 0 ? loggedBillable : (job.estimated_cost || 0);
+  const deposit = calculateJobDepositAmount(job);
+  return Math.max(0, Math.round((grossTotal - deposit) * 100) / 100);
+}
+
+/**
  * Generate & download CSV report for the invoicing team
  */
 export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
@@ -102,10 +123,15 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     'House Style',
     'Square Footage',
     'Current Phase',
+    'Estimated Base Fee ($)',
     'Hourly Rate ($)',
     'Total Seconds Logged',
     'Total Hours Logged',
-    'Billable Total ($)',
+    'Gross Billable Total ($)',
+    'Deposit Collected ($)',
+    'Deposit Notes / Ref',
+    'Net Balance Due / Invoice Amount ($)',
+    'Invoice Status',
     'Total Completed Sessions',
     'Last Activity Date'
   ];
@@ -113,7 +139,10 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
   const rows = jobsToExport.map(job => {
     const totalSec = calculateJobTotalSeconds(job);
     const totalHours = (totalSec / 3600).toFixed(2);
-    const billable = calculateJobBillableAmount(job).toFixed(2);
+    const grossBillable = calculateJobBillableAmount(job);
+    const effectiveGross = grossBillable > 0 ? grossBillable : (job.estimated_cost || 0);
+    const deposit = calculateJobDepositAmount(job);
+    const netDue = Math.max(0, effectiveGross - deposit).toFixed(2);
     const rate = (job.hourly_rate || 85).toFixed(2);
     const sessionsCount = (job.time_logs || []).length;
 
@@ -125,10 +154,15 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
       `"${job.style.replace(/"/g, '""')}"`,
       job.sq_ft,
       `"${job.current_status}"`,
+      (job.estimated_cost || 0).toFixed(2),
       rate,
       totalSec,
       totalHours,
-      billable,
+      effectiveGross.toFixed(2),
+      deposit.toFixed(2),
+      `"${(job.deposit_notes || (job.deposit_date ? `Paid on ${job.deposit_date}` : '')).replace(/"/g, '""')}"`,
+      netDue,
+      `"${job.invoice_status || 'Uninvoiced'}"`,
       sessionsCount,
       `"${new Date().toLocaleDateString()}"`
     ];

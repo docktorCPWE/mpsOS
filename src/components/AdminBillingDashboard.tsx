@@ -36,11 +36,12 @@ import {
   YAxis, 
   CartesianGrid 
 } from 'recharts';
-import { Job, JobPhase, JobComment, StaffUser } from '../types';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
+import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification } from '../types';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { Lock, ShieldCheck } from 'lucide-react';
 import { STAFF_USERS } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
+import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason } from '../utils/invoiceWorkflow';
 
 interface AdminBillingDashboardProps {
   jobs: Job[];
@@ -51,6 +52,7 @@ interface AdminBillingDashboardProps {
   onToggleRoadblock: (jobId: string) => void;
   onSelectJob: (job: Job) => void;
   onUpdateJob: (updatedJob: Job) => void;
+  onDispatchNotifications?: (notifs: AppNotification[]) => void;
   nowTimestamp?: number;
 }
 
@@ -75,11 +77,12 @@ const PHASE_COLORS: Record<JobPhase, string> = {
   'Completed': '#10b981',            // Emerald
 };
 
-const INVOICE_COLORS = {
+const INVOICE_COLORS: Record<string, string> = {
   'Uninvoiced': '#64748b',
   'Pending Invoicing': '#f59e0b',
+  'Jason Approved': '#10b981',
   'Invoiced': '#3b82f6',
-  'Paid': '#10b981',
+  'Paid': '#059669',
 };
 
 // Helper: Calculate days spent in current phase
@@ -154,6 +157,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   onToggleRoadblock,
   onSelectJob,
   onUpdateJob,
+  onDispatchNotifications,
   nowTimestamp
 }) => {
   // If current staff is not authorized for financials, show access restricted screen
@@ -226,29 +230,13 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   const [editingRoadblockJob, setEditingRoadblockJob] = useState<Job | null>(null);
   const [roadblockNoteText, setRoadblockNoteText] = useState('');
 
-  // Update job invoice status handler
-  const handleUpdateInvoiceStatus = (job: Job, newInvoiceStatus: Job['invoice_status']) => {
-    const isPaid = newInvoiceStatus === 'Paid';
-    const updated: Job = {
-      ...job,
-      invoice_status: newInvoiceStatus,
-      is_archived: isPaid,
-      archived_at: isPaid ? (job.archived_at || new Date().toISOString()) : undefined,
-      archived_by: isPaid ? (job.archived_by || currentStaff?.name || 'Operations') : undefined,
-      audit_logs: [
-        {
-          id: `a-${Date.now()}`,
-          action: isPaid ? 'Project Paid & Archived' : 'Invoice Status Updated',
-          performedBy: currentStaff?.name || 'Billing Admin',
-          timestamp: new Date().toISOString(),
-          details: isPaid
-            ? `Marked as Paid. Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`
-            : `Changed invoice status to "${newInvoiceStatus}"`
-        },
-        ...job.audit_logs
-      ]
-    };
-    onUpdateJob(updated);
+  // Update job invoice status handler with Jason Approval workflow
+  const handleUpdateInvoiceStatus = (job: Job, newInvoiceStatus: InvoiceStatus) => {
+    const { updatedJob, newNotifications } = applyInvoiceStatusTransition(job, newInvoiceStatus, currentStaff);
+    onUpdateJob(updatedJob);
+    if (onDispatchNotifications && newNotifications.length > 0) {
+      onDispatchNotifications(newNotifications);
+    }
   };
 
   // Roadblock modal submit
@@ -377,7 +365,13 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   // KPI Calculations
   const totalProjects = jobs.length;
   const activeRoadblocksCount = jobs.filter(j => j.roadblock).length;
-  const totalPendingInvoicing = jobs.filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing' || (j.invoice_status || 'Uninvoiced') === 'Uninvoiced').reduce((sum, j) => sum + calculateJobBillableAmount(j, nowTimestamp), 0);
+  const totalPendingInvoicingGross = jobs
+    .filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing' || (j.invoice_status || 'Uninvoiced') === 'Uninvoiced' || (j.invoice_status || 'Uninvoiced') === 'Jason Approved')
+    .reduce((sum, j) => sum + calculateJobBillableAmount(j, nowTimestamp), 0);
+  const totalPendingInvoicingNet = jobs
+    .filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing' || (j.invoice_status || 'Uninvoiced') === 'Uninvoiced' || (j.invoice_status || 'Uninvoiced') === 'Jason Approved')
+    .reduce((sum, j) => sum + calculateJobNetInvoiceAmount(j, nowTimestamp), 0);
+  const totalDepositsCollected = jobs.reduce((sum, j) => sum + calculateJobDepositAmount(j), 0);
   const totalPaidInvoiced = jobs.filter(j => j.invoice_status === 'Paid' || j.invoice_status === 'Invoiced').reduce((sum, j) => sum + calculateJobBillableAmount(j, nowTimestamp), 0);
   const avgDaysInPhase = jobs.length > 0 ? (jobs.reduce((sum, j) => sum + getDaysInPhase(j), 0) / jobs.length).toFixed(1) : '0';
 
@@ -392,13 +386,13 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   }).filter(item => item.value > 0);
 
   // Chart Data 2: Invoicing Status Distribution
-  const invoiceStatuses = ['Uninvoiced', 'Pending Invoicing', 'Invoiced', 'Paid'] as const;
+  const invoiceStatuses = ['Uninvoiced', 'Pending Invoicing', 'Jason Approved', 'Invoiced', 'Paid'] as const;
   const invoiceChartData = invoiceStatuses.map(status => {
     const count = jobs.filter(j => (j.invoice_status || 'Uninvoiced') === status).length;
     return {
       name: status,
       value: count,
-      color: INVOICE_COLORS[status]
+      color: INVOICE_COLORS[status] || '#64748b'
     };
   }).filter(item => item.value > 0);
 
@@ -468,17 +462,17 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
           </div>
         </div>
 
-        {/* Metric 2: Pending Invoicing Value */}
+        {/* Metric 2: Pending Invoicing Net Value */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex justify-between items-start">
           <div>
             <span className="text-[10px] font-mono uppercase font-bold text-amber-600 tracking-wider block">
-              Unbilled & Pending Invoicing
+              Net Pending Invoicing Pipeline
             </span>
             <span className="text-2xl font-black font-mono text-amber-600 mt-1 block">
-              ${totalPendingInvoicing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${totalPendingInvoicingNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
             <span className="text-xs text-amber-700 mt-1 block">
-              {jobs.filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing').length} ready for billing team
+              Gross ${totalPendingInvoicingGross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} less deposits
             </span>
           </div>
           <div className="p-3 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
@@ -486,17 +480,17 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
           </div>
         </div>
 
-        {/* Metric 3: Paid & Collected */}
+        {/* Metric 3: Paid & Collected + Deposits */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex justify-between items-start">
           <div>
             <span className="text-[10px] font-mono uppercase font-bold text-emerald-600 tracking-wider block">
-              Invoiced & Collected Revenue
+              Invoiced & Upfront Retainers
             </span>
             <span className="text-2xl font-black font-mono text-emerald-600 mt-1 block">
-              ${totalPaidInvoiced.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${(totalPaidInvoiced + totalDepositsCollected).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
             <span className="text-xs text-emerald-700 mt-1 block">
-              {jobs.filter(j => j.invoice_status === 'Paid').length} marked as fully paid
+              ${totalDepositsCollected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} deposits collected
             </span>
           </div>
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
@@ -793,6 +787,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                 <option value="ALL">All Invoicing States</option>
                 <option value="Uninvoiced">Uninvoiced</option>
                 <option value="Pending Invoicing">Pending Invoicing</option>
+                <option value="Jason Approved">✓ Jason Approved</option>
                 <option value="Invoiced">Invoiced</option>
                 <option value="Paid">Paid</option>
               </select>
@@ -1037,26 +1032,55 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                         {/* 6. Invoice Status & Financials */}
                         <td className="p-3.5">
                           <div className="space-y-1.5">
-                            <span className="font-bold font-mono text-slate-900 block text-sm">
-                              ${billableAmt.toFixed(2)}
-                            </span>
+                            <div>
+                              <span className="font-black font-mono text-slate-900 block text-sm">
+                                ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
+                              </span>
+                              {job.deposit_collected && (job.deposit_amount || 0) > 0 ? (
+                                <div className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-0.5 inline-block">
+                                  Gross: ${billableAmt.toFixed(2)} (-${(job.deposit_amount || 0).toFixed(2)} dep)
+                                </div>
+                              ) : (
+                                <span className="text-[10px] font-mono text-slate-400 block">
+                                  Gross: ${billableAmt.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
 
                             {/* Dropdown to change invoice status */}
-                            <select
-                              value={invoiceStatus}
-                              onChange={(e) => handleUpdateInvoiceStatus(job, e.target.value as any)}
-                              className={`text-[10px] font-bold font-mono px-2 py-1 rounded border cursor-pointer focus:outline-none transition ${
-                                invoiceStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                                invoiceStatus === 'Invoiced' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                                invoiceStatus === 'Pending Invoicing' ? 'bg-amber-100 text-amber-800 border-amber-300 font-bold' :
-                                'bg-slate-100 text-slate-700 border-slate-300'
-                              }`}
-                            >
-                              <option value="Uninvoiced">Uninvoiced</option>
-                              <option value="Pending Invoicing">Pending Invoicing</option>
-                              <option value="Invoiced">Invoiced</option>
-                              <option value="Paid">Paid</option>
-                            </select>
+                            <div className="space-y-1">
+                              <select
+                                value={invoiceStatus}
+                                onChange={(e) => handleUpdateInvoiceStatus(job, e.target.value as InvoiceStatus)}
+                                className={`text-[10px] font-bold font-mono px-2 py-1 rounded border cursor-pointer focus:outline-none transition ${
+                                  invoiceStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                  invoiceStatus === 'Invoiced' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                                  invoiceStatus === 'Jason Approved' ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-bold' :
+                                  invoiceStatus === 'Pending Invoicing' ? 'bg-amber-100 text-amber-800 border-amber-300 font-bold' :
+                                  'bg-slate-100 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                <option value="Uninvoiced">Uninvoiced</option>
+                                <option value="Pending Invoicing">Pending Invoicing</option>
+                                <option value="Jason Approved">
+                                  {isJasonApproved(job) ? '✓ Jason Approved' : 'Jason Approved'}
+                                </option>
+                                <option value="Invoiced">Invoiced</option>
+                                <option value="Paid">Paid</option>
+                              </select>
+
+                              {invoiceStatus === 'Pending Invoicing' && !isJasonApproved(job) && canUserApproveAsJason(currentStaff) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateInvoiceStatus(job, 'Jason Approved')}
+                                  className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 rounded flex items-center gap-1 shadow-2xs transition"
+                                  title="Approve for Invoicing (Notifies Ethan & Drew to begin invoicing)"
+                                >
+                                  <CheckCircle2 className="w-2.5 h-2.5" />
+                                  <span>Approve</span>
+                                </button>
+                              )}
+                            </div>
 
                             {job.invoice_number && (
                               <span className="text-[10px] font-mono text-slate-400 block">
@@ -1157,18 +1181,36 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                 {/* Financials & Action */}
                 <div className="pt-2 border-t flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] text-slate-400 block font-mono">BILLABLE TOTAL</span>
-                    <span className="text-sm font-bold font-mono text-slate-900">${billableAmt.toFixed(2)}</span>
+                    <span className="text-[10px] text-slate-400 block font-mono">NET TO INVOICE</span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-sm font-black font-mono text-slate-900">
+                        ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
+                      </span>
+                      {job.deposit_collected && (job.deposit_amount || 0) > 0 && (
+                        <span className="text-[9px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                          -${(job.deposit_amount || 0).toFixed(0)} dep
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <select
                       value={invoiceStatus}
-                      onChange={(e) => handleUpdateInvoiceStatus(job, e.target.value as any)}
-                      className="text-xs font-mono font-bold border rounded p-1"
+                      onChange={(e) => handleUpdateInvoiceStatus(job, e.target.value as InvoiceStatus)}
+                      className={`text-xs font-mono font-bold border rounded-lg p-1.5 focus:outline-none cursor-pointer ${
+                        invoiceStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                        invoiceStatus === 'Invoiced' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                        invoiceStatus === 'Jason Approved' ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-bold' :
+                        invoiceStatus === 'Pending Invoicing' ? 'bg-amber-100 text-amber-800 border-amber-300 font-bold' :
+                        'bg-slate-50 text-slate-700 border-slate-300'
+                      }`}
                     >
                       <option value="Uninvoiced">Uninvoiced</option>
                       <option value="Pending Invoicing">Pending Invoicing</option>
+                      <option value="Jason Approved">
+                        {isJasonApproved(job) ? '✓ Jason Approved' : 'Jason Approved'}
+                      </option>
                       <option value="Invoiced">Invoiced</option>
                       <option value="Paid">Paid</option>
                     </select>

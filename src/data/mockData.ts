@@ -503,6 +503,10 @@ export const INITIAL_JOBS: Job[] = [
     target_completion_date: '2026-08-15',
     estimated_cost: 3400,
     hourly_rate: 85,
+    deposit_collected: true,
+    deposit_amount: 1500,
+    deposit_date: '2026-07-10',
+    deposit_notes: 'Initial 50% retainer paid via Stripe',
     invoice_status: 'Invoiced',
     invoice_number: 'INV-2026-001',
     phase_entry_date: new Date(Date.now() - 3600000 * 72).toISOString(), // 3 days in current phase
@@ -706,7 +710,12 @@ export const INITIAL_JOBS: Job[] = [
     target_completion_date: '2026-08-01',
     estimated_cost: 4200,
     hourly_rate: 90,
+    deposit_collected: true,
+    deposit_amount: 2000,
+    deposit_date: '2026-07-02',
+    deposit_notes: 'Check #8821 upfront deposit',
     invoice_status: 'Pending Invoicing',
+    jason_approved: false,
     invoice_number: 'INV-2026-002',
     phase_entry_date: new Date(Date.now() - 3600000 * 216).toISOString(), // 9 days in phase
     delegated_tasks: [
@@ -1029,7 +1038,10 @@ export const INITIAL_JOBS: Job[] = [
     target_completion_date: '2026-09-10',
     estimated_cost: 3100,
     hourly_rate: 85,
-    invoice_status: 'Pending Invoicing',
+    invoice_status: 'Jason Approved',
+    jason_approved: true,
+    jason_approved_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+    jason_approved_by: 'Jason',
     invoice_number: 'INV-2026-006',
     phase_entry_date: new Date(Date.now() - 3600000 * 24).toISOString(),
     delegated_tasks: [

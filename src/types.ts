@@ -223,6 +223,8 @@ export interface AppNotification {
   senderName?: string;
 }
 
+export type InvoiceStatus = 'Uninvoiced' | 'Pending Invoicing' | 'Jason Approved' | 'Invoiced' | 'Paid';
+
 export interface Job {
   id: string;
   job_number: string;
@@ -245,8 +247,15 @@ export interface Job {
   target_completion_date: string;
   estimated_cost: number;
   hourly_rate?: number; // e.g. $85/hr for drafting calculation
-  invoice_status?: 'Uninvoiced' | 'Pending Invoicing' | 'Invoiced' | 'Paid';
+  deposit_collected?: boolean; // Whether an upfront retainer/deposit was collected
+  deposit_amount?: number; // Dollar amount of deposit collected e.g. $1500
+  deposit_date?: string; // Date deposit was received e.g. "2026-08-20"
+  deposit_notes?: string; // Payment reference or notes (e.g. "Check #1042 / Stripe 50% retainer")
+  invoice_status?: InvoiceStatus;
   invoice_number?: string;
+  jason_approved?: boolean; // True when Jason has approved the item for invoicing
+  jason_approved_at?: string; // Timestamp when Jason approved
+  jason_approved_by?: string; // Staff member who approved as/for Jason
   is_archived?: boolean;
   archived_at?: string;
   archived_by?: string;
