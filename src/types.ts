@@ -16,12 +16,17 @@ export interface PinnedLocation {
 export interface JobComment {
   id: string;
   author: string;
+  authorId?: string;
   role: 'drafter' | 'customer' | 'system';
   text: string;
   timestamp: string;
   attachmentUrl?: string;
   attachmentName?: string;
   pinnedLocation?: PinnedLocation;
+  taggedStaff?: string[]; // Staff user names tagged e.g. ["Jason", "Drew", "Kyle"]
+  replyToCommentId?: string;
+  replyToAuthor?: string;
+  replyToText?: string;
 }
 
 export interface DeliverableFile {
@@ -216,11 +221,18 @@ export interface AppNotification {
   message: string;
   timestamp: string;
   read: boolean;
-  type: 'delegation' | 'status_change' | 'roadblock' | 'comment' | 'review_ready' | 'deliverable_uploaded';
+  type: 'delegation' | 'status_change' | 'roadblock' | 'comment' | 'review_ready' | 'deliverable_uploaded' | 'tag_mention' | 'tag_reply';
   jobId?: string;
   jobNumber?: string;
   taskId?: string;
   senderName?: string;
+  commentId?: string;
+  projectDetails?: {
+    customerName?: string;
+    style?: string;
+    phase?: string;
+    sqFt?: number;
+  };
 }
 
 export type InvoiceStatus = 'Uninvoiced' | 'Pending Invoicing' | 'Jason Approved' | 'Invoiced' | 'Paid';

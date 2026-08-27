@@ -44,6 +44,8 @@ export default function App() {
 
   // Modals state
   const [selectedJobForDetail, setSelectedJobForDetail] = useState<Job | null>(null);
+  const [jobDetailInitialTab, setJobDetailInitialTab] = useState<'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'>('overview');
+  const [jobDetailHighlightCommentId, setJobDetailHighlightCommentId] = useState<string | undefined>(undefined);
   const [emailModalData, setEmailModalData] = useState<EmailTemplate | null>(null);
   const [isNewJobModalOpen, setIsNewJobModalOpen] = useState(false);
   const [jobToDelegate, setJobToDelegate] = useState<Job | null>(null);
@@ -53,6 +55,12 @@ export default function App() {
   const [isStaffManagementOpen, setIsStaffManagementOpen] = useState(false);
   const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
   const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
+
+  const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
+    setSelectedJobForDetail(job);
+    setJobDetailInitialTab(options?.initialTab || 'overview');
+    setJobDetailHighlightCommentId(options?.highlightCommentId);
+  };
 
   // Live ticker for active timers
   useEffect(() => {
@@ -1343,7 +1351,7 @@ export default function App() {
         jobs={jobs}
         notifications={notifications}
         onMarkNotificationRead={handleMarkNotificationRead}
-        onSelectJob={(job) => setSelectedJobForDetail(job)}
+        onSelectJob={handleOpenJobDetail}
         onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
         onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
         onResetData={handleResetData}
@@ -1386,7 +1394,7 @@ export default function App() {
             currentStaff={currentStaff}
             onUpdateStatus={handleUpdateJobStatus}
             onToggleRoadblock={handleToggleRoadblock}
-            onSelectJob={(job) => setSelectedJobForDetail(job)}
+            onSelectJob={handleOpenJobDetail}
             onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
             onStartTimer={handleStartTimer}
             onStopTimer={handleStopTimer}
@@ -1406,7 +1414,7 @@ export default function App() {
             onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
             onUpdateStatus={handleUpdateJobStatus}
             onToggleRoadblock={handleToggleRoadblock}
-            onSelectJob={(job) => setSelectedJobForDetail(job)}
+            onSelectJob={handleOpenJobDetail}
             onUpdateJob={(updatedJob) => {
               const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
               updateJobsState(updatedList);
@@ -1432,7 +1440,10 @@ export default function App() {
       {selectedJobForDetail && (
         <JobDetailModal
           job={selectedJobForDetail}
-          onClose={() => setSelectedJobForDetail(null)}
+          onClose={() => {
+            setSelectedJobForDetail(null);
+            setJobDetailHighlightCommentId(undefined);
+          }}
           onUpdateJob={(updatedJob) => {
             const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
             updateJobsState(updatedList);
@@ -1449,6 +1460,9 @@ export default function App() {
           onApproveTaskReview={handleApproveTaskReview}
           onRequestTaskRevision={handleRequestTaskRevision}
           currentStaff={currentStaff}
+          staffList={staffList}
+          initialTab={jobDetailInitialTab}
+          initialHighlightCommentId={jobDetailHighlightCommentId}
           nowTimestamp={nowTimestamp}
         />
       )}

@@ -14,7 +14,7 @@ interface HeaderNavProps {
   jobs: Job[];
   notifications: AppNotification[];
   onMarkNotificationRead: (id: string) => void;
-  onSelectJob: (job: Job) => void;
+  onSelectJob: (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => void;
   onOpenNewJobModal: () => void;
   onOpenStaffManagement?: () => void;
   onResetData: () => void;
@@ -87,11 +87,14 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   const handleNotificationClick = (notif: AppNotification) => {
     onMarkNotificationRead(notif.id);
-    if (notif.jobId) {
-      const targetJob = jobs.find(j => j.id === notif.jobId || j.job_number === notif.jobNumber);
-      if (targetJob) {
-        onSelectJob(targetJob);
-      }
+    const targetJob = jobs.find(j => (notif.jobId && j.id === notif.jobId) || (notif.jobNumber && j.job_number === notif.jobNumber));
+    if (targetJob) {
+      const targetTab = (notif.type === 'tag_mention' || notif.type === 'tag_reply' || notif.type === 'comment')
+        ? 'comments'
+        : notif.type === 'deliverable_uploaded'
+        ? 'deliverables'
+        : 'overview';
+      onSelectJob(targetJob, { initialTab: targetTab, highlightCommentId: notif.commentId });
     }
     setShowNotifDropdown(false);
   };
@@ -368,7 +371,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                       </button>
                     </div>
 
-                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-800">
                       {userNotifications.length === 0 ? (
                         <div className="p-4 text-center text-xs text-slate-400 italic">
                           No active notifications for {currentStaff.name}.
@@ -378,23 +381,49 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                           <div
                             key={notif.id}
                             onClick={() => handleNotificationClick(notif)}
-                            className={`p-3 text-xs transition cursor-pointer hover:bg-slate-800 ${
-                              notif.read ? 'opacity-70 bg-slate-900' : 'bg-slate-850 border-l-2 border-blue-500'
+                            className={`p-3 text-xs transition cursor-pointer hover:bg-slate-800 space-y-1.5 ${
+                              notif.read ? 'opacity-75 bg-slate-900' : 'bg-slate-850 border-l-3 border-blue-500'
                             }`}
                           >
-                            <div className="flex items-start justify-between gap-1">
-                              <span className="font-bold text-white text-[11px] leading-tight">
-                                {notif.title}
-                              </span>
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {notif.type === 'tag_mention' ? (
+                                  <span className="bg-blue-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                    <AtSign className="w-2.5 h-2.5" /> MENTION
+                                  </span>
+                                ) : notif.type === 'tag_reply' ? (
+                                  <span className="bg-indigo-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                    ↩️ FOLLOW-UP
+                                  </span>
+                                ) : notif.type === 'delegated_task' ? (
+                                  <span className="bg-amber-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                                    ⚡ TASK
+                                  </span>
+                                ) : null}
+
+                                <span className="font-bold text-white text-[11px] leading-tight">
+                                  {notif.title}
+                                </span>
+                              </div>
                               {!notif.read && (
-                                <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1" />
+                                <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-0.5 animate-pulse" />
                               )}
                             </div>
-                            <p className="text-[11px] text-slate-300 mt-1 leading-snug">
+
+                            <p className="text-[11px] text-slate-300 leading-snug">
                               {notif.message}
                             </p>
-                            <div className="flex items-center justify-between mt-1.5 text-[10px] text-slate-400">
-                              <span>From: <strong>{notif.senderName || 'System'}</strong></span>
+
+                            {/* Project details pill preview if carried over */}
+                            {notif.projectDetails && (
+                              <div className="bg-slate-950/80 border border-slate-800 rounded-md p-1.5 text-[10px] text-slate-300 font-mono flex items-center justify-between">
+                                <span>📋 {notif.projectDetails.customerName} ({notif.projectDetails.phase})</span>
+                                <span className="text-blue-400 font-bold hover:underline">Open ↗</span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                              <span>From: <strong className="text-slate-300">{notif.senderName || 'System'}</strong></span>
                               <span>{new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
-import { isJobArchived } from '../data/mockData';
+import { isJobArchived, STAFF_USERS } from '../data/mockData';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 
@@ -24,6 +24,9 @@ interface JobDetailModalProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   currentStaff?: StaffUser;
+  staffList?: StaffUser[];
+  initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time';
+  initialHighlightCommentId?: string;
   nowTimestamp?: number;
 }
 
@@ -53,13 +56,43 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   onApproveTaskReview,
   onRequestTaskRevision,
   currentStaff,
+  staffList = [],
+  initialTab = 'overview',
+  initialHighlightCommentId,
   nowTimestamp,
 }) => {
   if (!job) return null;
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'>(initialTab);
   const [roadblockNoteInput, setRoadblockNoteInput] = useState(job.roadblock_note || '');
   const [newCommentInput, setNewCommentInput] = useState('');
+
+  // Tagging & Mentions State
+  const [selectedTaggedStaff, setSelectedTaggedStaff] = useState<StaffUser[]>([]);
+  const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [replyingToComment, setReplyingToComment] = useState<JobComment | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(initialHighlightCommentId || null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionCursorPos, setMentionCursorPos] = useState<number | null>(null);
+
+  const availableStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+  const commentInputRef = useRef<HTMLInputElement>(null);
+  const commentListEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to highlighted comment if opened from notification
+  useEffect(() => {
+    if (initialHighlightCommentId) {
+      setHighlightedCommentId(initialHighlightCommentId);
+      setActiveTab('comments');
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`comment-${initialHighlightCommentId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [initialHighlightCommentId]);
 
   // Resolve Roadblock Modal State
   const [showResolveRoadblockModal, setShowResolveRoadblockModal] = useState(false);
@@ -741,31 +774,203 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Add Comment with Attachment
+  // Helper to toggle tagged staff member
+  const handleToggleTagStaff = (staff: StaffUser) => {
+    const isAlreadyTagged = selectedTaggedStaff.some(s => s.id === staff.id);
+    if (isAlreadyTagged) {
+      setSelectedTaggedStaff(prev => prev.filter(s => s.id !== staff.id));
+    } else {
+      setSelectedTaggedStaff(prev => [...prev, staff]);
+      const shortName = staff.name.split(' ')[0];
+      if (!newCommentInput.includes(`@${shortName}`) && !newCommentInput.includes(`@${staff.name}`)) {
+        setNewCommentInput(prev => {
+          const trimmed = prev.trim();
+          return trimmed ? `${trimmed} @${shortName} ` : `@${shortName} `;
+        });
+      }
+    }
+  };
+
+  // Handle comment input changes with inline @mention autocomplete detection
+  const handleCommentInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart || value.length;
+    setNewCommentInput(value);
+
+    // Look for @word pattern before current cursor
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const match = textBeforeCursor.match(/@([a-zA-Z0-9_]*)$/);
+    if (match) {
+      setMentionQuery(match[1]);
+      setMentionCursorPos(cursorPos);
+    } else {
+      setMentionQuery(null);
+      setMentionCursorPos(null);
+    }
+  };
+
+  // Select mention suggestion from floating autocomplete popover
+  const handleSelectMentionSuggestion = (staff: StaffUser) => {
+    const cursorPos = mentionCursorPos || newCommentInput.length;
+    const textBeforeCursor = newCommentInput.slice(0, cursorPos);
+    const textAfterCursor = newCommentInput.slice(cursorPos);
+    const lastAtIdx = textBeforeCursor.lastIndexOf('@');
+
+    const shortName = staff.name.split(' ')[0];
+    if (lastAtIdx !== -1) {
+      const updated = textBeforeCursor.slice(0, lastAtIdx) + `@${shortName} ` + textAfterCursor;
+      setNewCommentInput(updated);
+    } else {
+      setNewCommentInput(prev => `${prev.trim()} @${shortName} `);
+    }
+
+    if (!selectedTaggedStaff.some(s => s.id === staff.id)) {
+      setSelectedTaggedStaff(prev => [...prev, staff]);
+    }
+    setMentionQuery(null);
+    setMentionCursorPos(null);
+    if (commentInputRef.current) {
+      commentInputRef.current.focus();
+    }
+  };
+
+  // Add Comment with Tagging & Notification Dispatch
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCommentInput.trim() && !commentAttachmentUrl) return;
 
-    const drafterName = job.assigned_drafter.split(',')[0] || 'Drafter Studio';
+    const senderName = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Drafter Studio';
+    const commentText = newCommentInput.trim() || (commentAttachmentName ? `Attached file: ${commentAttachmentName}` : 'Attached image');
+
+    // 1. Gather all tagged staff (from selectedTaggedStaff AND @Name regex in text)
+    const taggedStaffList: StaffUser[] = [...selectedTaggedStaff];
+    
+    // Parse @Name tokens from comment text
+    const words = commentText.split(/\s+/);
+    words.forEach(w => {
+      if (w.startsWith('@')) {
+        const cleanName = w.replace(/^@/, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        if (cleanName) {
+          const match = availableStaff.find(s => 
+            s.name.toLowerCase() === cleanName ||
+            s.name.toLowerCase().startsWith(cleanName) ||
+            s.name.split(' ')[0].toLowerCase() === cleanName
+          );
+          if (match && !taggedStaffList.some(s => s.id === match.id)) {
+            taggedStaffList.push(match);
+          }
+        }
+      }
+    });
+
+    // If replying to someone, also ensure the original author is included
+    let originalAuthorStaff: StaffUser | undefined = undefined;
+    if (replyingToComment && replyingToComment.author) {
+      originalAuthorStaff = availableStaff.find(s => 
+        s.name.toLowerCase().includes(replyingToComment.author.toLowerCase()) ||
+        replyingToComment.author.toLowerCase().includes(s.name.toLowerCase()) ||
+        s.name.split(' ')[0].toLowerCase() === replyingToComment.author.split(' ')[0].toLowerCase()
+      );
+      if (originalAuthorStaff && !taggedStaffList.some(s => s.id === originalAuthorStaff?.id)) {
+        taggedStaffList.push(originalAuthorStaff);
+      }
+    }
+
+    const uniqueTaggedNames = Array.from(new Set(taggedStaffList.map(s => s.name)));
+    const newCommentId = `c-${Date.now()}`;
+
     const newComment: JobComment = {
-      id: `c-${Date.now()}`,
-      author: drafterName,
+      id: newCommentId,
+      author: senderName,
+      authorId: currentStaff?.id,
       role: 'drafter' as const,
-      text: newCommentInput.trim() || (commentAttachmentName ? `Attached file: ${commentAttachmentName}` : 'Attached image'),
+      text: commentText,
       timestamp: new Date().toISOString(),
       attachmentUrl: commentAttachmentUrl || undefined,
-      attachmentName: commentAttachmentName || undefined
+      attachmentName: commentAttachmentName || undefined,
+      taggedStaff: uniqueTaggedNames.length > 0 ? uniqueTaggedNames : undefined,
+      replyToCommentId: replyingToComment?.id,
+      replyToAuthor: replyingToComment?.author,
+      replyToText: replyingToComment ? replyingToComment.text.slice(0, 120) : undefined
     };
+
+    const newAuditLogs = [...job.audit_logs];
+    if (uniqueTaggedNames.length > 0) {
+      newAuditLogs.unshift({
+        id: `a-tag-${Date.now()}`,
+        action: 'Note & Staff Tag Dispatched',
+        performedBy: senderName,
+        timestamp: new Date().toISOString(),
+        details: `${senderName} tagged ${uniqueTaggedNames.join(', ')} on note for #${job.job_number}: "${commentText.slice(0, 70)}"`
+      });
+    }
 
     const updated: Job = {
       ...job,
-      comments: [...job.comments, newComment]
+      comments: [...job.comments, newComment],
+      audit_logs: newAuditLogs
     };
 
     onUpdateJob(updated);
+
+    // 2. Dispatch rich AppNotifications to tagged individuals so they can click and open project
+    if (onDispatchNotifications && taggedStaffList.length > 0) {
+      const notifs: AppNotification[] = [];
+
+      taggedStaffList.forEach(staffUser => {
+        // Do not notify self
+        if (currentStaff && staffUser.id === currentStaff.id) return;
+
+        const isReply = replyingToComment && (
+          staffUser.name.toLowerCase().includes(replyingToComment.author.toLowerCase()) ||
+          replyingToComment.author.toLowerCase().includes(staffUser.name.toLowerCase()) ||
+          staffUser.name.split(' ')[0].toLowerCase() === replyingToComment.author.split(' ')[0].toLowerCase()
+        );
+
+        const notifTitle = isReply
+          ? `↩️ Follow-Up Reply on #${job.job_number} from ${senderName}`
+          : `📢 Tagged in Job #${job.job_number} by ${senderName}`;
+
+        const notifMessage = isReply
+          ? `Re: "${replyingToComment.text.slice(0, 60)}..." → "${commentText}"`
+          : `"${commentText}" • Project: ${job.customer_name} (${job.style || 'Custom Plan'}, ${job.current_status})`;
+
+        notifs.push({
+          id: `notif-tag-${Date.now()}-${staffUser.id}-${Math.random().toString(36).substr(2, 4)}`,
+          recipientName: staffUser.name,
+          recipientEmail: staffUser.email,
+          title: notifTitle,
+          message: notifMessage,
+          timestamp: new Date().toISOString(),
+          read: false,
+          type: isReply ? 'tag_reply' : 'tag_mention',
+          jobId: job.id,
+          jobNumber: job.job_number,
+          commentId: newCommentId,
+          senderName: senderName,
+          projectDetails: {
+            customerName: job.customer_name,
+            style: job.style,
+            phase: job.current_status,
+            sqFt: job.square_footage
+          }
+        });
+      });
+
+      if (notifs.length > 0) {
+        onDispatchNotifications(notifs);
+      }
+    }
+
+    // Reset input state
     setNewCommentInput('');
     setCommentAttachmentUrl('');
     setCommentAttachmentName('');
+    setSelectedTaggedStaff([]);
+    setReplyingToComment(null);
+    setMentionQuery(null);
+    setMentionCursorPos(null);
+    setShowTagDropdown(false);
   };
 
   // Upload CAD Sheet / Deliverable
@@ -1944,21 +2149,44 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                 {displayedJob.comments.map(c => {
                   const isRoadblockFlag = c.text.includes('ROADBLOCK FLAGGED') || c.text.includes('ROADBLOCK ACTIVATED') || c.text.startsWith('🚨');
                   const isRoadblockResolved = c.text.includes('ROADBLOCK RESOLVED') || c.text.startsWith('✅ ROADBLOCK');
+                  const isHighlighted = highlightedCommentId === c.id;
+
+                  // Render text with highlighted @mentions
+                  const renderTextWithMentions = (text: string) => {
+                    const parts = text.split(/(@[a-zA-Z0-9_]+)/g);
+                    return parts.map((part, idx) => {
+                      if (part.startsWith('@')) {
+                        return (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center font-bold text-blue-700 bg-blue-100/90 border border-blue-200 px-1.5 py-0.5 rounded text-[11px] font-mono mx-0.5"
+                          >
+                            {part}
+                          </span>
+                        );
+                      }
+                      return part;
+                    });
+                  };
 
                   return (
                     <div
                       key={c.id}
-                      className={`p-3.5 rounded-xl border text-xs shadow-2xs transition space-y-2 ${
-                        isRoadblockFlag
+                      id={`comment-${c.id}`}
+                      className={`p-3.5 rounded-xl border text-xs shadow-2xs transition space-y-2.5 ${
+                        isHighlighted
+                          ? 'ring-2 ring-blue-500 bg-blue-50/90 border-blue-300 text-blue-950 shadow-md'
+                          : isRoadblockFlag
                           ? 'bg-red-50/90 border-red-300 text-red-950'
                           : isRoadblockResolved
                           ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
                           : 'bg-slate-50 border-slate-200 text-slate-800'
                       }`}
                     >
-                      <div className="flex justify-between font-bold">
+                      {/* Header with author, badges, timestamp */}
+                      <div className="flex justify-between items-start font-bold gap-2">
                         <span className="flex items-center gap-1.5 flex-wrap">
-                          <span>{c.author}</span>
+                          <span className="text-slate-900 font-bold">{c.author}</span>
                           <span className={`font-mono text-[10px] px-1.5 py-0.2 rounded uppercase ${
                             isRoadblockFlag
                               ? 'bg-red-200 text-red-900 font-bold'
@@ -1968,6 +2196,13 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                           }`}>
                             {c.role}
                           </span>
+
+                          {isHighlighted && (
+                            <span className="bg-blue-600 text-white font-mono text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-2xs animate-pulse">
+                              <Bell className="w-3 h-3" />
+                              <span>TARGET NOTE FROM NOTIFICATION</span>
+                            </span>
+                          )}
 
                           {isRoadblockFlag && (
                             <span className="bg-red-600 text-white font-mono text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-2xs">
@@ -1989,14 +2224,48 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                             </span>
                           )}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">{new Date(c.timestamp).toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 font-mono shrink-0">{new Date(c.timestamp).toLocaleString()}</span>
                       </div>
 
-                      <p className={`whitespace-pre-wrap ${
-                        isRoadblockFlag ? 'font-medium text-red-900' : isRoadblockResolved ? 'font-medium text-emerald-900' : 'text-slate-700'
+                      {/* Replying quote box if this was a follow-up reply */}
+                      {c.replyToAuthor && (
+                        <div className="bg-slate-100/90 border-l-3 border-blue-500 p-2 rounded-r-lg text-[11px] text-slate-700 italic space-y-0.5">
+                          <div className="font-bold text-slate-900 not-italic flex items-center gap-1 text-[11px]">
+                            <CornerDownRight className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>In reply to <strong>{c.replyToAuthor}</strong>:</span>
+                          </div>
+                          {c.replyToText && (
+                            <p className="line-clamp-2 text-slate-600 pl-4 text-[11px]">
+                              "{c.replyToText}"
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Main Comment Text */}
+                      <p className={`whitespace-pre-wrap leading-relaxed ${
+                        isRoadblockFlag ? 'font-medium text-red-900' : isRoadblockResolved ? 'font-medium text-emerald-900' : 'text-slate-800'
                       }`}>
-                        {c.text}
+                        {renderTextWithMentions(c.text)}
                       </p>
+
+                      {/* Tagged Staff Pills */}
+                      {c.taggedStaff && c.taggedStaff.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                            <AtSign className="w-3 h-3 text-blue-600" />
+                            <span>Notified Staff:</span>
+                          </span>
+                          {c.taggedStaff.map((tagName, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="inline-flex items-center gap-0.5 bg-blue-100 text-blue-800 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 shadow-2xs"
+                            >
+                              <span>@{tagName}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Attached Image / File Preview inside comment */}
                       {c.attachmentUrl && (
@@ -2013,13 +2282,234 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                           )}
                         </div>
                       )}
+
+                      {/* Action Bar: Reply & Follow-up or Tag Author */}
+                      {selectedSnapshotId === 'live' && (
+                        <div className="flex items-center gap-2 pt-1 border-t border-slate-200/60 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingToComment(c);
+                              const authorStaff = availableStaff.find(s => 
+                                s.name.toLowerCase().includes(c.author.toLowerCase()) ||
+                                c.author.toLowerCase().includes(s.name.toLowerCase()) ||
+                                s.name.split(' ')[0].toLowerCase() === c.author.split(' ')[0].toLowerCase()
+                              );
+                              if (authorStaff && !selectedTaggedStaff.some(s => s.id === authorStaff.id)) {
+                                setSelectedTaggedStaff(prev => [...prev, authorStaff]);
+                              }
+                              if (commentInputRef.current) {
+                                commentInputRef.current.focus();
+                              }
+                            }}
+                            className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-blue-600 transition px-2 py-1 rounded-md hover:bg-blue-50 border border-transparent hover:border-blue-200"
+                            title="Reply and notify the original drafter/author"
+                          >
+                            <Reply className="w-3 h-3 text-blue-600" />
+                            <span>Reply & Follow-up</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const authorStaff = availableStaff.find(s => 
+                                s.name.toLowerCase().includes(c.author.toLowerCase()) ||
+                                c.author.toLowerCase().includes(s.name.toLowerCase()) ||
+                                s.name.split(' ')[0].toLowerCase() === c.author.split(' ')[0].toLowerCase()
+                              );
+                              if (authorStaff) {
+                                handleToggleTagStaff(authorStaff);
+                              } else {
+                                const clean = c.author.split(' ')[0];
+                                setNewCommentInput(prev => prev.trim() ? `${prev.trim()} @${clean} ` : `@${clean} `);
+                              }
+                              if (commentInputRef.current) {
+                                commentInputRef.current.focus();
+                              }
+                            }}
+                            className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-indigo-600 transition px-2 py-1 rounded-md hover:bg-indigo-50 border border-transparent hover:border-indigo-200"
+                            title={`Tag @${c.author.split(' ')[0]} in note`}
+                          >
+                            <AtSign className="w-3 h-3 text-indigo-600" />
+                            <span>Tag @{c.author.split(' ')[0]}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
 
               {selectedSnapshotId === 'live' && (
-                <form onSubmit={handleAddComment} className="space-y-2 pt-2 border-t border-slate-200">
+                <form onSubmit={handleAddComment} className="space-y-2.5 pt-3 border-t border-slate-200 relative">
+                  
+                  {/* Floating @Mention Autocomplete Dropdown Popover */}
+                  {mentionQuery !== null && (
+                    <div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 p-2 z-50 space-y-1">
+                      <div className="flex items-center justify-between px-2 py-1 border-b border-slate-800 text-[10px] text-slate-400 font-mono">
+                        <span className="flex items-center gap-1 font-bold text-blue-400">
+                          <AtSign className="w-3 h-3" /> Tag Team Member
+                        </span>
+                        <span>Filtering "@{mentionQuery}"</span>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-0.5">
+                        {availableStaff
+                          .filter(s => 
+                            !mentionQuery || 
+                            s.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+                            s.role.toLowerCase().includes(mentionQuery.toLowerCase())
+                          )
+                          .map(staff => (
+                            <button
+                              key={staff.id}
+                              type="button"
+                              onClick={() => handleSelectMentionSuggestion(staff)}
+                              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-blue-600 text-xs transition flex items-center justify-between group"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-slate-700 group-hover:bg-blue-500 text-[10px] flex items-center justify-center font-bold">
+                                  {staff.name.charAt(0)}
+                                </span>
+                                <span className="font-bold text-white group-hover:text-white">{staff.name}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 group-hover:text-blue-200 uppercase">
+                                {staff.role}
+                              </span>
+                            </button>
+                          ))}
+                        {availableStaff.filter(s => !mentionQuery || s.name.toLowerCase().includes(mentionQuery.toLowerCase())).length === 0 && (
+                          <div className="p-2 text-center text-xs text-slate-400 italic">No matching drafter or admin found.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Replying Banner */}
+                  {replyingToComment && (
+                    <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-2xs">
+                      <div className="flex items-center gap-2 truncate">
+                        <CornerDownRight className="w-4 h-4 text-blue-600 shrink-0" />
+                        <div className="truncate">
+                          <span className="font-bold text-blue-950">
+                            Replying & Following up with <strong>{replyingToComment.author}</strong>:
+                          </span>
+                          <span className="text-blue-700 ml-1.5 italic truncate">
+                            "{replyingToComment.text.slice(0, 60)}..."
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setReplyingToComment(null)}
+                        className="text-slate-400 hover:text-red-600 p-1 transition shrink-0"
+                        title="Cancel reply"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Active Tagged Staff Recipients Pill Bar */}
+                  {selectedTaggedStaff.length > 0 && (
+                    <div className="bg-slate-100 border border-slate-200 p-2 rounded-xl flex items-center gap-2 flex-wrap text-xs">
+                      <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                        <Bell className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Carrying details & notification to:</span>
+                      </span>
+                      {selectedTaggedStaff.map(staff => (
+                        <span
+                          key={staff.id}
+                          className="inline-flex items-center gap-1 bg-blue-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-full shadow-2xs"
+                        >
+                          <span>@{staff.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTaggedStaff(prev => prev.filter(s => s.id !== staff.id))}
+                            className="hover:text-red-200 transition p-0.5"
+                            title="Remove tag"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTaggedStaff([])}
+                        className="text-[10px] text-slate-500 hover:text-red-600 font-semibold underline ml-auto"
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Quick Tag Shortcuts Bar */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+                      <AtSign className="w-3 h-3 text-blue-500" /> Tag:
+                    </span>
+
+                    {/* Prominent Quick-Tag Buttons for Primary Leads (Jason, Drew, Kyle) + Drafters */}
+                    {availableStaff.slice(0, 5).map(staff => {
+                      const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
+                      return (
+                        <button
+                          key={staff.id}
+                          type="button"
+                          onClick={() => handleToggleTagStaff(staff)}
+                          className={`text-[11px] font-bold px-2 py-1 rounded-lg transition border flex items-center gap-1 shadow-2xs ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-700'
+                              : 'bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
+                          }`}
+                        >
+                          <span>@{staff.name.split(' ')[0]}</span>
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </button>
+                      );
+                    })}
+
+                    {/* Tag Team Member Dropdown for remaining staff */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowTagDropdown(!showTagDropdown)}
+                        className="text-[11px] font-bold px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200 flex items-center gap-1 shadow-2xs"
+                      >
+                        <span>+ More Staff...</span>
+                        <ChevronDown className="w-3 h-3 text-slate-500" />
+                      </button>
+
+                      {showTagDropdown && (
+                        <div className="absolute left-0 bottom-full mb-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200 p-1.5 z-40 space-y-0.5">
+                          <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                            Select Drafter / Lead to Tag
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-0.5">
+                            {availableStaff.map(staff => {
+                              const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
+                              return (
+                                <button
+                                  key={staff.id}
+                                  type="button"
+                                  onClick={() => {
+                                    handleToggleTagStaff(staff);
+                                    setShowTagDropdown(false);
+                                  }}
+                                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between ${
+                                    isSelected ? 'bg-blue-50 text-blue-900 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <span>{staff.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">{staff.role}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {commentAttachmentUrl && (
                     <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 truncate">
@@ -2051,15 +2541,21 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                     </label>
 
                     <input
+                      ref={commentInputRef}
+                      id="new-drafter-comment-input"
                       type="text"
                       value={newCommentInput}
-                      onChange={(e) => setNewCommentInput(e.target.value)}
-                      placeholder="Add drafter note, CAD explanation, or reply..."
-                      className="flex-1 border border-slate-300 bg-slate-50 rounded-lg p-2 text-xs"
+                      onChange={handleCommentInputChange}
+                      placeholder="Add note, CAD feedback, or type @ to tag Jason, Drew, Kyle, or another drafter..."
+                      className="flex-1 border border-slate-300 bg-slate-50 rounded-lg p-2.5 text-xs focus:bg-white focus:border-blue-500 focus:outline-hidden transition"
                     />
 
-                    <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition shrink-0">
-                      Send Note
+                    <button
+                      type="submit"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition shrink-0 flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{replyingToComment ? 'Send Reply' : 'Post Note'}</span>
                     </button>
                   </div>
                 </form>
