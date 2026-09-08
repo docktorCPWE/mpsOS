@@ -84,63 +84,6 @@ export const STAFF_USERS: StaffUser[] = [
     canManageRoadblocks: true
   },
   {
-    id: 'staff-sarah',
-    name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@myplanstore.com',
-    title: 'Senior Architect',
-    phone: '(555) 678-9012',
-    role: 'drafter',
-    department: 'Architecture',
-    hourlyRate: 90,
-    status: 'active',
-    joinedDate: '2022-08-01',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: true,
-    canManageRoadblocks: true
-  },
-  {
-    id: 'staff-alex',
-    name: 'Alex Rivers',
-    email: 'alex.rivers@myplanstore.com',
-    title: 'CAD Designer & 3D Specialist',
-    phone: '(555) 789-0123',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 75,
-    status: 'active',
-    joinedDate: '2023-01-10',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: false,
-    canManageRoadblocks: false
-  },
-  {
-    id: 'staff-elena',
-    name: 'Elena Rostova',
-    email: 'elena.rostova@myplanstore.com',
-    title: 'Structural Specialist',
-    phone: '(555) 890-1234',
-    role: 'drafter',
-    department: 'Engineering',
-    hourlyRate: 85,
-    status: 'active',
-    joinedDate: '2023-04-18',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: false,
-    canManageRoadblocks: false
-  },
-  {
     id: 'staff-james',
     name: 'James',
     email: 'james@myplanstore.com',
@@ -336,20 +279,20 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     recipientName: 'Ethan',
     recipientEmail: 'ethan@myplanstore.com',
     title: 'Truss Calculation Review Request',
-    message: 'Jason requested review of structural truss calculations on #MPS-2024-002 before sending client invoice.',
+    message: 'Jason requested review of structural truss calculations on #M26-195 before finalizing client package.',
     timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
     read: false,
     type: 'comment',
-    jobId: 'job-2',
-    jobNumber: 'MPS-2024-002',
+    jobId: 'job-1',
+    jobNumber: 'M26-195',
     senderName: 'Jason'
   },
   {
     id: 'notif-ethan-2',
     recipientName: 'Ethan',
     recipientEmail: 'ethan@myplanstore.com',
-    title: 'Operations Schedule: Farmhouse Intake',
-    message: 'Greg Hyatt flagged 5 modern farmhouse submissions for ops scheduling in current sprint.',
+    title: 'Operations Schedule: Plan Review',
+    message: 'Greg Hyatt flagged upcoming intake submissions for ops scheduling in current sprint.',
     timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
     read: false,
     type: 'comment',
@@ -359,59 +302,47 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     id: 'notif-kyle-1',
     recipientName: 'Kyle',
     recipientEmail: 'kyle@myplanstore.com',
-    title: 'Revision Completed: Garage Header Heights',
-    message: 'Sarah Jenkins completed garage ceiling clearance to 10\'-4" for Job #MPS-2024-001.',
+    title: 'Component Review: Foundation Detail',
+    message: 'James completed foundation & stem wall structural detail for Job #M26-195.',
     timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
     read: false,
     type: 'review_ready',
     jobId: 'job-1',
-    jobNumber: 'MPS-2024-001',
-    senderName: 'Sarah Jenkins'
+    jobNumber: 'M26-195',
+    senderName: 'James'
   },
   {
     id: 'notif-kyle-2',
     recipientName: 'Kyle',
     recipientEmail: 'kyle@myplanstore.com',
-    title: 'Setback Verified: #MPS-test',
-    message: 'Aaron verified 25ft front and 10ft side county setbacks on #MPS-test.',
+    title: 'Setback Verified: #M26-195',
+    message: 'Aaron verified 35ft rear and 10ft side setbacks for #M26-195.',
     timestamp: new Date(Date.now() - 3600000 * 1).toISOString(),
     read: false,
     type: 'comment',
-    jobNumber: 'MPS-test',
+    jobId: 'job-1',
+    jobNumber: 'M26-195',
     senderName: 'Aaron'
   },
   {
     id: 'notif-jason-1',
     recipientName: 'Jason',
     recipientEmail: 'jason@myplanstore.com',
-    title: 'Engineering Sign-Off: Permit Packet',
-    message: 'Structural engineering permit packet for #MPS-2024-003 is signed off and ready for review.',
+    title: 'Preliminary Layout Review Ready',
+    message: 'Kyle finished initial floor plan draft for #M26-195 (Testing Dummy).',
     timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
     read: false,
     type: 'comment',
-    jobId: 'job-3',
-    jobNumber: 'MPS-2024-003',
-    senderName: 'Engineering'
-  },
-  {
-    id: 'notif-jason-2',
-    recipientName: 'Jason',
-    recipientEmail: 'jason@myplanstore.com',
-    title: '3D Render Uploaded',
-    message: 'Alex Rivers uploaded 3D exterior perspective for #MPS-2024-002.',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    read: false,
-    type: 'deliverable_uploaded',
-    jobId: 'job-2',
-    jobNumber: 'MPS-2024-002',
-    senderName: 'Alex Rivers'
+    jobId: 'job-1',
+    jobNumber: 'M26-195',
+    senderName: 'Kyle'
   },
   {
     id: 'notif-1',
-    recipientName: 'Sarah Jenkins',
-    recipientEmail: 'sarah.jenkins@myplanstore.com',
+    recipientName: 'James',
+    recipientEmail: 'james@myplanstore.com',
     title: 'New Component Delegated: Foundation & Slab Detail',
-    message: 'Kyle delegated "Foundation & Slab Structural Detail" for Job #M26-195 with 2 attached files.',
+    message: 'Kyle delegated "Foundation & Stem Wall Structural Detail" for Job #M26-195 with 2 attached files.',
     timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
     read: false,
     type: 'delegation',
@@ -421,21 +352,8 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 'notif-2',
-    recipientName: 'Alex Rivers',
-    recipientEmail: 'alex.rivers@myplanstore.com',
-    title: 'New Component Delegated: 3D Exterior Elevation Render',
-    message: 'Jason delegated "3D Exterior Perspective & Siding Detailing" for Job #M26-198 with CAD dwg attachment.',
-    timestamp: new Date(Date.now() - 3600000 * 6).toISOString(),
-    read: false,
-    type: 'delegation',
-    jobId: 'job-2',
-    jobNumber: 'M26-198',
-    senderName: 'Jason'
-  },
-  {
-    id: 'notif-3',
-    recipientName: 'James',
-    recipientEmail: 'james@myplanstore.com',
+    recipientName: 'Aaron',
+    recipientEmail: 'aaron@myplanstore.com',
     title: 'New Component Delegated: Hidden Pantry Millwork CAD',
     message: 'Jason delegated "Hidden Pantry Millwork & Kitchen Island CAD Detail" for Job #M26-195 with concept sketches.',
     timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
@@ -446,23 +364,11 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     senderName: 'Jason'
   },
   {
-    id: 'notif-aaron-1',
-    recipientName: 'Aaron',
-    recipientEmail: 'aaron@myplanstore.com',
-    title: 'Setback Boundary Check Request',
-    message: 'Kyle requested setback verification and zoning review for #MPS-test.',
-    timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-    read: false,
-    type: 'comment',
-    jobNumber: 'MPS-test',
-    senderName: 'Kyle'
-  },
-  {
     id: 'notif-drew-1',
     recipientName: 'Drew Lupkey',
     recipientEmail: 'drew@myplanstore.com',
     title: 'Weekly Invoicing Audit Request',
-    message: 'Greg Hyatt requested weekly billing reconciliation for completed drafter packages.',
+    message: 'Greg Hyatt requested weekly billing reconciliation for active projects.',
     timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
     read: false,
     type: 'comment',
@@ -472,12 +378,13 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     id: 'notif-greg-1',
     recipientName: 'Greg Hyatt',
     recipientEmail: 'greg@myplanstore.com',
-    title: 'Engineering Sign-Off: #MPS-2024-003',
-    message: 'Jason completed engineering review and marked preliminary structural permit ready.',
+    title: 'Engineering Review: #M26-195',
+    message: 'Jason completed engineering review for Testing Dummy (#M26-195) and marked preliminary layout ready.',
     timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
     read: false,
     type: 'comment',
-    jobNumber: 'MPS-2024-003',
+    jobId: 'job-1',
+    jobNumber: 'M26-195',
     senderName: 'Jason'
   }
 ];
@@ -486,10 +393,10 @@ export const INITIAL_JOBS: Job[] = [
   {
     id: 'job-1',
     job_number: 'M26-195',
-    customer_name: 'Marcus & Elena Vance',
-    customer_email: 'marcus.vance@example.com',
+    customer_name: 'Testing Dummy',
+    customer_email: 'testing.dummy@example.com',
     customer_phone: '(555) 234-5678',
-    assigned_drafter: 'Sarah Jenkins, Senior Architect',
+    assigned_drafter: 'Kyle, Lead Project Manager & Senior Drafter',
     sq_ft: 2850,
     style: 'Modern Farmhouse',
     lot_details: 'Sloped 0.75 acre lot with north rear orientation, 35ft set back requirement.',
@@ -515,12 +422,12 @@ export const INITIAL_JOBS: Job[] = [
         id: 'del-1',
         jobId: 'job-1',
         jobNumber: 'M26-195',
-        customerName: 'Marcus & Elena Vance',
+        customerName: 'Testing Dummy',
         componentTitle: 'Foundation & Stem Wall Structural Detail',
         category: 'Foundation Plan',
         priority: 'High',
-        assignedTo: 'Sarah Jenkins',
-        assignedToEmail: 'sarah.jenkins@myplanstore.com',
+        assignedTo: 'James',
+        assignedToEmail: 'james@myplanstore.com',
         delegatedBy: 'Kyle',
         delegatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
         dueDate: '2026-08-18',
@@ -548,12 +455,12 @@ export const INITIAL_JOBS: Job[] = [
         id: 'del-2',
         jobId: 'job-1',
         jobNumber: 'M26-195',
-        customerName: 'Marcus & Elena Vance',
+        customerName: 'Testing Dummy',
         componentTitle: 'Hidden Pantry Millwork & Kitchen Island CAD Detail',
         category: 'Floor Plan',
         priority: 'Normal',
-        assignedTo: 'James',
-        assignedToEmail: 'james@myplanstore.com',
+        assignedTo: 'Aaron',
+        assignedToEmail: 'aaron@myplanstore.com',
         delegatedBy: 'Jason',
         delegatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
         dueDate: '2026-08-20',
@@ -577,12 +484,12 @@ export const INITIAL_JOBS: Job[] = [
         versionLabel: 'v1.0 - Customer Inquiry',
         timestamp: '2026-07-10T09:30:00Z',
         phase: 'Customer Inquiry',
-        createdByName: 'Sarah Jenkins',
+        createdByName: 'Kyle',
         note: 'Initial intake snapshot before layout drafting.',
         comments: [
           {
             id: 'c0',
-            author: 'Marcus Vance',
+            author: 'Testing Dummy',
             role: 'customer',
             text: 'Submitted request for 2,850 sq ft Modern Farmhouse floor plan.',
             timestamp: '2026-07-10T09:15:00Z'
@@ -594,12 +501,12 @@ export const INITIAL_JOBS: Job[] = [
         versionLabel: 'v1.1 - Preliminary Layout Pass',
         timestamp: new Date(Date.now() - 3600000 * 20).toISOString(),
         phase: 'Preliminary Layout',
-        createdByName: 'Sarah Jenkins',
+        createdByName: 'Kyle',
         note: 'First CAD pass with 10ft ceilings and open kitchen concept.',
         comments: [
           {
             id: 'c1',
-            author: 'Sarah Jenkins',
+            author: 'Kyle',
             role: 'drafter',
             text: 'Initial layout complete! Sent primary floorplan with open concept kitchen/dining and 10ft ceiling height across the main living area.',
             timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
@@ -610,7 +517,7 @@ export const INITIAL_JOBS: Job[] = [
     time_logs: [
       {
         id: 'tl-1',
-        drafterName: 'Sarah Jenkins',
+        drafterName: 'Kyle',
         startTime: new Date(Date.now() - 3600000 * 48).toISOString(),
         endTime: new Date(Date.now() - 3600000 * 45).toISOString(),
         durationSeconds: 10800, // 3 hours
@@ -619,7 +526,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 'tl-2',
-        drafterName: 'Sarah Jenkins',
+        drafterName: 'James',
         startTime: new Date(Date.now() - 3600000 * 24).toISOString(),
         endTime: new Date(Date.now() - 3600000 * 21.5).toISOString(),
         durationSeconds: 9000, // 2.5 hours
@@ -630,14 +537,14 @@ export const INITIAL_JOBS: Job[] = [
     comments: [
       {
         id: 'c1',
-        author: 'Sarah Jenkins',
+        author: 'Kyle',
         role: 'drafter',
         text: 'Initial layout complete! Sent primary floorplan with open concept kitchen/dining and 10ft ceiling height across the main living area.',
         timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
       },
       {
         id: 'c2',
-        author: 'Marcus Vance',
+        author: 'Testing Dummy',
         role: 'customer',
         text: 'We love the island layout! Could we check if the pantry can be converted to a hidden walk-in pantry behind cabinet doors?',
         timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
@@ -656,7 +563,7 @@ export const INITIAL_JOBS: Job[] = [
         fileUrl: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80',
         fileName: 'Main_Level_Floorplan_v1.1.png',
         changeNotes: 'Revised kitchen island footprint to 10ft length, added hidden walk-in pantry doorway concealed behind custom millwork cabinets.',
-        authorDrafter: 'Sarah Jenkins'
+        authorDrafter: 'Kyle'
       },
       {
         id: 'd2',
@@ -669,442 +576,643 @@ export const INITIAL_JOBS: Job[] = [
         fileUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
         fileName: 'Modern_Farmhouse_Exterior_3D_Concept.jpg',
         changeNotes: 'Initial 3D exterior perspective showcasing board-and-batten siding, dark bronze standing seam metal roof accents, and timber truss front porch.',
-        authorDrafter: 'Sarah Jenkins'
+        authorDrafter: 'James'
       }
     ],
     audit_logs: [
       {
         id: 'a1',
         action: 'Job Initialized',
-        performedBy: 'Sarah Jenkins',
+        performedBy: 'Kyle',
         timestamp: '2026-07-10T09:00:00Z',
-        details: 'Created job M26-195 for Marcus & Elena Vance (Modern Farmhouse 2,850 sq ft)'
+        details: 'Created job M26-195 for Testing Dummy (Modern Farmhouse 2,850 sq ft)'
       },
       {
         id: 'a2',
         action: 'Status Changed',
-        performedBy: 'Sarah Jenkins',
+        performedBy: 'Kyle',
         timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
         details: 'Advanced phase from Customer Inquiry to Preliminary Layout'
       }
     ]
   },
   {
-    id: 'job-2',
-    job_number: 'M26-198',
-    customer_name: 'David & Rachel Sterling',
-    customer_email: 'david.sterling@example.com',
-    customer_phone: '(555) 876-5432',
-    assigned_drafter: 'Alex Rivers, CAD Designer',
-    sq_ft: 3400,
-    style: 'Barndominium with RV Garage',
-    lot_details: '5.2 acre rural lot in Hill Country, no HOA restrictions, well & septic.',
-    current_status: 'Customer Review',
-    roadblock: true,
-    roadblock_note: 'Awaiting updated septic drain field location from County Surveyor before final foundation engineering.',
-    layout_reviews_count: 2,
-    max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 14).toISOString(),
-    next_step: 'Awaiting customer feedback on Review #2 regarding RV bay clearance and exterior board & batten finish.',
-    created_at: '2026-06-28T10:30:00Z',
-    target_completion_date: '2026-08-01',
-    estimated_cost: 4200,
-    hourly_rate: 90,
-    deposit_collected: true,
-    deposit_amount: 2000,
-    deposit_date: '2026-07-02',
-    deposit_notes: 'Check #8821 upfront deposit',
-    invoice_status: 'Pending Invoicing',
-    jason_approved: false,
-    invoice_number: 'INV-2026-002',
-    phase_entry_date: new Date(Date.now() - 3600000 * 216).toISOString(), // 9 days in phase
-    delegated_tasks: [
-      {
-        id: 'del-3',
-        jobId: 'job-2',
-        jobNumber: 'M26-198',
-        customerName: 'David & Rachel Sterling',
-        componentTitle: 'RV Bay Clearance & Steel Beam Framing Calculation',
-        category: 'Structural Details',
-        priority: 'High',
-        assignedTo: 'Alex Rivers',
-        assignedToEmail: 'alex.rivers@myplanstore.com',
-        delegatedBy: 'Kyle',
-        delegatedAt: new Date(Date.now() - 3600000 * 8).toISOString(),
-        dueDate: '2026-08-22',
-        neededWorkDescription: 'Calculate clear span for 14ft overhead garage door. Determine beam size (W-shape steel vs LVL) for 24ft open span.',
-        notes: 'Client wants minimum vertical clearance of 15ft 6in inside the shop area. Reference engineering handbook.',
-        status: 'In Progress',
-        attachments: [
-          {
-            id: 'att-201',
-            name: 'Barndominium_Framing_Section_Kyle.pdf',
-            size: '3.4 MB',
-            type: 'application/pdf',
-            url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
-          }
-        ]
-      }
-    ],
-    comments: [
-      {
-        id: 'c3',
-        author: 'Alex Rivers',
-        role: 'drafter',
-        text: 'Uploaded Revision 2 incorporating the enlarged 14ft tall RV garage door and guest suite above shop.',
-        timestamp: new Date(Date.now() - 3600000 * 16).toISOString()
-      },
-      {
-        id: 'c4',
-        author: 'Alex Rivers',
-        role: 'drafter',
-        text: '🚨 ROADBLOCK FLAGGED: Awaiting updated septic drain field location from County Surveyor before final foundation engineering.',
-        timestamp: new Date(Date.now() - 3600000 * 14).toISOString()
-      }
-    ],
-    deliverables: [
-      {
-        id: 'd3',
-        title: 'Floor Plan Rev 2 - Barndominium Shop & Living',
-        category: 'Floor Plan',
-        version: 'v2.0',
-        uploadedAt: new Date(Date.now() - 3600000 * 16).toISOString(),
-        fileSize: '5.6 MB',
-        previewType: 'canvas_floorplan'
-      },
-      {
-        id: 'd4',
-        title: 'Exterior Elevations - Board & Batten',
-        category: 'Exterior Elevations',
-        version: 'v1.2',
-        uploadedAt: new Date(Date.now() - 3600000 * 20).toISOString(),
-        fileSize: '3.9 MB',
-        previewType: 'canvas_elevation'
-      }
-    ],
-    audit_logs: [
-      {
-        id: 'a3',
-        action: 'Roadblock Flagged',
-        performedBy: 'Alex Rivers',
-        timestamp: new Date(Date.now() - 3600000 * 14).toISOString(),
-        details: 'Marked roadblock active due to septic survey hold.'
-      }
-    ]
-  },
-  {
-    id: 'job-3',
-    job_number: 'M26-201',
-    customer_name: 'Horizon Custom Builders (Ref: Oakridge)',
-    customer_email: 'projects@horizonbuilders.com',
-    customer_phone: '(555) 444-9911',
-    assigned_drafter: 'Elena Rostova, Structural Specialist',
-    sq_ft: 2200,
-    style: 'Craftsman Bungalow',
-    lot_details: 'Corner urban lot with strict 20ft front setback and garage side entry requirement.',
-    current_status: 'Exterior Elevations',
-    roadblock: false,
-    layout_reviews_count: 3,
-    max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 2).toISOString(),
-    next_step: 'Drafting roof pitch angles, stone wainscoting details, and porch column structural callouts.',
-    created_at: '2026-06-15T14:00:00Z',
-    target_completion_date: '2026-07-30',
-    estimated_cost: 2950,
-    hourly_rate: 85,
-    invoice_status: 'Invoiced',
-    invoice_number: 'INV-2026-003',
-    phase_entry_date: new Date(Date.now() - 3600000 * 96).toISOString(), // 4 days in phase
-    delegated_tasks: [
-      {
-        id: 'del-4',
-        jobId: 'job-3',
-        jobNumber: 'M26-201',
-        customerName: 'Horizon Custom Builders (Ref: Oakridge)',
-        componentTitle: 'Front Craftsman Porch Tapered Column & Stone Pier Detail',
-        category: 'Exterior Elevations',
-        priority: 'Normal',
-        assignedTo: 'Elena Rostova',
-        assignedToEmail: 'elena.rostova@myplanstore.com',
-        delegatedBy: 'Kyle',
-        delegatedAt: new Date(Date.now() - 3600000 * 16).toISOString(),
-        dueDate: '2026-08-25',
-        neededWorkDescription: 'Provide 1/2"=1\'-0" architectural detail of Craftsman square tapered columns resting on battered stone piers.',
-        notes: 'Include flashing details and Simpson Strong-Tie post base connection callout for building inspector.',
-        status: 'In Progress',
-        attachments: [
-          {
-            id: 'att-301',
-            name: 'Craftsman_Porch_Inspiration_Kyle.jpg',
-            size: '2.1 MB',
-            type: 'image/jpeg',
-            url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80'
-          }
-        ]
-      }
-    ],
-    comments: [
-      {
-        id: 'c5',
-        author: 'Elena Rostova',
-        role: 'drafter',
-        text: 'Layout reviews approved by Horizon team! Moving forward with exterior elevation sheets and timber truss callouts.',
-        timestamp: new Date(Date.now() - 3600000 * 24).toISOString()
-      }
-    ],
-    deliverables: [
-      {
-        id: 'd5',
-        title: 'Approved Main Floor Plan',
-        category: 'Floor Plan',
-        version: 'v3.0 (Final Approved)',
-        uploadedAt: new Date(Date.now() - 3600000 * 30).toISOString(),
-        fileSize: '4.8 MB',
-        previewType: 'canvas_floorplan'
-      },
-      {
-        id: 'd6',
-        title: 'Exterior Elevation Draft - Front & Side',
-        category: 'Exterior Elevations',
-        version: 'v1.0',
-        uploadedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-        fileSize: '6.1 MB',
-        previewType: 'canvas_elevation'
-      }
-    ],
-    audit_logs: [
-      {
-        id: 'a4',
-        action: 'Phase Advanced',
-        performedBy: 'Elena Rostova',
-        timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-        details: 'Moved to Exterior Elevations after layout sign-off.'
-      }
-    ]
-  },
-  {
-    id: 'job-4',
-    job_number: 'M26-204',
-    customer_name: 'Dr. Gregory & Cynthia Hayes',
-    customer_email: 'g.hayes@medcenter.org',
-    customer_phone: '(555) 901-2345',
-    assigned_drafter: 'Sarah Jenkins, Senior Architect',
-    sq_ft: 4100,
-    style: 'Modern Luxury Villa',
-    lot_details: 'Golf course waterfront lot with pool deck zoning requirements and glass cantilever structural loads.',
-    current_status: 'Construction Prints',
-    roadblock: false,
-    layout_reviews_count: 2,
-    max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 8).toISOString(),
-    next_step: 'Finalizing electrical plan, HVAC duct layout, and structural engineer wet stamp review.',
-    created_at: '2026-05-20T11:00:00Z',
-    target_completion_date: '2026-07-28',
-    estimated_cost: 5800,
-    hourly_rate: 110,
-    invoice_status: 'Paid',
-    invoice_number: 'INV-2026-004',
-    is_archived: true,
-    archived_at: '2026-06-25T14:30:00Z',
-    archived_by: 'Ethan',
-    phase_entry_date: new Date(Date.now() - 3600000 * 48).toISOString(), // 2 days in phase
-    delegated_tasks: [
-      {
-        id: 'del-5',
-        jobId: 'job-4',
-        jobNumber: 'M26-204',
-        customerName: 'Dr. Gregory & Cynthia Hayes',
-        componentTitle: 'Cantilevered Glass Wall Framing & Steel Lintel Detailing',
-        category: 'Structural Details',
-        priority: 'High',
-        assignedTo: 'Alex Rivers',
-        assignedToEmail: 'alex.rivers@myplanstore.com',
-        delegatedBy: 'Kyle',
-        delegatedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-        dueDate: '2026-08-20',
-        neededWorkDescription: 'Engineer 18ft rear cantilevered glass wall framing connection and steel column base anchorage.',
-        notes: 'Please double-check load calculations with local building code wind uplift specifications.',
-        status: 'Completed',
-        completedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-        completedBy: 'Alex Rivers',
-        completionNotes: 'Completed cantilever framing calculations and drafted Sheet S2.1 with Simpson Strong-Tie connections and W-beam moment connections. Uploaded DWG and PDF stamp package ready for your sign-off.',
-        attachments: [
-          {
-            id: 'att-501',
-            name: 'Cantilever_Glass_Wall_Detail_S2.1.pdf',
-            size: '4.2 MB',
-            type: 'application/pdf',
-            url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
-          },
-          {
-            id: 'att-502',
-            name: 'Deck_Steel_Anchorage_Revision.dwg',
-            size: '6.8 MB',
-            type: 'application/acad',
-            url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80'
-          }
-        ]
-      }
-    ],
-    comments: [
-      {
-        id: 'c6',
-        author: 'Sarah Jenkins',
-        role: 'drafter',
-        text: 'Structural engineer approved the 18ft rear glass wall lintels. Assembly sheets are being formatted for municipal building permit submission.',
-        timestamp: new Date(Date.now() - 3600000 * 8).toISOString()
-      }
-    ],
-    deliverables: [
-      {
-        id: 'd7',
-        title: 'Architectural Construction Set (Sheet A1-A8)',
-        category: 'PDF Specs',
-        version: 'v1.0 Ready for Permit',
-        uploadedAt: new Date(Date.now() - 3600000 * 10).toISOString(),
-        fileSize: '18.4 MB',
-        previewType: 'pdf_spec'
-      }
-    ],
-    audit_logs: [
-      {
-        id: 'a5',
-        action: 'Phase Advanced',
-        performedBy: 'Sarah Jenkins',
-        timestamp: new Date(Date.now() - 3600000 * 48).toISOString(),
-        details: 'Advanced to Construction Prints.'
-      }
-    ]
-  },
-  {
-    id: 'job-5',
-    job_number: 'M26-209',
-    customer_name: 'Samantha Thorne',
-    customer_email: 'sthorne.design@gmail.com',
-    customer_phone: '(555) 321-7654',
-    assigned_drafter: 'James, Architectural Drafter',
+    id: 'job-m26-214',
+    job_number: 'M26-214',
+    owner: 'JB',
+    project_name: 'Ceci McFee',
+    customer_name: 'Ceci McFee',
+    sq_ft_goal: '1800-1900',
     sq_ft: 1850,
-    style: 'Coastal Cottage',
-    lot_details: 'Elevated pilings on coastal flood plain zone V-12.',
+    style: 'Custom Residential',
+    lot_details: '203 Tom Miller Lane, Bismarck. Front orientation, standard setbacks.',
+    project_address: '203 Tom Miller Lane, Bismarck',
+    customer_email: 'ceci.mcfee@live.com',
+    customer_phone: '501-538-9862',
+    builder: 'Zach Ritter',
+    sheet_status: 'Customer Review',
+    status_note: '',
+    completed: false,
+    phase_name: 'Layout',
+    current_status: 'Customer Review',
+    roadblock: false,
+    layout_reviews_count: 1,
+    max_reviews_included: 3,
+    last_customer_contact: '2026-09-06T10:00:00.000Z',
+    next_step: 'Customer review of layout package in coordination with Zach Ritter',
+    created_at: '2026-08-10T08:03:02.000Z',
+    target_completion_date: '2026-09-18',
+    estimated_cost: 2250,
+    hourly_rate: 85,
+    deposit_collected: true,
+    deposit_amount: 1125,
+    deposit_date: '2026-08-10',
+    deposit_notes: '50% retainer paid on intake',
+    invoice_status: 'Pending Invoicing',
+    invoice_number: 'INV-2026-M26214',
+    total_time_entries: 7,
+    total_duration_minutes: 552,
+    total_duration_hours: 9.2,
+    assigned_drafter: 'Kyle',
+    project_manager: 'Jason',
+    time_logs: [
+      {
+        id: 't-214-1',
+        drafterName: 'Kyle',
+        startTime: '2026-08-11T09:00:00.000Z',
+        durationSeconds: 5400, // 90 min (1.50h)
+        taskDescription: 'Initial CAD Floor Plan Layout & Dimensioning',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.5,
+        billableAmount: 127.50
+      },
+      {
+        id: 't-214-2',
+        drafterName: 'Kyle',
+        startTime: '2026-08-14T10:30:00.000Z',
+        durationSeconds: 4500, // 75 min (1.25h)
+        taskDescription: 'Master Suite Flow & Kitchen Island Space Optimization',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.25,
+        billableAmount: 106.25
+      },
+      {
+        id: 't-214-3',
+        drafterName: 'James',
+        startTime: '2026-08-18T13:00:00.000Z',
+        durationSeconds: 3600, // 60 min (1.00h)
+        taskDescription: 'Roofline Geometry & Exterior Elevations Drafting',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-214-4',
+        drafterName: 'James',
+        startTime: '2026-08-22T09:30:00.000Z',
+        durationSeconds: 5400, // 90 min (1.50h)
+        taskDescription: 'Foundation & Footing Structural Coordination',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.5,
+        billableAmount: 127.50
+      },
+      {
+        id: 't-214-5',
+        drafterName: 'Aaron',
+        startTime: '2026-08-26T11:00:00.000Z',
+        durationSeconds: 3600, // 60 min (1.00h)
+        taskDescription: 'Electrical Schematics & Reflected Ceiling Layout',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-214-6',
+        drafterName: 'Kyle',
+        startTime: '2026-09-01T14:00:00.000Z',
+        durationSeconds: 5400, // 90 min (1.50h)
+        taskDescription: 'Customer Review Markup Adjustments & Window Schedule',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.5,
+        billableAmount: 127.50
+      },
+      {
+        id: 't-214-7',
+        drafterName: 'Kyle',
+        startTime: '2026-09-05T10:00:00.000Z',
+        durationSeconds: 5220, // 87 min (1.45h) -> 90+75+60+90+60+90+87 = 552 mins = 9.20 hrs
+        taskDescription: 'Layout Package Assembly & Review Sheet Export',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.45,
+        billableAmount: 123.25
+      }
+    ],
+    delegated_tasks: [],
+    deliverables: [
+      {
+        id: 'deliv-214-1',
+        title: 'Floor Plan Review Set (1,850 sq ft)',
+        category: 'Floor Plan',
+        version: 'v1.0',
+        uploadedAt: '2026-09-05T11:30:00.000Z',
+        fileSize: '3.8 MB',
+        previewType: 'canvas_floorplan',
+        authorDrafter: 'Kyle'
+      }
+    ],
+    comments: [
+      {
+        id: 'c-214-1',
+        author: 'Kyle',
+        role: 'drafter',
+        text: 'Layout package exported and sent to Ceci McFee and Zach Ritter for preliminary review.',
+        timestamp: '2026-09-05T12:00:00.000Z'
+      }
+    ],
+    audit_logs: [
+      {
+        id: 'a-214-1',
+        action: 'Job Initialized',
+        performedBy: 'Jason',
+        timestamp: '2026-08-10T08:03:02.000Z',
+        details: 'Intake created from sheet. Builder: Zach Ritter. Target: 1800-1900 sq ft.'
+      }
+    ]
+  },
+  {
+    id: 'job-m26-218',
+    job_number: 'M26-218',
+    owner: 'JB',
+    project_name: 'Peggy Thompson - Remodel',
+    customer_name: 'Peggy Thompson',
+    sq_ft_goal: '1800-2200',
+    sq_ft: 2000,
+    style: 'Remodel',
+    lot_details: '1820 N Tyler St, LR. Existing residential footprint remodel.',
+    project_address: '1820 N Tyler St, LR',
+    customer_email: 'brock@thompsondriving.com; peggytdrv@sbcglobal.net',
+    customer_phone: '501-626-9200; 501-350-7758',
+    builder: '',
+    sheet_status: 'Changes',
+    status_note: '',
+    completed: false,
+    phase_name: 'Prelim',
+    current_status: 'Revisions',
+    roadblock: false,
+    layout_reviews_count: 2,
+    max_reviews_included: 3,
+    last_customer_contact: '2026-09-07T11:30:00.000Z',
+    next_step: 'Implementing customer changes on living room and master bath remodel',
+    created_at: '2026-08-20T14:02:52.000Z',
+    target_completion_date: '2026-09-25',
+    estimated_cost: 2600,
+    hourly_rate: 85,
+    deposit_collected: true,
+    deposit_amount: 1200,
+    deposit_date: '2026-08-20',
+    deposit_notes: 'Initial retainer paid',
+    invoice_status: 'Uninvoiced',
+    invoice_number: 'INV-2026-M26218',
+    total_time_entries: 10,
+    total_duration_minutes: 593,
+    total_duration_hours: 9.88,
+    assigned_drafter: 'James',
+    project_manager: 'Jason',
+    time_logs: [
+      {
+        id: 't-218-1',
+        drafterName: 'James',
+        startTime: '2026-08-21T09:00:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'As-Built Existing Measurements & Wall Verification',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-2',
+        drafterName: 'James',
+        startTime: '2026-08-22T10:00:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Demolition Plan & Load-Bearing Wall Check',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-3',
+        drafterName: 'James',
+        startTime: '2026-08-25T13:00:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Proposed Remodel Main Living & Kitchen Concept',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-4',
+        drafterName: 'James',
+        startTime: '2026-08-27T11:00:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Master Bath Expansion & Plumbing Reroute Layout',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-5',
+        drafterName: 'Aaron',
+        startTime: '2026-08-29T14:00:00.000Z',
+        durationSeconds: 2700, // 45m
+        taskDescription: 'Electrical & Lighting Plan for Remodel Zones',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 0.75,
+        billableAmount: 63.75
+      },
+      {
+        id: 't-218-6',
+        drafterName: 'James',
+        startTime: '2026-09-01T09:30:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Structural Header & Beam Framing Specs',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-7',
+        drafterName: 'James',
+        startTime: '2026-09-02T13:30:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Window & Door Alterations Schedule',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-8',
+        drafterName: 'James',
+        startTime: '2026-09-03T10:00:00.000Z',
+        durationSeconds: 3600, // 60m
+        taskDescription: 'Elevation Changes for Rear Addition',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      },
+      {
+        id: 't-218-9',
+        drafterName: 'James',
+        startTime: '2026-09-04T15:00:00.000Z',
+        durationSeconds: 4080, // 68m (1.13h)
+        taskDescription: 'Client Changes & Kitchen Island Revision',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.13,
+        billableAmount: 96.33
+      },
+      {
+        id: 't-218-10',
+        drafterName: 'James',
+        startTime: '2026-09-06T11:00:00.000Z',
+        durationSeconds: 3600, // 60m -> Sum: 60*7 + 45 + 68 + 60 = 593 mins = 9.88 hrs
+        taskDescription: 'Prelim Set Assembly & Construction Note Callouts',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.0,
+        billableAmount: 85.00
+      }
+    ],
+    delegated_tasks: [],
+    deliverables: [
+      {
+        id: 'deliv-218-1',
+        title: 'Remodel Floor Plan & Demolition Schedule',
+        category: 'Floor Plan',
+        version: 'v1.1',
+        uploadedAt: '2026-09-04T16:00:00.000Z',
+        fileSize: '4.2 MB',
+        previewType: 'canvas_floorplan',
+        authorDrafter: 'James'
+      }
+    ],
+    comments: [
+      {
+        id: 'c-218-1',
+        author: 'James',
+        role: 'drafter',
+        text: 'Received customer notes regarding kitchen pantry expansion. Updating preliminary drawings now.',
+        timestamp: '2026-09-04T16:30:00.000Z'
+      }
+    ],
+    audit_logs: [
+      {
+        id: 'a-218-1',
+        action: 'Job Initialized',
+        performedBy: 'Jason',
+        timestamp: '2026-08-20T14:02:52.000Z',
+        details: 'Intake created from sheet. Goal: 1800-2200 sq ft remodel.'
+      }
+    ]
+  },
+  {
+    id: 'job-m26-236',
+    job_number: 'M26-236',
+    owner: 'JB',
+    project_name: 'Mary Cole',
+    customer_name: 'Mary Cole',
+    sq_ft_goal: 'remodel',
+    sq_ft: 0,
+    style: 'Remodel',
+    lot_details: '9 Covey Lane, Sherwood. Residential remodel assessment.',
+    project_address: '9 Covey Lane, Sherwood',
+    customer_email: 'mary.vadalma@gmail.com; jcfryar@outlook.com; chenin.doiron@gmail.com',
+    customer_phone: '559-359-8370',
+    builder: '',
+    sheet_status: 'No Status',
+    status_note: '',
+    completed: false,
+    phase_name: 'No Phase',
     current_status: 'Customer Inquiry',
     roadblock: false,
     layout_reviews_count: 0,
     max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 1).toISOString(),
-    next_step: 'Initial intake interview & collecting site boundary survey map.',
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    target_completion_date: '2026-08-30',
-    estimated_cost: 2600,
+    last_customer_contact: '2026-08-31T09:51:17.000Z',
+    next_step: 'Awaiting customer confirmation on remodel scope and measurements',
+    created_at: '2026-08-31T09:51:17.000Z',
+    target_completion_date: '2026-10-05',
+    estimated_cost: 1600,
     hourly_rate: 85,
+    deposit_collected: false,
+    deposit_amount: 0,
     invoice_status: 'Uninvoiced',
-    phase_entry_date: new Date(Date.now() - 3600000 * 2).toISOString(), // 2 hours in phase
-    comments: [
+    invoice_number: 'INV-2026-M26236',
+    total_time_entries: 4,
+    total_duration_minutes: 313,
+    total_duration_hours: 5.22,
+    assigned_drafter: 'Aaron',
+    project_manager: 'Jason',
+    time_logs: [
       {
-        id: 'c7',
-        author: 'Samantha Thorne',
-        role: 'customer',
-        text: 'Hi James! Just sent over the site plan from the surveyor with tidal boundary lines.',
-        timestamp: new Date(Date.now() - 3600000 * 1).toISOString()
+        id: 't-236-1',
+        drafterName: 'Aaron',
+        startTime: '2026-09-01T09:00:00.000Z',
+        durationSeconds: 4800, // 80 min
+        taskDescription: 'Remodel Intake & Site Photo Dimension Conversion',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.33,
+        billableAmount: 113.33
+      },
+      {
+        id: 't-236-2',
+        drafterName: 'Aaron',
+        startTime: '2026-09-02T10:30:00.000Z',
+        durationSeconds: 4800, // 80 min
+        taskDescription: 'Existing Footprint CAD Tracing & As-Built Walls',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.33,
+        billableAmount: 113.33
+      },
+      {
+        id: 't-236-3',
+        drafterName: 'Aaron',
+        startTime: '2026-09-03T13:00:00.000Z',
+        durationSeconds: 4800, // 80 min
+        taskDescription: 'Conceptual Kitchen & Living Room Reconfiguration',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.33,
+        billableAmount: 113.33
+      },
+      {
+        id: 't-236-4',
+        drafterName: 'Aaron',
+        startTime: '2026-09-04T15:00:00.000Z',
+        durationSeconds: 4380, // 73 min -> 80+80+80+73 = 313 mins = 5.22 hrs
+        taskDescription: 'Client Review Intake Notes & Wall Opening Callouts',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 1.22,
+        billableAmount: 103.42
       }
     ],
+    delegated_tasks: [],
     deliverables: [],
+    comments: [
+      {
+        id: 'c-236-1',
+        author: 'Aaron',
+        role: 'drafter',
+        text: 'Initial as-built dimensions converted into CAD. Ready for customer scope review.',
+        timestamp: '2026-09-04T16:00:00.000Z'
+      }
+    ],
     audit_logs: [
       {
-        id: 'a6',
-        action: 'Job Created',
-        performedBy: 'System Intake',
-        timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-        details: 'Customer inquiry created via website intake form.'
+        id: 'a-236-1',
+        action: 'Job Initialized',
+        performedBy: 'Jason',
+        timestamp: '2026-08-31T09:51:17.000Z',
+        details: 'Intake created from sheet. 9 Covey Lane, Sherwood.'
       }
     ]
   },
   {
-    id: 'job-6',
-    job_number: 'M26-212',
-    customer_name: 'Nathan & Chloe Miller',
-    customer_email: 'nathan.miller@example.com',
-    customer_phone: '(555) 789-0123',
-    assigned_drafter: 'Aaron, Architectural Drafter',
-    sq_ft: 2650,
-    style: 'Scandinavian Modern Timber',
-    lot_details: 'Wooded 1.2 acre lot with steep southern hillside exposure.',
+    id: 'job-m26-249',
+    job_number: 'M26-249',
+    owner: 'JB',
+    project_name: 'REVEST - 4617 Crestwood Dr',
+    customer_name: 'REVEST',
+    sq_ft_goal: '',
+    sq_ft: 0,
+    style: 'Custom Residential',
+    lot_details: '4617 Crestwood Dr, LR. Investor remodel / new build study.',
+    project_address: '4617 Crestwood Dr, LR',
+    customer_email: '',
+    customer_phone: '',
+    builder: '',
+    sheet_status: 'Changes',
+    status_note: '',
+    completed: false,
+    phase_name: 'Layout',
     current_status: 'Preliminary Layout',
     roadblock: false,
     layout_reviews_count: 1,
     max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 3).toISOString(),
-    next_step: 'Drafting open timber post & beam grid and cathedral ceiling glass wall.',
-    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-    target_completion_date: '2026-09-10',
-    estimated_cost: 3100,
+    last_customer_contact: '2026-09-04T14:00:00.000Z',
+    next_step: 'Drafting preliminary layout modifications for REVEST team',
+    created_at: '2026-09-02T15:02:03.000Z',
+    target_completion_date: '2026-09-28',
+    estimated_cost: 2100,
     hourly_rate: 85,
-    invoice_status: 'Jason Approved',
-    jason_approved: true,
-    jason_approved_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-    jason_approved_by: 'Jason',
-    invoice_number: 'INV-2026-006',
-    phase_entry_date: new Date(Date.now() - 3600000 * 24).toISOString(),
-    delegated_tasks: [
-      {
-        id: 'del-aaron-1',
-        jobId: 'job-6',
-        jobNumber: 'M26-212',
-        customerName: 'Nathan & Chloe Miller',
-        componentTitle: 'Cathedral Ceiling Timber Beam Detail',
-        category: 'Structural Details',
-        priority: 'High',
-        assignedTo: 'Aaron',
-        assignedToEmail: 'aaron@myplanstore.com',
-        delegatedBy: 'Kyle',
-        delegatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-        dueDate: '2026-08-25',
-        neededWorkDescription: 'Structural connection detail for exposed Douglas Fir glulam ridge beam.',
-        notes: 'Check slope calculations for 8:12 cathedral pitch.',
-        status: 'In Progress',
-        attachments: []
-      }
-    ],
+    deposit_collected: false,
+    deposit_amount: 0,
+    invoice_status: 'Uninvoiced',
+    invoice_number: 'INV-2026-M26249',
+    total_time_entries: 2,
+    total_duration_minutes: 313,
+    total_duration_hours: 5.22,
+    assigned_drafter: 'Kyle',
+    project_manager: 'Jason',
     time_logs: [
       {
-        id: 'tl-aaron-1',
-        drafterName: 'Aaron',
-        startTime: new Date(Date.now() - 3600000 * 6).toISOString(),
-        endTime: new Date(Date.now() - 3600000 * 3.5).toISOString(),
-        durationSeconds: 9000,
-        taskDescription: 'Preliminary timber grid & master layout drafting',
-        hourlyRate: 85
+        id: 't-249-1',
+        drafterName: 'Kyle',
+        startTime: '2026-09-03T09:00:00.000Z',
+        durationSeconds: 9600, // 160 min (2.67h)
+        taskDescription: 'Initial Architectural CAD Layout & Spatial Planning',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 2.67,
+        billableAmount: 226.67
+      },
+      {
+        id: 't-249-2',
+        drafterName: 'Kyle',
+        startTime: '2026-09-04T13:00:00.000Z',
+        durationSeconds: 9180, // 153 min (2.55h) -> 160+153 = 313 mins = 5.22 hrs
+        taskDescription: 'Preliminary Floor Plan Adjustments & Changes',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 2.55,
+        billableAmount: 216.75
+      }
+    ],
+    delegated_tasks: [],
+    deliverables: [
+      {
+        id: 'deliv-249-1',
+        title: 'Crestwood Dr Preliminary Layout Concept',
+        category: 'Floor Plan',
+        version: 'v1.0',
+        uploadedAt: '2026-09-04T16:00:00.000Z',
+        fileSize: '3.1 MB',
+        previewType: 'canvas_floorplan',
+        authorDrafter: 'Kyle'
+      }
+    ],
+    comments: [],
+    audit_logs: [
+      {
+        id: 'a-249-1',
+        action: 'Job Initialized',
+        performedBy: 'Jason',
+        timestamp: '2026-09-02T15:02:03.000Z',
+        details: 'Intake created from sheet. REVEST - 4617 Crestwood Dr.'
+      }
+    ]
+  },
+  {
+    id: 'job-m26-252',
+    job_number: 'M26-252',
+    owner: 'JB',
+    project_name: 'CCI - 34 Pleasant Cove',
+    customer_name: 'CCI - AJ & Gwen',
+    sq_ft_goal: '1800',
+    sq_ft: 1800,
+    style: 'Custom Residential',
+    lot_details: '34 Pleasant Cove. Builder lot package.',
+    project_address: '34 Pleasant Cove',
+    customer_email: '',
+    customer_phone: '',
+    builder: 'CCI',
+    sheet_status: 'Changes',
+    status_note: '',
+    completed: false,
+    phase_name: 'Final Review',
+    current_status: 'Construction Prints',
+    roadblock: false,
+    layout_reviews_count: 2,
+    max_reviews_included: 3,
+    last_customer_contact: '2026-09-06T15:00:00.000Z',
+    next_step: 'Final QA review on construction prints for builder CCI',
+    created_at: '2026-09-04T12:19:45.000Z',
+    target_completion_date: '2026-09-16',
+    estimated_cost: 2000,
+    hourly_rate: 85,
+    deposit_collected: true,
+    deposit_amount: 1000,
+    deposit_date: '2026-09-04',
+    deposit_notes: 'Builder account deposit',
+    invoice_status: 'Pending Invoicing',
+    invoice_number: 'INV-2026-M26252',
+    total_time_entries: 1,
+    total_duration_minutes: 20,
+    total_duration_hours: 0.33,
+    assigned_drafter: 'James',
+    project_manager: 'Jason',
+    time_logs: [
+      {
+        id: 't-252-1',
+        drafterName: 'James',
+        startTime: '2026-09-05T14:00:00.000Z',
+        durationSeconds: 1200, // 20 min (0.33h)
+        taskDescription: 'Final Review Changes & Construction Print QA Check',
+        billingCategory: 'Standard Offline CAD Drafting',
+        hourlyRate: 85,
+        billableHours: 0.33,
+        billableAmount: 28.33
+      }
+    ],
+    delegated_tasks: [],
+    deliverables: [
+      {
+        id: 'deliv-252-1',
+        title: 'Full Construction Print Set (1,800 sq ft)',
+        category: 'Construction Prints' as any,
+        version: 'v2.0',
+        uploadedAt: '2026-09-05T15:00:00.000Z',
+        fileSize: '8.4 MB',
+        previewType: 'pdf_spec',
+        authorDrafter: 'James'
       }
     ],
     comments: [
       {
-        id: 'c8',
-        author: 'Aaron',
+        id: 'c-252-1',
+        author: 'James',
         role: 'drafter',
-        text: 'Initial post and beam layout draft completed. Preparing preliminary elevation sketches.',
-        timestamp: new Date(Date.now() - 3600000 * 3).toISOString()
-      }
-    ],
-    deliverables: [
-      {
-        id: 'd8',
-        title: 'Timber Layout Concept Draft',
-        category: 'Floor Plan',
-        version: 'v1.0',
-        uploadedAt: new Date(Date.now() - 3600000 * 3.5).toISOString(),
-        fileSize: '3.4 MB',
-        previewType: 'canvas_floorplan'
+        text: 'Applied final review edits requested by CCI (AJ & Gwen). Ready for final invoicing and print delivery.',
+        timestamp: '2026-09-05T15:15:00.000Z'
       }
     ],
     audit_logs: [
       {
-        id: 'a7',
-        action: 'Layout Started',
-        performedBy: 'Aaron',
-        timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-        details: 'Aaron commenced preliminary timber layout.'
+        id: 'a-252-1',
+        action: 'Job Initialized',
+        performedBy: 'Jason',
+        timestamp: '2026-09-04T12:19:45.000Z',
+        details: 'Intake created from sheet. Builder: CCI (AJ & Gwen).'
       }
     ]
   }
+];
+
+export const RESERVED_JOB_NUMBERS: string[] = [
+  'M26-254', 'M26-255', 'M26-256', 'M26-257', 'M26-258', 'M26-259',
+  'M26-260', 'M26-261', 'M26-262', 'M26-263', 'M26-264', 'M26-265',
+  'M26-266', 'M26-267', 'M26-268', 'M26-269', 'M26-270', 'M26-271',
+  'M26-272', 'M26-273', 'M26-274', 'M26-275', 'M26-276', 'M26-277',
+  'M26-278', 'M26-279', 'M26-280', 'M26-281', 'M26-282', 'M26-283',
+  'M26-284', 'M26-285', 'M26-286', 'M26-287', 'M26-288', 'M26-289',
+  'M26-290', 'M26-291', 'M26-292', 'M26-293', 'M26-294', 'M26-295',
+  'M26-296', 'M26-297', 'M26-298', 'M26-299', 'M26-300'
 ];
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
@@ -1114,10 +1222,10 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-jason',
     senderName: 'Jason',
     senderRole: 'Project Manager & Operations',
-    text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #MPS-2024-002 before we send the customer invoice?',
+    text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #M26-195 before we send the customer invoice?',
     timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
     mentions: ['Ethan'],
-    referencedJobNumbers: ['MPS-2024-002'],
+    referencedJobNumbers: ['M26-195'],
     readByStaffIds: ['staff-jason'],
     channelId: 'general'
   },
@@ -1126,15 +1234,15 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-ethan',
     senderName: 'Ethan',
     senderRole: 'Operations & Project Manager',
-    text: 'Checked #MPS-2024-002. Truss layouts and engineering stamps look solid. Permitting packet is good to go for customer invoicing!',
+    text: 'Checked #M26-195. Truss layouts and engineering stamps look solid. Permitting packet is good to go for customer invoicing!',
     timestamp: new Date(Date.now() - 3600000 * 1.8).toISOString(),
     mentions: ['Jason'],
-    referencedJobNumbers: ['MPS-2024-002'],
+    referencedJobNumbers: ['M26-195'],
     replyToId: 'msg-ethan-1',
     replyToMessage: {
       id: 'msg-ethan-1',
       senderName: 'Jason',
-      text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #MPS-2024-002 before we send the customer invoice?'
+      text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #M26-195 before we send the customer invoice?'
     },
     readByStaffIds: ['staff-ethan', 'staff-jason'],
     channelId: 'general'
@@ -1144,7 +1252,7 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-greg',
     senderName: 'Greg Hyatt',
     senderRole: 'Owner & Founder',
-    text: '@Ethan please check the operations schedule for the upcoming 5 modern farmhouse submissions.',
+    text: '@Ethan please check the operations schedule for the upcoming plan submissions.',
     timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
     mentions: ['Ethan'],
     readByStaffIds: ['staff-greg'],
@@ -1155,48 +1263,48 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-ethan',
     senderName: 'Ethan',
     senderRole: 'Operations & Project Manager',
-    text: '@Greg Hyatt scheduled Aaron and Sarah on the primary intake queues. We are on track for this sprint.',
+    text: '@Greg Hyatt scheduled Aaron and James on the primary drafting queues. We are on track for this sprint.',
     timestamp: new Date(Date.now() - 3600000 * 4.2).toISOString(),
     mentions: ['Greg Hyatt'],
     replyToId: 'msg-ethan-3',
     replyToMessage: {
       id: 'msg-ethan-3',
       senderName: 'Greg Hyatt',
-      text: '@Ethan please check the operations schedule for the upcoming 5 modern farmhouse submissions.'
+      text: '@Ethan please check the operations schedule for the upcoming plan submissions.'
     },
     readByStaffIds: ['staff-ethan', 'staff-greg'],
     channelId: 'general'
   },
 
-  // Kyle & Sarah Jenkins
+  // Kyle & James
   {
     id: 'msg-1',
     senderId: 'staff-kyle',
     senderName: 'Kyle',
     senderRole: 'Lead Project Manager & Senior Drafter',
-    text: 'Hey @Sarah Jenkins, can you double check the garage header heights on #MPS-2024-001? Customer asked if we can raise ceiling clearance to 10ft.',
+    text: 'Hey @James, can you double check the garage header heights on #M26-195? Customer asked if we can raise ceiling clearance to 10ft.',
     timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    mentions: ['Sarah Jenkins'],
-    referencedJobNumbers: ['MPS-2024-001'],
-    readByStaffIds: ['staff-kyle', 'staff-sarah', 'staff-jason'],
+    mentions: ['James'],
+    referencedJobNumbers: ['M26-195'],
+    readByStaffIds: ['staff-kyle', 'staff-james', 'staff-jason'],
     channelId: 'general'
   },
   {
     id: 'msg-2',
-    senderId: 'staff-sarah',
-    senderName: 'Sarah Jenkins',
-    senderRole: 'Senior Architect',
-    text: 'Checked #MPS-2024-001, updated the header spans and raised clearance to 10\'-4" clearance! Deliverables are uploaded for review.',
+    senderId: 'staff-james',
+    senderName: 'James',
+    senderRole: 'Architectural Drafter',
+    text: 'Checked #M26-195, updated the header spans and raised clearance to 10\'-4" clearance! Deliverables are uploaded for review.',
     timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
     mentions: ['Kyle'],
-    referencedJobNumbers: ['MPS-2024-001'],
+    referencedJobNumbers: ['M26-195'],
     replyToId: 'msg-1',
     replyToMessage: {
       id: 'msg-1',
       senderName: 'Kyle',
-      text: 'Hey @Sarah Jenkins, can you double check the garage header heights on #MPS-2024-001?...'
+      text: 'Hey @James, can you double check the garage header heights on #M26-195? Customer asked if we can raise ceiling clearance to 10ft.'
     },
-    readByStaffIds: ['staff-sarah', 'staff-kyle'],
+    readByStaffIds: ['staff-james', 'staff-kyle'],
     channelId: 'general'
   },
 
@@ -1206,10 +1314,10 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-jason',
     senderName: 'Jason',
     senderRole: 'Project Manager & Operations',
-    text: '@Greg Hyatt the preliminary structural permit packet for #MPS-2024-003 is signed off by engineering. Ready for customer review stage.',
+    text: '@Greg Hyatt the preliminary structural permit packet for #M26-195 is signed off by engineering. Ready for customer review stage.',
     timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
     mentions: ['Greg Hyatt'],
-    referencedJobNumbers: ['MPS-2024-003'],
+    referencedJobNumbers: ['M26-195'],
     readByStaffIds: ['staff-jason', 'staff-kyle'],
     channelId: 'general'
   },
@@ -1221,7 +1329,7 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     text: '@Jason verified and approved for customer review delivery.',
     timestamp: new Date(Date.now() - 3600000 * 1.6).toISOString(),
     mentions: ['Jason'],
-    referencedJobNumbers: ['MPS-2024-003'],
+    referencedJobNumbers: ['M26-195'],
     replyToId: 'msg-3',
     readByStaffIds: ['staff-greg', 'staff-jason'],
     channelId: 'general'
@@ -1233,10 +1341,10 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-kyle',
     senderName: 'Kyle',
     senderRole: 'Lead Project Manager & Senior Drafter',
-    text: 'Hey @Aaron, please check the setback boundary on #MPS-test when you have a moment.',
+    text: 'Hey @Aaron, please check the setback boundary on #M26-195 when you have a moment.',
     timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
     mentions: ['Aaron'],
-    referencedJobNumbers: ['MPS-test'],
+    referencedJobNumbers: ['M26-195'],
     readByStaffIds: ['staff-kyle', 'staff-aaron'],
     channelId: 'general'
   },
@@ -1245,44 +1353,17 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     senderId: 'staff-aaron',
     senderName: 'Aaron',
     senderRole: 'Architectural Drafter',
-    text: 'Took a look at #MPS-test, 25ft front setback and 10ft side setbacks are all verified with local county code.',
+    text: 'Took a look at #M26-195, 35ft rear setback and 10ft side setbacks are all verified with local county code.',
     timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(),
     mentions: ['Kyle'],
-    referencedJobNumbers: ['MPS-test'],
+    referencedJobNumbers: ['M26-195'],
     replyToId: 'msg-4',
     replyToMessage: {
       id: 'msg-4',
       senderName: 'Kyle',
-      text: 'Hey @Aaron, please check the setback boundary on #MPS-test when you have a moment.'
+      text: 'Hey @Aaron, please check the setback boundary on #M26-195 when you have a moment.'
     },
     readByStaffIds: ['staff-aaron', 'staff-kyle'],
-    channelId: 'general'
-  },
-
-  // Alex Rivers & Jason
-  {
-    id: 'msg-al-1',
-    senderId: 'staff-jason',
-    senderName: 'Jason',
-    senderRole: 'Project Manager & Operations',
-    text: 'Hey @Alex Rivers, can you upload the 3D exterior rendering for #MPS-2024-002 when ready?',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    mentions: ['Alex Rivers'],
-    referencedJobNumbers: ['MPS-2024-002'],
-    readByStaffIds: ['staff-jason', 'staff-alex'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-al-2',
-    senderId: 'staff-alex',
-    senderName: 'Alex Rivers',
-    senderRole: 'CAD Designer',
-    text: 'Rendering v2 is uploaded in deliverables for #MPS-2024-002! Let me know if the trim colors need tweaking.',
-    timestamp: new Date(Date.now() - 3600000 * 3.2).toISOString(),
-    mentions: ['Jason'],
-    referencedJobNumbers: ['MPS-2024-002'],
-    replyToId: 'msg-al-1',
-    readByStaffIds: ['staff-alex', 'staff-jason'],
     channelId: 'general'
   },
 
@@ -1313,33 +1394,6 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     channelId: 'general'
   },
 
-  // Elena Rostova & Kyle
-  {
-    id: 'msg-el-1',
-    senderId: 'staff-kyle',
-    senderName: 'Kyle',
-    senderRole: 'Lead Project Manager & Senior Drafter',
-    text: 'Hey @Elena Rostova, can you review the shear wall placement and anchor spacing on #MPS-2024-004?',
-    timestamp: new Date(Date.now() - 3600000 * 3.5).toISOString(),
-    mentions: ['Elena Rostova'],
-    referencedJobNumbers: ['MPS-2024-004'],
-    readByStaffIds: ['staff-kyle', 'staff-elena'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-el-2',
-    senderId: 'staff-elena',
-    senderName: 'Elena Rostova',
-    senderRole: 'Structural Specialist',
-    text: '@Kyle shear wall calcs and anchor bolt spacing updated on sheet S-101 for #MPS-2024-004.',
-    timestamp: new Date(Date.now() - 3600000 * 2.8).toISOString(),
-    mentions: ['Kyle'],
-    referencedJobNumbers: ['MPS-2024-004'],
-    replyToId: 'msg-el-1',
-    readByStaffIds: ['staff-elena', 'staff-kyle'],
-    channelId: 'general'
-  },
-
   // Drew Lupkey & Greg Hyatt
   {
     id: 'msg-dr-1',
@@ -1366,10 +1420,10 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   }
 ];
 
-export const STORAGE_KEY = 'my_plan_store_os_jobs_v10';
-export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v10';
-export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v10';
-export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v10';
+export const STORAGE_KEY = 'my_plan_store_os_jobs_v13';
+export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v13';
+export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v13';
+export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v13';
 
 export function getStoredStaff(): StaffUser[] {
   try {
@@ -1468,159 +1522,9 @@ export function saveStoredChatMessages(messages: ChatMessage[]) {
   }
 }
 
-export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v10';
+export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v12';
 
 export const INITIAL_TIME_CARDS: TimeCardShift[] = [
-  // Sarah Jenkins (Mon, Tue, Wed)
-  {
-    id: 'shift-sarah-mon',
-    staffId: 'staff-sarah',
-    staffName: 'Sarah Jenkins',
-    date: '2026-08-24',
-    clockInTime: '2026-08-24T08:02:15.000Z',
-    clockOutTime: '2026-08-24T16:35:40.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-sarah-mon-1',
-        startTime: '2026-08-24T12:00:00.000Z',
-        endTime: '2026-08-24T12:35:00.000Z',
-        durationSeconds: 2100
-      }
-    ],
-    totalWorkSeconds: 28705, // ~7.97 hrs
-    totalBreakSeconds: 2100,
-    notes: 'Floor plan modeling and kitchen island detailing'
-  },
-  {
-    id: 'shift-sarah-tue',
-    staffId: 'staff-sarah',
-    staffName: 'Sarah Jenkins',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T07:58:00.000Z',
-    clockOutTime: '2026-08-25T16:45:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-sarah-tue-1',
-        startTime: '2026-08-25T12:15:00.000Z',
-        endTime: '2026-08-25T12:45:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 29820, // ~8.28 hrs
-    totalBreakSeconds: 1800,
-    notes: 'Structural grid alignment for Craftsman job'
-  },
-  {
-    id: 'shift-sarah-wed',
-    staffId: 'staff-sarah',
-    staffName: 'Sarah Jenkins',
-    date: '2026-08-26',
-    clockInTime: '2026-08-26T08:00:00.000Z',
-    status: 'clocked_in',
-    breaks: [],
-    totalWorkSeconds: 0,
-    totalBreakSeconds: 0,
-    notes: 'Active shift'
-  },
-
-  // Alex Rivers (Mon, Tue, Wed)
-  {
-    id: 'shift-alex-mon',
-    staffId: 'staff-alex',
-    staffName: 'Alex Rivers',
-    date: '2026-08-24',
-    clockInTime: '2026-08-24T08:30:00.000Z',
-    clockOutTime: '2026-08-24T17:00:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-alex-mon-1',
-        startTime: '2026-08-24T12:30:00.000Z',
-        endTime: '2026-08-24T13:00:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800, // 8.0 hrs
-    totalBreakSeconds: 1800,
-    notes: '3D exterior rendering passes'
-  },
-  {
-    id: 'shift-alex-tue',
-    staffId: 'staff-alex',
-    staffName: 'Alex Rivers',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T08:25:00.000Z',
-    clockOutTime: '2026-08-25T16:55:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-alex-tue-1',
-        startTime: '2026-08-25T12:10:00.000Z',
-        endTime: '2026-08-25T12:40:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Elevation perspective drafting'
-  },
-  {
-    id: 'shift-alex-wed',
-    staffId: 'staff-alex',
-    staffName: 'Alex Rivers',
-    date: '2026-08-26',
-    clockInTime: '2026-08-26T08:15:00.000Z',
-    status: 'clocked_in',
-    breaks: [],
-    totalWorkSeconds: 0,
-    totalBreakSeconds: 0,
-    notes: 'Active shift'
-  },
-
-  // Elena Rostova (Mon, Tue, Wed)
-  {
-    id: 'shift-elena-mon',
-    staffId: 'staff-elena',
-    staffName: 'Elena Rostova',
-    date: '2026-08-24',
-    clockInTime: '2026-08-24T08:10:00.000Z',
-    clockOutTime: '2026-08-24T16:40:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-elena-mon-1',
-        startTime: '2026-08-24T12:00:00.000Z',
-        endTime: '2026-08-24T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Foundation structural detail review'
-  },
-  {
-    id: 'shift-elena-tue',
-    staffId: 'staff-elena',
-    staffName: 'Elena Rostova',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T08:05:00.000Z',
-    clockOutTime: '2026-08-25T16:50:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-elena-tue-1',
-        startTime: '2026-08-25T12:00:00.000Z',
-        endTime: '2026-08-25T12:45:00.000Z',
-        durationSeconds: 2700
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 2700,
-    notes: 'Load bearing calculations and truss specs'
-  },
-
   // Kyle (Lead Drafter)
   {
     id: 'shift-kyle-mon',

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
@@ -1367,6 +1367,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                             <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
                               MPS #{job.job_number}
                             </span>
+                            {job.owner && (
+                              <span className="text-[9px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`Owner: ${job.owner}`}>
+                                <Building className="w-2.5 h-2.5 text-purple-500" />
+                                <span>{job.owner}</span>
+                              </span>
+                            )}
                             {isJobArchived(job) && (
                               <span className="text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                 <Archive className="w-2.5 h-2.5 text-emerald-600" />
@@ -1388,8 +1394,51 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         </div>
 
                         <div>
-                          <h4 className="font-bold text-slate-900 text-xs">{job.customer_name}</h4>
-                          <p className="text-[11px] text-slate-500">{job.style} • {job.sq_ft} sq ft</p>
+                          <div className="flex items-start justify-between gap-1">
+                            <h4 className="font-bold text-slate-900 text-xs truncate" title={job.project_name || job.customer_name}>
+                              {job.project_name || job.customer_name}
+                            </h4>
+                            {job.builder && (
+                              <span className="text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-1 py-0.2 rounded shrink-0 flex items-center gap-0.5" title={`Builder: ${job.builder}`}>
+                                <Hammer className="w-2.5 h-2.5 text-amber-600" />
+                                <span className="truncate max-w-[80px]">{job.builder}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {job.project_name && job.customer_name && job.project_name.toLowerCase() !== job.customer_name.toLowerCase() && (
+                            <p className="text-[10px] text-slate-500">Customer: <span className="font-medium text-slate-700">{job.customer_name}</span></p>
+                          )}
+
+                          {job.project_address && (
+                            <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5 truncate" title={job.project_address}>
+                              <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
+                              <span className="truncate">{job.project_address}</span>
+                            </p>
+                          )}
+
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[10px]">
+                            {job.sq_ft_goal ? (
+                              <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded">
+                                Goal: {job.sq_ft_goal}
+                              </span>
+                            ) : job.sq_ft > 0 ? (
+                              <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded">
+                                {job.sq_ft} sq ft
+                              </span>
+                            ) : null}
+                            {job.sheet_status && (
+                              <span className="font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                                {job.sheet_status}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                            <User className="w-2.5 h-2.5 text-slate-400" />
+                            <span className="truncate">{job.assigned_drafter}</span>
+                          </p>
+
                           {delegatedCount > 0 && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded mt-1">
                               <ListTodo className="w-3 h-3" />
@@ -1462,14 +1511,15 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-50 border-b border-slate-200 uppercase font-mono text-[10px] text-slate-500 tracking-wider">
                 <tr>
-                  <th className="p-3.5">Job #</th>
-                  <th className="p-3.5">Customer Name</th>
-                  <th className="p-3.5">Style & Sq Ft</th>
+                  <th className="p-3.5">Job # / Owner</th>
+                  <th className="p-3.5">Project & Customer</th>
+                  <th className="p-3.5">Builder</th>
+                  <th className="p-3.5">Goal & Style</th>
                   <th className="p-3.5">Drafter</th>
-                  <th className="p-3.5">Current Phase</th>
+                  <th className="p-3.5">Phase & Status</th>
                   <th className="p-3.5">Time Logged</th>
                   {canAccessFinancials && <th className="p-3.5">Invoicing ($)</th>}
-                  <th className="p-3.5">Delegated Tasks</th>
+                  <th className="p-3.5">Delegated</th>
                   <th className="p-3.5">Timer Controls</th>
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
@@ -1484,41 +1534,87 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   return (
                     <tr key={job.id} className={`transition ${isRunning ? 'bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
                       <td className="p-3.5 font-mono font-bold text-blue-700">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span>MPS #{job.job_number}</span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>MPS #{job.job_number}</span>
+                            {job.owner && (
+                              <span className="text-[9px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.2 rounded">
+                                {job.owner}
+                              </span>
+                            )}
+                          </div>
                           {isJobArchived(job) && (
-                            <span className="text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                            <span className="text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded flex items-center gap-0.5 w-fit">
                               <Archive className="w-2.5 h-2.5 text-emerald-600" />
                               <span>Archived</span>
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="p-3.5 font-bold text-slate-900">{job.customer_name}</td>
-                      <td className="p-3.5">{job.style} ({job.sq_ft} sq ft)</td>
-                      <td className="p-3.5">{job.assigned_drafter}</td>
                       <td className="p-3.5">
-                        <select
-                          value={job.current_status}
-                          onChange={(e) => {
-                            const newPhase = e.target.value as JobPhase;
-                            if (newPhase === 'Completed' && !canMarkProjectCompleted) {
-                              alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
-                              return;
-                            }
-                            onUpdateStatus(job.id, newPhase);
-                          }}
-                          className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-semibold cursor-pointer"
-                        >
-                          {PHASES.map(p => {
-                            const isLocked = p === 'Completed' && !canMarkProjectCompleted;
-                            return (
-                              <option key={p} value={p} disabled={isLocked}>
-                                {isLocked ? `🔒 ${p} (Kyle & Jason only)` : p}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-slate-900">{job.project_name || job.customer_name}</div>
+                          {job.project_name && job.customer_name && job.project_name.toLowerCase() !== job.customer_name.toLowerCase() && (
+                            <div className="text-[11px] text-slate-500">Customer: {job.customer_name}</div>
+                          )}
+                          {job.project_address && (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 truncate max-w-[200px]" title={job.project_address}>
+                              <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                              <span className="truncate">{job.project_address}</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        {job.builder ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded">
+                            <Hammer className="w-3 h-3 text-amber-600" />
+                            <span>{job.builder}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="p-3.5">
+                        <div className="space-y-0.5 text-xs">
+                          {job.sq_ft_goal ? (
+                            <div className="font-mono font-semibold text-slate-800">Goal: {job.sq_ft_goal}</div>
+                          ) : job.sq_ft > 0 ? (
+                            <div className="font-mono text-slate-700">{job.sq_ft} sq ft</div>
+                          ) : null}
+                          {job.style && <div className="text-slate-500 text-[11px]">{job.style}</div>}
+                        </div>
+                      </td>
+                      <td className="p-3.5 text-slate-700 font-medium">{job.assigned_drafter}</td>
+                      <td className="p-3.5">
+                        <div className="space-y-1">
+                          <select
+                            value={job.current_status}
+                            onChange={(e) => {
+                              const newPhase = e.target.value as JobPhase;
+                              if (newPhase === 'Completed' && !canMarkProjectCompleted) {
+                                alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+                                return;
+                              }
+                              onUpdateStatus(job.id, newPhase);
+                            }}
+                            className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-semibold cursor-pointer block"
+                          >
+                            {PHASES.map(p => {
+                              const isLocked = p === 'Completed' && !canMarkProjectCompleted;
+                              return (
+                                <option key={p} value={p} disabled={isLocked}>
+                                  {isLocked ? `🔒 ${p} (Kyle & Jason only)` : p}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          {job.sheet_status && (
+                            <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 inline-block">
+                              {job.sheet_status}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3.5 font-mono font-bold text-slate-800">
                         {formatSecondsToReadable(totalSecs)}

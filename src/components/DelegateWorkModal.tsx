@@ -55,7 +55,7 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
 }) => {
   const [componentTitle, setComponentTitle] = useState('');
   const [category, setCategory] = useState<DelegatedWorkItem['category']>('Floor Plan');
-  const [assignedTo, setAssignedTo] = useState('Sarah Jenkins');
+  const [assignedTo, setAssignedTo] = useState('James');
   const [priority, setPriority] = useState<DelegatedWorkItem['priority']>('Normal');
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();

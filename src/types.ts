@@ -100,7 +100,7 @@ export interface DelegatedWorkItem {
   componentTitle: string; // e.g. "Foundation & Slab Structural Detail", "Kitchen Island & Cabinetry Revisions", "Truss Layout Elevation"
   category: 'Floor Plan' | 'Exterior Elevations' | 'Foundation Plan' | 'Electrical & Reflected Ceiling' | '3D Render' | 'Structural Details' | 'Site Plan' | 'CAD Modeling' | 'Revisions' | 'General';
   priority: 'Normal' | 'High' | 'Urgent';
-  assignedTo: string; // Drafter name e.g. "Sarah Jenkins", "Alex Rivers", "Elena Rostova"
+  assignedTo: string; // Drafter name e.g. "Kyle", "James", "Aaron"
   assignedToEmail?: string;
   delegatedBy: string; // e.g. "Kyle", "Jason", "Greg Hyatt"
   delegatedAt: string; // ISO string
@@ -201,7 +201,7 @@ export interface ChatMessage {
   senderAvatar?: string;
   text: string;
   timestamp: string; // ISO string
-  mentions?: string[]; // Staff user names mentioned e.g. ["Sarah Jenkins", "Kyle"]
+  mentions?: string[]; // Staff user names mentioned e.g. ["James", "Kyle"]
   referencedJobNumbers?: string[]; // e.g. ["MPS-2024-001", "MPS-test"]
   replyToId?: string;
   replyToMessage?: {
@@ -245,6 +245,20 @@ export interface Job {
   customer_phone: string;
   assigned_drafter: string;
   project_manager?: string;
+  owner?: string; // e.g. "JB"
+  project_name?: string; // e.g. "Ceci McFee", "Peggy Thompson - Remodel"
+  sq_ft_goal?: string; // e.g. "1800-1900", "remodel", "1800"
+  project_address?: string; // e.g. "203 Tom Miller Lane, Bismarck"
+  builder?: string; // e.g. "Zach Ritter", "CCI"
+  sheet_status?: string; // e.g. "Customer Review", "Changes", "No Status"
+  status_note?: string;
+  completed?: boolean;
+  completed_at?: string;
+  due_date?: string;
+  total_time_entries?: number;
+  total_duration_minutes?: number;
+  total_duration_hours?: number;
+  phase_name?: string; // e.g. "Layout", "Prelim", "No Phase", "Final Review"
   sq_ft: number;
   style: string;
   lot_details: string;

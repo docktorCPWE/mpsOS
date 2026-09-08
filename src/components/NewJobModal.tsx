@@ -26,7 +26,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
   };
 
   const defaultDrafter = availableStaff.find(s => s.role === 'drafter' || s.role === 'drafter_lead') || availableStaff[0];
-  const initialDrafterValue = defaultDrafter ? getStaffOptionValue(defaultDrafter) : 'Sarah Jenkins, Senior Architect';
+  const initialDrafterValue = defaultDrafter ? getStaffOptionValue(defaultDrafter) : 'Kyle, Lead Project Manager & Senior Drafter';
 
   const [jobNumber, setJobNumber] = useState(() => `M26-${Math.floor(210 + Math.random() * 80)}`);
   const [customerName, setCustomerName] = useState('');

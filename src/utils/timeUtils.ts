@@ -30,10 +30,15 @@ export function formatSecondsToReadable(seconds: number): string {
  * Calculate total logged seconds for a job, including completed logs and currently running timer if active.
  */
 export function calculateJobTotalSeconds(job: Job, nowTimestamp?: number): number {
-  const completedSeconds = (job.time_logs || []).reduce(
+  let completedSeconds = (job.time_logs || []).reduce(
     (sum, log) => sum + (log.durationSeconds || 0),
     0
   );
+
+  // Fallback to sheet duration if time_logs is empty
+  if (completedSeconds === 0 && (job.total_duration_minutes || job.total_duration_hours)) {
+    completedSeconds = Math.round((job.total_duration_minutes || (job.total_duration_hours! * 60)) * 60);
+  }
 
   let activeSeconds = 0;
   if (job.active_timer_start) {

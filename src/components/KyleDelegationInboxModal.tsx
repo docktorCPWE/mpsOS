@@ -220,10 +220,9 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                 className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
               >
                 <option value="all" className="bg-slate-900">All Drafters</option>
+                <option value="James" className="bg-slate-900">James</option>
                 <option value="Aaron" className="bg-slate-900">Aaron</option>
-                <option value="Carlos" className="bg-slate-900">Carlos</option>
-                <option value="Sarah" className="bg-slate-900">Sarah</option>
-                <option value="David" className="bg-slate-900">David</option>
+                <option value="Kyle" className="bg-slate-900">Kyle</option>
               </select>
             </div>
 

@@ -1,5 +1,35 @@
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Eye, FileCheck, Layers, MessageSquare, ChevronRight, User, Sparkles, ShieldAlert, Play, Square, DollarSign, History, Share2, ListTodo, Paperclip, Archive, Coffee, PauseCircle } from 'lucide-react';
+import { 
+  AlertTriangle, 
+  CheckCircle2, 
+  Clock, 
+  Eye, 
+  FileCheck, 
+  Layers, 
+  MessageSquare, 
+  ChevronRight, 
+  User, 
+  Sparkles, 
+  ShieldAlert, 
+  Play, 
+  Square, 
+  DollarSign, 
+  History, 
+  Share2, 
+  ListTodo, 
+  Paperclip, 
+  Archive, 
+  Coffee, 
+  PauseCircle,
+  MapPin,
+  Hammer,
+  Mail,
+  Phone,
+  Copy,
+  Check,
+  Calendar,
+  Building
+} from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
 import { isJobArchived } from '../data/mockData';
@@ -28,6 +58,20 @@ const PHASE_COLORS: Record<JobPhase, { bg: string; text: string; border: string 
   'Completed': { bg: 'bg-teal-50', text: 'text-teal-800', border: 'border-teal-300' },
 };
 
+function getSheetStatusColor(status?: string): { bg: string; text: string; border: string } {
+  const s = (status || '').toLowerCase();
+  if (s.includes('customer review')) {
+    return { bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-300' };
+  }
+  if (s.includes('changes')) {
+    return { bg: 'bg-rose-50', text: 'text-rose-800', border: 'border-rose-300' };
+  }
+  if (s.includes('no status') || !s) {
+    return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
+  }
+  return { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-blue-200' };
+}
+
 export const JobCard: React.FC<JobCardProps> = ({
   job,
   onUpdateStatus,
@@ -44,6 +88,7 @@ export const JobCard: React.FC<JobCardProps> = ({
   const currentPhaseStyle = PHASE_COLORS[job.current_status] || PHASE_COLORS['Customer Inquiry'];
   const [taskInput, setTaskInput] = useState('');
   const [showLogs, setShowLogs] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState(false);
 
   const isTimerRunning = Boolean(job.active_timer_start);
   const isTimerPaused = Boolean(job.paused_by_break);
@@ -69,6 +114,34 @@ export const JobCard: React.FC<JobCardProps> = ({
     setTaskInput('');
   };
 
+  const handleCopyAddress = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!job.project_address) return;
+    navigator.clipboard.writeText(job.project_address);
+    setCopiedAddress(true);
+    setTimeout(() => setCopiedAddress(false), 2000);
+  };
+
+  // Resolve primary and secondary titles
+  const projectTitle = job.project_name || job.customer_name;
+  const showSecondaryCustomer = Boolean(
+    job.project_name && 
+    job.customer_name && 
+    job.project_name.trim().toLowerCase() !== job.customer_name.trim().toLowerCase()
+  );
+
+  // Email and phone shortcuts
+  const primaryEmail = job.customer_email ? job.customer_email.split(';')[0].trim() : '';
+  const primaryPhone = job.customer_phone ? job.customer_phone.split(';')[0].trim() : '';
+  const sheetStatusStyle = getSheetStatusColor(job.sheet_status);
+
+  // Format created date
+  const formattedCreatedDate = job.created_at ? new Date(job.created_at).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }) : '';
+
   return (
     <div className={`bg-white rounded-xl border transition-all duration-200 shadow-sm hover:shadow-md flex flex-col justify-between overflow-hidden relative group font-sans ${
       isTimerRunning
@@ -93,16 +166,23 @@ export const JobCard: React.FC<JobCardProps> = ({
 
       <div className="p-5 flex-1 space-y-4">
         
-        {/* Header Row: Job Number & Status Badges */}
+        {/* Header Row: Job Number, Owner Badge, & Status Badges */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md shadow-2xs flex items-center gap-1">
               <span className="text-[10px] text-blue-500 font-sans uppercase">MPS</span>
               <span>#{job.job_number}</span>
             </span>
-            <span className="text-xs font-mono text-slate-500 font-medium">
-              {job.sq_ft} sq ft
-            </span>
+
+            {/* Owner Badge */}
+            {job.owner && (
+              <span className="text-[10px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-md flex items-center gap-1" title={`Job Owner: ${job.owner}`}>
+                <Building className="w-2.5 h-2.5 text-purple-500" />
+                <span>Owner: {job.owner}</span>
+              </span>
+            )}
+
+            {/* Archived Indicator */}
             {isJobArchived(job) && (
               <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
                 <Archive className="w-3 h-3 text-emerald-600" />
@@ -118,7 +198,7 @@ export const JobCard: React.FC<JobCardProps> = ({
               onToggleRoadblock(job.id);
             }}
             title={job.roadblock ? 'Click to resolve roadblock' : 'Click to flag roadblock'}
-            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-md transition border ${
+            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-md transition border cursor-pointer ${
               job.roadblock
                 ? 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200'
                 : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
@@ -127,7 +207,7 @@ export const JobCard: React.FC<JobCardProps> = ({
             {job.roadblock ? (
               <>
                 <AlertTriangle className="w-3.5 h-3.5 text-red-600 animate-bounce" />
-                <span>Roadblock Active</span>
+                <span>Roadblock</span>
               </>
             ) : (
               <>
@@ -138,27 +218,109 @@ export const JobCard: React.FC<JobCardProps> = ({
           </button>
         </div>
 
-        {/* Customer & Style Info */}
+        {/* Project Name & Builder Row */}
         <div>
-          <h3 className="font-bold text-slate-900 text-base group-hover:text-blue-600 transition truncate">
-            {job.customer_name}
-          </h3>
-          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="font-bold text-slate-900 text-base group-hover:text-blue-600 transition truncate" title={projectTitle}>
+              {projectTitle}
+            </h3>
+            {job.builder && (
+              <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0" title={`Builder: ${job.builder}`}>
+                <Hammer className="w-3 h-3 text-amber-600" />
+                <span className="truncate max-w-[130px]">{job.builder}</span>
+              </span>
+            )}
+          </div>
+
+          {/* Secondary Customer Entity (if different from project title) */}
+          {showSecondaryCustomer && (
+            <p className="text-xs text-slate-600 font-medium mt-0.5">
+              Customer: <span className="text-slate-800 font-semibold">{job.customer_name}</span>
+            </p>
+          )}
+
+          {/* Assigned Drafter */}
+          <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
             <User className="w-3.5 h-3.5 text-slate-400" />
             <span className="truncate">{job.assigned_drafter}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            <span className="text-xs font-medium text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-              🎨 {job.style}
-            </span>
+
+          {/* Property Address with Quick Copy */}
+          {job.project_address && (
+            <div className="flex items-center justify-between gap-1.5 mt-2 bg-slate-50 hover:bg-slate-100/80 px-2.5 py-1.5 rounded-lg border border-slate-200/80 transition text-xs">
+              <div className="flex items-center gap-1.5 truncate text-slate-700 font-medium">
+                <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                <span className="truncate" title={job.project_address}>{job.project_address}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyAddress}
+                className="text-slate-400 hover:text-blue-600 p-1 rounded transition shrink-0 cursor-pointer"
+                title={copiedAddress ? 'Address copied!' : 'Copy address to clipboard'}
+              >
+                {copiedAddress ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Goal, Style & Delegated Tags */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            {/* Sq Ft Goal or Sq Ft */}
+            {job.sq_ft_goal ? (
+              <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                📐 Goal: {job.sq_ft_goal} {job.sq_ft_goal.toLowerCase().includes('remodel') ? '' : 'sq ft'}
+              </span>
+            ) : job.sq_ft > 0 ? (
+              <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                📐 {job.sq_ft} sq ft
+              </span>
+            ) : null}
+
+            {job.style && (
+              <span className="text-xs font-medium text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                🎨 {job.style}
+              </span>
+            )}
             
             {delegatedTasks.length > 0 && (
               <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1" title={`${delegatedTasks.length} delegated work components on this plan`}>
                 <ListTodo className="w-3 h-3 text-indigo-600" />
-                <span>{delegatedTasks.length} Delegated {delegatedTasks.length === 1 ? 'Task' : 'Tasks'}</span>
+                <span>{delegatedTasks.length} Delegated</span>
               </span>
             )}
           </div>
+
+          {/* Direct Client Contact Shortcuts (Email & Phone) */}
+          {(primaryEmail || primaryPhone) && (
+            <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-600 pt-1.5 border-t border-slate-100">
+              {primaryEmail && (
+                <a
+                  href={`mailto:${primaryEmail}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[180px]"
+                  title={job.customer_email}
+                >
+                  <Mail className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{primaryEmail}</span>
+                </a>
+              )}
+              {primaryPhone && (
+                <a
+                  href={`tel:${primaryPhone}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 text-slate-700 hover:text-blue-600 hover:underline font-mono shrink-0"
+                  title={job.customer_phone}
+                >
+                  <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                  <span>{primaryPhone}</span>
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* --- DRAFTER START/STOP TIMER WIDGET CARD --- */}
@@ -184,17 +346,17 @@ export const JobCard: React.FC<JobCardProps> = ({
               {isTimerPaused && (
                 <span className="flex items-center gap-1 bg-amber-500 text-slate-950 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full animate-pulse">
                   <Coffee className="w-3 h-3 text-slate-950" />
-                  PAUSED (ON BREAK)
+                  PAUSED
                 </span>
               )}
             </div>
 
             <button
               onClick={(e) => { e.stopPropagation(); setShowLogs(!showLogs); }}
-              className="text-[10px] text-slate-500 hover:text-blue-600 flex items-center gap-0.5 font-medium underline decoration-slate-300"
+              className="text-[10px] text-slate-500 hover:text-blue-600 flex items-center gap-0.5 font-medium underline decoration-slate-300 cursor-pointer"
             >
               <History className="w-3 h-3" />
-              <span>{(job.time_logs || []).length} logs</span>
+              <span>{job.total_time_entries || (job.time_logs || []).length} logs</span>
             </button>
           </div>
 
@@ -207,13 +369,23 @@ export const JobCard: React.FC<JobCardProps> = ({
               }`}>
                 {isTimerRunning ? formatSecondsToHHMMSS(activeSessionSeconds) : formatSecondsToReadable(totalSeconds)}
               </div>
+              {job.total_duration_hours ? (
+                <div className="text-[10px] text-slate-400 font-mono">
+                  Sheet: {job.total_duration_hours} hrs ({job.total_duration_minutes} min)
+                </div>
+              ) : null}
             </div>
 
             <div className="text-right">
-              <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Sessions Logged</div>
+              <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Total Sessions</div>
               <div className="text-sm font-bold font-mono text-slate-700">
-                {(job.time_logs || []).length} Recorded
+                {job.total_time_entries || (job.time_logs || []).length} Recorded
               </div>
+              {canAccessFinancials && (
+                <div className="text-[10px] text-emerald-700 font-mono font-semibold">
+                  ${totalBillable.toFixed(2)} billable
+                </div>
+              )}
             </div>
           </div>
 
@@ -227,7 +399,7 @@ export const JobCard: React.FC<JobCardProps> = ({
             ) : isTimerPaused ? (
               <div className="text-xs bg-amber-100/90 p-2 rounded border border-amber-300 text-amber-950 font-medium flex items-center justify-between gap-1.5">
                 <div className="truncate flex items-center gap-1">
-                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold uppercase">Paused Task:</span>
+                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold uppercase">Paused:</span>
                   <span className="truncate">{job.paused_timer_task || `Drafting ${job.current_status}`}</span>
                 </div>
                 <span className="text-[10px] text-amber-800 italic shrink-0">Resumes on return</span>
@@ -287,9 +459,9 @@ export const JobCard: React.FC<JobCardProps> = ({
           {/* Expanded Session Logs List */}
           {showLogs && (
             <div className="mt-3 pt-2 border-t border-slate-200 space-y-1.5 max-h-36 overflow-y-auto text-[11px]">
-              <div className="font-bold text-slate-700 text-[10px] uppercase">Session History</div>
+              <div className="font-bold text-slate-700 text-[10px] uppercase">Session History ({job.time_logs?.length || 0})</div>
               {(!job.time_logs || job.time_logs.length === 0) ? (
-                <div className="text-slate-400 italic text-[10px]">No completed sessions yet.</div>
+                <div className="text-slate-400 italic text-[10px]">No recorded sessions yet.</div>
               ) : (
                 job.time_logs.map((log) => (
                   <div key={log.id} className="bg-white p-1.5 rounded border border-slate-200 flex justify-between items-center text-slate-600">
@@ -307,43 +479,57 @@ export const JobCard: React.FC<JobCardProps> = ({
           )}
         </div>
 
-        {/* Status Phase Details Box */}
+        {/* Phase & Sheet Status Matrix */}
         <div className="bg-slate-50 p-3 rounded-lg border border-slate-200/80 space-y-2 text-xs">
           
+          {/* Phase & Sheet Status Row */}
           <div className="flex justify-between items-center">
             <span className="text-slate-500 font-medium">Phase:</span>
             <span className={`font-semibold px-2 py-0.5 rounded border text-[11px] ${currentPhaseStyle.bg} ${currentPhaseStyle.text} ${currentPhaseStyle.border}`}>
-              {job.current_status}
+              {job.phase_name || job.current_status}
             </span>
           </div>
 
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Layout Reviews:</span>
-            <span className={`font-mono font-bold ${
-              job.layout_reviews_count >= job.max_reviews_included ? 'text-red-600' : 'text-slate-800'
-            }`}>
-              {job.layout_reviews_count} / {job.max_reviews_included}
-            </span>
+          {job.sheet_status && (
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500 font-medium">Sheet Status:</span>
+              <span className={`font-semibold px-2 py-0.5 rounded border text-[11px] ${sheetStatusStyle.bg} ${sheetStatusStyle.text} ${sheetStatusStyle.border}`}>
+                {job.sheet_status}
+              </span>
+            </div>
+          )}
+
+          {/* Dates Row */}
+          <div className="flex justify-between items-center text-[11px] text-slate-500 pt-1 border-t border-slate-200/60">
+            <div className="flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-slate-400" />
+              <span>Created: {formattedCreatedDate || 'N/A'}</span>
+            </div>
+            {job.due_date && (
+              <span className="font-semibold text-slate-700">Due: {job.due_date}</span>
+            )}
           </div>
 
-          <div className="text-slate-500 pt-1 border-t border-slate-200/60">
-            <span className="font-semibold text-slate-700 block text-[11px]">Next Focus:</span>
-            <span className="text-slate-600 line-clamp-1 italic text-[11px]">{job.next_step}</span>
-          </div>
+          {job.next_step && (
+            <div className="text-slate-500 pt-1 border-t border-slate-200/60">
+              <span className="font-semibold text-slate-700 block text-[11px]">Next Focus:</span>
+              <span className="text-slate-600 line-clamp-1 italic text-[11px]">{job.next_step}</span>
+            </div>
+          )}
         </div>
 
       </div>
 
-      {/* Footer: Quick Actions Bar */}
+      {/* Footer: Deliverables, Comments & Action Buttons */}
       <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
         <div className="flex items-center gap-3 text-slate-500">
           <span className="flex items-center gap-1" title="Deliverable sheets">
             <FileCheck className="w-3.5 h-3.5 text-blue-600" />
-            <strong className="text-slate-700">{job.deliverables.length}</strong>
+            <strong className="text-slate-700">{(job.deliverables || []).length}</strong>
           </span>
           <span className="flex items-center gap-1" title="Comments & Markups">
             <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
-            <strong className="text-slate-700">{job.comments.length}</strong>
+            <strong className="text-slate-700">{(job.comments || []).length}</strong>
           </span>
         </div>
 
@@ -355,7 +541,7 @@ export const JobCard: React.FC<JobCardProps> = ({
                 onOpenDelegateModal(job);
               }}
               title="Delegate work component or sub-task to another drafter"
-              className="text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 shadow-2xs active:scale-95"
+              className="text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
             >
               <Share2 className="w-3 h-3" />
               <span>Delegate</span>

@@ -64,24 +64,33 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   const [sqFt, setSqFt] = useState<number>(job.sq_ft || 0);
   const [currentPhase, setCurrentPhase] = useState<JobPhase>(job.current_status || 'Construction Prints');
   const [assignedDrafter, setAssignedDrafter] = useState<string>(job.assigned_drafter || '');
+  const [projectName, setProjectName] = useState<string>(job.project_name || '');
+  const [builder, setBuilder] = useState<string>(job.builder || '');
+  const [projectAddress, setProjectAddress] = useState<string>(job.project_address || '');
+  const [sqFtGoal, setSqFtGoal] = useState<string>(job.sq_ft_goal || '');
+  const [owner, setOwner] = useState<string>(job.owner || '');
 
   // Editable Time Logs Array
   const [timeLogs, setTimeLogs] = useState<TimeLog[]>(() => {
     if (job.time_logs && job.time_logs.length > 0) {
       return JSON.parse(JSON.stringify(job.time_logs));
     }
-    // If no logs exist yet, create an initial default drafting session so user can edit it
+    const fallbackHours = job.total_duration_hours
+      ? job.total_duration_hours
+      : job.total_duration_minutes
+        ? job.total_duration_minutes / 60
+        : 10.5;
     return [
       {
         id: `t-init-${Date.now()}`,
-        drafterName: (job.assigned_drafter || 'Sarah Jenkins').split(',')[0].trim(),
+        drafterName: (job.assigned_drafter || 'Kyle').split(',')[0].trim(),
         startTime: new Date().toISOString(),
-        durationSeconds: 37800, // 10.5 hours
-        taskDescription: 'Architectural Design & CAD Drafting Services',
+        durationSeconds: Math.round(fallbackHours * 3600),
+        taskDescription: job.phase_name ? `CAD Drafting Services - ${job.phase_name}` : 'Architectural Design & CAD Drafting Services',
         billingCategory: 'Standard Offline CAD Drafting',
         hourlyRate: job.hourly_rate || 85,
-        billableHours: 10.5,
-        billableAmount: 10.5 * (job.hourly_rate || 85)
+        billableHours: fallbackHours,
+        billableAmount: Math.round(fallbackHours * (job.hourly_rate || 85) * 100) / 100
       }
     ];
   });
@@ -202,6 +211,11 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
     setSqFt(job.sq_ft || 0);
     setCurrentPhase(job.current_status || 'Construction Prints');
     setAssignedDrafter(job.assigned_drafter || '');
+    setProjectName(job.project_name || '');
+    setBuilder(job.builder || '');
+    setProjectAddress(job.project_address || '');
+    setSqFtGoal(job.sq_ft_goal || '');
+    setOwner(job.owner || '');
     setTimeLogs(job.time_logs && job.time_logs.length > 0 ? JSON.parse(JSON.stringify(job.time_logs)) : []);
     setIsAddingTimeLog(false);
     setEditingLogId(null);
@@ -212,7 +226,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   // Open Form to Add New Time Entry
   const handleOpenAddTimeLog = () => {
     setEditingLogId(null);
-    setFormDrafterName((currentStaff?.name || assignedDrafter.split(',')[0] || 'Sarah Jenkins').trim());
+    setFormDrafterName((currentStaff?.name || assignedDrafter.split(',')[0] || 'Kyle').trim());
     setFormCategory('Standard Offline CAD Drafting');
     setFormDescription('Architectural plan drafting & redline updates');
     setFormDate(new Date().toISOString().split('T')[0]);
@@ -225,7 +239,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   const handleOpenEditTimeLog = (log: TimeLog) => {
     setIsAddingTimeLog(false);
     setEditingLogId(log.id);
-    setFormDrafterName(log.drafterName || assignedDrafter.split(',')[0] || 'Sarah Jenkins');
+    setFormDrafterName(log.drafterName || assignedDrafter.split(',')[0] || 'Kyle');
     setFormCategory(log.billingCategory || 'Standard Offline CAD Drafting');
     setFormDescription(log.taskDescription || '');
     setFormDate(log.startTime ? log.startTime.split('T')[0] : new Date().toISOString().split('T')[0]);
@@ -309,7 +323,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       // Create single log
       const newEntry: TimeLog = {
         id: `t-adj-${Date.now()}`,
-        drafterName: assignedDrafter.split(',')[0] || 'Sarah Jenkins',
+        drafterName: assignedDrafter.split(',')[0] || 'Kyle',
         startTime: new Date().toISOString(),
         durationSeconds: Math.round(newTotal * 3600),
         taskDescription: 'Architectural Drafting & Plan Package',
@@ -380,6 +394,14 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       sq_ft: Number(sqFt) || job.sq_ft,
       current_status: currentPhase,
       assigned_drafter: assignedDrafter.trim() || job.assigned_drafter,
+      project_name: projectName.trim() || job.project_name || customerName.trim(),
+      builder: builder.trim() || job.builder,
+      project_address: projectAddress.trim() || job.project_address,
+      sq_ft_goal: sqFtGoal.trim() || job.sq_ft_goal,
+      owner: owner.trim() || job.owner,
+      total_time_entries: timeLogs.length,
+      total_duration_hours: Number(totalCalculatedHours.toFixed(2)),
+      total_duration_minutes: Math.round(totalCalculatedHours * 60),
       time_logs: timeLogs,
       audit_logs: [
         {
@@ -903,7 +925,7 @@ My Plan Store`,
                             type="text"
                             value={formDrafterName}
                             onChange={(e) => setFormDrafterName(e.target.value)}
-                            placeholder="e.g. Sarah Jenkins"
+                            placeholder="e.g. Kyle"
                             className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-medium focus:ring-2 focus:ring-blue-500"
                             required
                           />
@@ -1510,6 +1532,16 @@ My Plan Store`,
                             className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Project Address</label>
+                          <input
+                            type="text"
+                            value={projectAddress}
+                            onChange={(e) => setProjectAddress(e.target.value)}
+                            placeholder="e.g. 203 Tom Miller Lane, Bismarck"
+                            className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1517,6 +1549,28 @@ My Plan Store`,
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                       <h6 className="font-bold text-xs text-slate-900 uppercase">Plan & Project Specifications</h6>
                       <div className="space-y-2 text-xs">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Project Title</label>
+                            <input
+                              type="text"
+                              value={projectName}
+                              onChange={(e) => setProjectName(e.target.value)}
+                              placeholder="e.g. Ceci McFee"
+                              className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Builder / Contractor</label>
+                            <input
+                              type="text"
+                              value={builder}
+                              onChange={(e) => setBuilder(e.target.value)}
+                              placeholder="e.g. Zach Ritter"
+                              className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </div>
                         <div>
                           <label className="block text-[11px] font-bold text-slate-700 mb-0.5">House Style / Package Title</label>
                           <input
@@ -1527,23 +1581,47 @@ My Plan Store`,
                             className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Total Heated Area (sq ft)</label>
-                          <input
-                            type="number"
-                            value={sqFt}
-                            onChange={(e) => setSqFt(parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
-                          />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Total Heated Area (sq ft)</label>
+                            <input
+                              type="number"
+                              value={sqFt}
+                              onChange={(e) => setSqFt(parseInt(e.target.value) || 0)}
+                              className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Sq Ft Goal / Range</label>
+                            <input
+                              type="text"
+                              value={sqFtGoal}
+                              onChange={(e) => setSqFtGoal(e.target.value)}
+                              placeholder="e.g. 1800-1900"
+                              className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Current Phase</label>
-                          <input
-                            type="text"
-                            value={currentPhase}
-                            onChange={(e) => setCurrentPhase(e.target.value as JobPhase)}
-                            className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
-                          />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Current Phase</label>
+                            <input
+                              type="text"
+                              value={currentPhase}
+                              onChange={(e) => setCurrentPhase(e.target.value as JobPhase)}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Owner Initials / Lead</label>
+                            <input
+                              type="text"
+                              value={owner}
+                              onChange={(e) => setOwner(e.target.value)}
+                              placeholder="e.g. JB"
+                              className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Assigned Drafter / PM</label>
@@ -1665,11 +1743,22 @@ My Plan Store`,
                     PROJECT / PLAN SPECIFICATIONS
                   </span>
                   <h4 className="text-xs sm:text-sm font-bold text-slate-900">
-                    {planStyle} Plan Package
+                    {projectName || planStyle || 'Custom Architectural'} Plan Package
                   </h4>
                   <div className="text-xs text-slate-600 space-y-0.5 pt-0.5">
-                    <p>Total Heated Area: <strong>{sqFt.toLocaleString()} sq ft</strong></p>
-                    <p>Current Phase: <strong>{currentPhase}</strong></p>
+                    {builder && (
+                      <p className="font-semibold text-amber-900 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-block text-xs">
+                        Builder: {builder}
+                      </p>
+                    )}
+                    {projectAddress && (
+                      <p className="text-slate-700">Site: {projectAddress}</p>
+                    )}
+                    <p>
+                      Total Heated Area: <strong>{sqFt > 0 ? `${sqFt.toLocaleString()} sq ft` : sqFtGoal ? `${sqFtGoal} sq ft` : 'Custom'}</strong>
+                      {sqFtGoal && sqFt > 0 && <span className="text-slate-400"> (Goal: {sqFtGoal})</span>}
+                    </p>
+                    <p>Current Phase: <strong>{currentPhase}</strong> {owner && <span className="text-purple-700 font-mono text-[11px] font-bold">[{owner}]</span>}</p>
                     <p>Assigned Drafter / PM: <strong>{assignedDrafter}</strong></p>
                   </div>
                 </div>
