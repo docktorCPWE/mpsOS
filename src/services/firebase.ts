@@ -1,5 +1,15 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+  updateProfile,
+  User
+} from 'firebase/auth';
 import {
   getFirestore,
   doc,
@@ -13,6 +23,9 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Job, StaffUser, ChatMessage } from '../types';
+
+// Root owner accounts with master system privileges
+export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'jason@myplanstore.com'];
 
 // Initialize Firebase App & Firestore with strict databaseId
 const app = initializeApp(firebaseConfig);
@@ -249,4 +262,130 @@ export async function saveChatMessageToFirestore(message: ChatMessage): Promise<
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
+}
+
+// ----------------------------------------------------
+// AUTHENTICATION & EMAIL VERIFICATION
+// ----------------------------------------------------
+
+export function subscribeToAuth(
+  onUserChanged: (user: User | null) => void
+): () => void {
+  return onAuthStateChanged(auth, (user) => {
+    onUserChanged(user);
+  });
+}
+
+export async function registerWithEmail(
+  email: string,
+  pass: string,
+  fullName: string
+): Promise<User> {
+  const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+  const user = userCredential.user;
+
+  // Set profile display name
+  if (fullName.trim()) {
+    await updateProfile(user, { displayName: fullName.trim() });
+  }
+
+  // Send email verification link
+  await sendEmailVerification(user);
+  console.log('[Auth] Verification email sent to:', user.email);
+
+  return user;
+}
+
+export async function loginWithEmail(
+  email: string,
+  pass: string
+): Promise<User> {
+  const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
+  return userCredential.user;
+}
+
+export async function logoutUser(): Promise<void> {
+  await signOut(auth);
+}
+
+export async function resendVerificationEmail(): Promise<void> {
+  if (auth.currentUser) {
+    await sendEmailVerification(auth.currentUser);
+    console.log('[Auth] Resent verification email to:', auth.currentUser.email);
+  } else {
+    throw new Error('No user is currently signed in.');
+  }
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email.trim());
+}
+
+export async function checkEmailVerified(): Promise<boolean> {
+  if (!auth.currentUser) return false;
+  await auth.currentUser.reload();
+  return auth.currentUser.emailVerified;
+}
+
+// Maps authenticated Firebase user to a StaffUser record in the OS
+export async function syncAuthToStaffUser(
+  user: User,
+  existingStaffList: StaffUser[]
+): Promise<StaffUser> {
+  const userEmail = (user.email || '').toLowerCase().trim();
+  const isOwnerEmail = ROOT_OWNER_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
+
+  // Check if staff member already exists with this email or name
+  let matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
+
+  if (!matched && isOwnerEmail) {
+    // Check if Greg Hyatt or Jason exists in roster and match to them
+    matched = existingStaffList.find(s => s.role === 'admin' && s.canManageStaff === true) ||
+              existingStaffList.find(s => s.name.toLowerCase().includes('greg') || s.name.toLowerCase().includes('jason'));
+  }
+
+  if (matched) {
+    // If user is owner email, ensure Owner/Superadmin privileges
+    if (isOwnerEmail && (!matched.canManageStaff || matched.role !== 'admin')) {
+      const updated: StaffUser = {
+        ...matched,
+        email: userEmail,
+        role: 'admin',
+        title: 'System Owner & Principal',
+        canAccessFinancials: true,
+        canDelegate: true,
+        canViewAllProjects: true,
+        canManageStaff: true,
+        canManageInvoices: true,
+        canEditJobPhases: true,
+        canManageRoadblocks: true
+      };
+      await saveStaffToFirestore(updated);
+      return updated;
+    }
+    return matched;
+  }
+
+  // Create new staff profile for verified user
+  const newStaff: StaffUser = {
+    id: `staff-${user.uid.slice(0, 8)}`,
+    name: user.displayName || user.email?.split('@')[0] || 'Drafter User',
+    email: userEmail,
+    title: isOwnerEmail ? 'System Owner & Principal' : 'Architectural Drafter',
+    role: isOwnerEmail ? 'admin' : 'drafter',
+    department: isOwnerEmail ? 'Management' : 'Drafting',
+    hourlyRate: isOwnerEmail ? 150 : 75,
+    status: 'active',
+    joinedDate: new Date().toISOString().split('T')[0],
+    canAccessFinancials: isOwnerEmail,
+    canDelegate: isOwnerEmail,
+    canViewAllProjects: isOwnerEmail,
+    canManageStaff: isOwnerEmail,
+    canManageInvoices: isOwnerEmail,
+    canEditJobPhases: isOwnerEmail,
+    canManageRoadblocks: isOwnerEmail
+  };
+
+  await saveStaffToFirestore(newStaff);
+  return newStaff;
 }

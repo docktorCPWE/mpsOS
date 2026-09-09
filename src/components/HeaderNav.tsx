@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database } from 'lucide-react';
+import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff } from '../data/mockData';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderNavProps {
   userRole: 'drafter' | 'admin' | 'customer';
@@ -23,6 +24,8 @@ interface HeaderNavProps {
   isChatOpen?: boolean;
   unreadChatCount?: number;
   isCloudConnected?: boolean;
+  authUser?: FirebaseUser | null;
+  onSignOut?: () => void;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -44,7 +47,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onToggleChat,
   isChatOpen = false,
   unreadChatCount = 0,
-  isCloudConnected = true
+  isCloudConnected = true,
+  authUser = null,
+  onSignOut
 }) => {
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
@@ -550,6 +555,18 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   <span>Customer View</span>
                 </button>
               </div>
+
+              {/* Authenticated User Sign Out Button */}
+              {onSignOut && (
+                <button
+                  onClick={onSignOut}
+                  title={authUser ? `Signed in as ${authUser.email}. Click to Sign Out` : 'Sign Out'}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-800/60 rounded-xl text-xs font-medium transition cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-300" />
+                  <span className="hidden xl:inline">Sign Out</span>
+                </button>
+              )}
 
             </div>
 

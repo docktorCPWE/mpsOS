@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
+import { AuthScreen } from './components/AuthScreen';
 import {
   testConnection,
   subscribeToJobs,
@@ -11,8 +12,12 @@ import {
   saveStaffToFirestore,
   seedStaffToFirestore,
   subscribeToChat,
-  saveChatMessageToFirestore
+  saveChatMessageToFirestore,
+  subscribeToAuth,
+  syncAuthToStaffUser,
+  logoutUser
 } from './services/firebase';
+import { User as FirebaseUser } from 'firebase/auth';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
 import { CustomerPortal } from './components/CustomerPortal';
@@ -52,6 +57,11 @@ export default function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
   const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
+
+  // Firebase Authentication State
+  const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isDemoModeBypassed, setIsDemoModeBypassed] = useState<boolean>(false);
 
   // Modals state
   const [selectedJobForDetail, setSelectedJobForDetail] = useState<Job | null>(null);
@@ -144,6 +154,29 @@ export default function App() {
       unsubscribeChat();
     };
   }, []);
+
+  // Listen to Firebase Auth state & sync authenticated staff user
+  useEffect(() => {
+    const unsubscribeAuth = subscribeToAuth(async (user) => {
+      setAuthUser(user);
+      setIsAuthLoading(false);
+      if (user && user.emailVerified) {
+        try {
+          const matched = await syncAuthToStaffUser(user, staffList);
+          setCurrentStaff(matched);
+        } catch (err) {
+          console.warn('[Auth] Staff profile sync notice:', err);
+        }
+      }
+    });
+    return () => unsubscribeAuth();
+  }, [staffList]);
+
+  const handleSignOut = async () => {
+    await logoutUser();
+    setAuthUser(null);
+    setIsDemoModeBypassed(false);
+  };
 
   // Sync jobs state to localStorage and Firestore whenever modified
   const updateJobsState = (newJobs: Job[]) => {
@@ -1404,9 +1437,61 @@ export default function App() {
   // Get active selected customer job object
   const activeCustomerJob = jobs.find(j => j.id === selectedCustomerId) || jobs[0];
 
+  // 1. Loading state while checking Firebase Auth status
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-4">
+        <div className="w-10 h-10 border-3 border-blue-500/20 border-t-blue-400 rounded-full animate-spin mb-4" />
+        <div className="text-center space-y-1">
+          <p className="text-sm font-semibold tracking-wide text-white font-sans">Connecting to My Plan Store OS...</p>
+          <p className="text-xs text-slate-400 font-mono">Verifying authentication & security session</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Gate access: Require user to be authenticated and have a verified email address
+  const isAuthRequired = !isDemoModeBypassed && (!authUser || !authUser.emailVerified);
+  if (isAuthRequired) {
+    return (
+      <AuthScreen
+        currentUser={authUser}
+        onAuthenticated={async (user) => {
+          setAuthUser(user);
+          setIsDemoModeBypassed(false);
+          try {
+            const matched = await syncAuthToStaffUser(user, staffList);
+            setCurrentStaff(matched);
+          } catch (err) {
+            console.warn('[Auth] Staff profile sync notice:', err);
+          }
+        }}
+        onBypassDemo={() => setIsDemoModeBypassed(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 font-sans text-slate-900 selection:bg-blue-500 selection:text-white flex flex-col">
       
+      {/* Guest Demo Mode Banner if user bypassed authentication to inspect system */}
+      {isDemoModeBypassed && !authUser && (
+        <div className="bg-amber-950 border-b border-amber-800 px-4 py-2 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-bold uppercase tracking-wider bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded text-[10px] font-mono">
+              Guest Preview Mode
+            </span>
+            <span>You are browsing the workspace in demo mode. Sign in to link your verified employee credentials.</span>
+          </div>
+          <button
+            onClick={() => setIsDemoModeBypassed(false)}
+            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded-lg transition shadow-xs cursor-pointer"
+          >
+            Employee Sign In / Sign Up
+          </button>
+        </div>
+      )}
+
       {/* Top OS Header Bar */}
       <HeaderNav
         userRole={userRole}
@@ -1432,6 +1517,8 @@ export default function App() {
         }}
         isChatOpen={isChatOpen}
         unreadChatCount={unreadChatCount}
+        authUser={authUser}
+        onSignOut={handleSignOut}
       />
 
       {/* Clock-In, Break & Clock-Out Bar (Accessible to all employees, with special manager view for Jason) */}
