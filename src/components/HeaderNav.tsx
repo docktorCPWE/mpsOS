@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign } from 'lucide-react';
+import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff } from '../data/mockData';
 
@@ -22,6 +22,7 @@ interface HeaderNavProps {
   onToggleChat?: () => void;
   isChatOpen?: boolean;
   unreadChatCount?: number;
+  isCloudConnected?: boolean;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -42,7 +43,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onOpenKyleInbox,
   onToggleChat,
   isChatOpen = false,
-  unreadChatCount = 0
+  unreadChatCount = 0,
+  isCloudConnected = true
 }) => {
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
@@ -163,6 +165,15 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     <div className="flex items-center gap-1.5">
                       <AlertTriangle className={`w-3.5 h-3.5 ${activeRoadblocksCount > 0 ? 'text-red-400 animate-pulse' : 'text-slate-500'}`} />
                       <span>Roadblocks: <strong className={activeRoadblocksCount > 0 ? 'text-red-400' : 'text-slate-400'}>{activeRoadblocksCount}</strong></span>
+                    </div>
+
+                    <span className="text-slate-700">|</span>
+
+                    {/* Firestore Cloud Database Indicator */}
+                    <div className="flex items-center gap-1.5 font-mono text-[11px] text-emerald-300" title="Connected to Google Cloud Firestore">
+                      <Database className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Cloud DB</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     </div>
                   </div>
                 );

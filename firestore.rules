@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Health check & connection validation
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // Jobs collection
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow create, update: if isValidId(jobId);
+      allow delete: if isValidId(jobId);
+
+      // Subcollection for granular time logs
+      match /time_logs/{timeLogId} {
+        allow read: if true;
+        allow create, update: if isValidId(timeLogId) && isValidId(jobId);
+        allow delete: if isValidId(timeLogId) && isValidId(jobId);
+      }
+
+      // Subcollection for job audit logs
+      match /audit_logs/{auditId} {
+        allow read: if true;
+        allow create: if isValidId(auditId) && isValidId(jobId);
+        allow update, delete: if false; // Immutable audit records
+      }
+    }
+
+    // Staff user profiles & drafter roster
+    match /staff/{staffId} {
+      allow read: if true;
+      allow create, update: if isValidId(staffId);
+      allow delete: if isValidId(staffId);
+    }
+
+    // Official billing invoices
+    match /invoices/{invoiceId} {
+      allow read: if true;
+      allow create, update: if isValidId(invoiceId);
+      allow delete: if isValidId(invoiceId);
+    }
+
+    // Discussions & internal team chat
+    match /discussions/{messageId} {
+      allow read: if true;
+      allow create, update: if isValidId(messageId);
+      allow delete: if isValidId(messageId);
+    }
+
+    // Company Settings & global defaults
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidId(settingId);
+      allow delete: if isValidId(settingId);
+    }
+  }
+}

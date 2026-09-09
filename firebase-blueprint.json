@@ -1,0 +1,157 @@
+{
+  "entities": {
+    "Job": {
+      "title": "Job",
+      "description": "Architectural drafting project and plan package managed within My Plan Store OS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the job record" },
+        "job_number": { "type": "string", "description": "MPS Job Number e.g. M26-214" },
+        "project_name": { "type": "string", "description": "Project title or customer name" },
+        "customer_name": { "type": "string", "description": "Client or homeowner name" },
+        "project_address": { "type": "string", "description": "Job site physical address" },
+        "owner": { "type": "string", "description": "Lead owner initials or code e.g. JB" },
+        "builder": { "type": "string", "description": "Builder or general contractor name" },
+        "sq_ft": { "type": "number", "description": "Total heated square footage" },
+        "sq_ft_goal": { "type": "string", "description": "Square footage goal or target range" },
+        "style": { "type": "string", "description": "Architectural plan style" },
+        "assigned_drafter": { "type": "string", "description": "Primary assigned architectural drafter" },
+        "current_status": { "type": "string", "description": "Current lifecycle phase e.g. Construction Prints, Concept Design" },
+        "sheet_status": { "type": "string", "description": "CAD sheet progression status e.g. Elev Complete, Final Plan Ready" },
+        "roadblock": { "type": "boolean", "description": "Whether the project has an active blocker or holds" },
+        "roadblock_notes": { "type": "string", "description": "Detailed notes on what is blocking progress" },
+        "next_step": { "type": "string", "description": "Immediate next drafting milestone or action" },
+        "total_duration_hours": { "type": "number", "description": "Total tracked drafting duration in hours" },
+        "total_duration_minutes": { "type": "number", "description": "Total tracked drafting duration in minutes" },
+        "total_time_entries": { "type": "number", "description": "Count of drafting sessions recorded" },
+        "hourly_rate": { "type": "number", "description": "Hourly billing rate for drafting services" },
+        "is_archived": { "type": "boolean", "description": "Flag indicating if job is archived" },
+        "target_completion_date": { "type": "string", "description": "Estimated or target completion ISO date" },
+        "created_at": { "type": "string", "description": "Creation timestamp ISO string" },
+        "updated_at": { "type": "string", "description": "Last updated timestamp ISO string" }
+      },
+      "required": ["id", "job_number", "customer_name", "current_status"]
+    },
+    "TimeLog": {
+      "title": "TimeLog",
+      "description": "Granular drafting work session and billing entry associated with a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the time entry" },
+        "job_id": { "type": "string", "description": "Associated parent job ID" },
+        "job_number": { "type": "string", "description": "Associated MPS Job Number" },
+        "start_time": { "type": "string", "description": "Start timestamp ISO string" },
+        "duration_seconds": { "type": "number", "description": "Drafting duration in seconds" },
+        "drafter_name": { "type": "string", "description": "Name of drafter who logged the session" },
+        "task_description": { "type": "string", "description": "Description of work performed during session" },
+        "billing_category": { "type": "string", "description": "Category e.g. Standard CAD Drafting, Revisions" },
+        "hourly_rate": { "type": "number", "description": "Hourly rate applied to this entry" },
+        "billable_hours": { "type": "number", "description": "Calculated billable hours" },
+        "billable_amount": { "type": "number", "description": "Calculated billable dollar amount" },
+        "created_at": { "type": "string", "description": "Record creation timestamp" }
+      },
+      "required": ["id", "job_id", "duration_seconds", "drafter_name"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "Authorized staff member, architectural drafter, or project manager",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique staff user ID" },
+        "name": { "type": "string", "description": "Staff member full name" },
+        "role": { "type": "string", "description": "Designation e.g. Owner, Project Manager, Architectural Drafter" },
+        "initials": { "type": "string", "description": "Staff initials e.g. JB, KH, DL, GH" },
+        "email": { "type": "string", "description": "Company email address" },
+        "hourly_rate": { "type": "number", "description": "Standard billing rate per hour" },
+        "is_active": { "type": "boolean", "description": "Whether staff member is currently active" },
+        "can_mark_completed": { "type": "boolean", "description": "Permission to approve projects as Completed" },
+        "can_access_financials": { "type": "boolean", "description": "Permission to view and generate billing rates and invoices" }
+      },
+      "required": ["id", "name", "role"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Official billing invoice document issued for architectural drafting work",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique invoice ID" },
+        "invoice_number": { "type": "string", "description": "Formatted invoice number e.g. INV-2026-001" },
+        "job_id": { "type": "string", "description": "Associated Job ID" },
+        "job_number": { "type": "string", "description": "Associated MPS Job Number" },
+        "customer_name": { "type": "string", "description": "Billed client name" },
+        "project_name": { "type": "string", "description": "Project title" },
+        "builder": { "type": "string", "description": "Builder or contractor" },
+        "project_address": { "type": "string", "description": "Site address" },
+        "sq_ft": { "type": "number", "description": "Plan square footage" },
+        "assigned_drafter": { "type": "string", "description": "Primary drafter" },
+        "owner": { "type": "string", "description": "Project owner code" },
+        "status": { "type": "string", "description": "Payment status e.g. Draft, Sent, Paid, Overdue" },
+        "subtotal": { "type": "number", "description": "Drafting subtotal dollar amount" },
+        "tax_amount": { "type": "number", "description": "Applicable tax amount" },
+        "discount_amount": { "type": "number", "description": "Discount applied" },
+        "total_amount": { "type": "number", "description": "Total invoiced dollar balance" },
+        "issue_date": { "type": "string", "description": "Date invoice was issued" },
+        "due_date": { "type": "string", "description": "Payment due date" },
+        "notes": { "type": "string", "description": "Client notes or payment instructions" },
+        "created_at": { "type": "string", "description": "Invoice creation timestamp" }
+      },
+      "required": ["id", "invoice_number", "job_id", "total_amount", "status"]
+    },
+    "DiscussionMessage": {
+      "title": "DiscussionMessage",
+      "description": "Internal team communication or project collaboration message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique message ID" },
+        "job_id": { "type": "string", "description": "Target job ID or general channel identifier" },
+        "sender_name": { "type": "string", "description": "Name of drafter or manager posting the message" },
+        "sender_role": { "type": "string", "description": "Sender role title" },
+        "content": { "type": "string", "description": "Message content and directives" },
+        "created_at": { "type": "string", "description": "Timestamp when message was posted" }
+      },
+      "required": ["id", "job_id", "sender_name", "content"]
+    },
+    "CompanySettings": {
+      "title": "CompanySettings",
+      "description": "Global My Plan Store OS company information, branding, and defaults",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique settings record identifier" },
+        "company_name": { "type": "string", "description": "Company legal/operating name" },
+        "company_address": { "type": "string", "description": "Mailing address" },
+        "company_phone": { "type": "string", "description": "Contact phone number" },
+        "company_email": { "type": "string", "description": "Official billing contact email" },
+        "company_website": { "type": "string", "description": "Website URL" },
+        "default_hourly_rate": { "type": "number", "description": "Default base hourly drafting rate" },
+        "payment_instructions": { "type": "string", "description": "Standard invoice payment terms" }
+      },
+      "required": ["id", "company_name"]
+    }
+  },
+  "firestore": {
+    "/jobs/{jobId}": {
+      "schema": "Job",
+      "description": "Master collection of architectural drafting projects"
+    },
+    "/jobs/{jobId}/time_logs/{timeLogId}": {
+      "schema": "TimeLog",
+      "description": "Granular work session logs nested under each drafting project"
+    },
+    "/staff/{staffId}": {
+      "schema": "StaffUser",
+      "description": "Registry of authorized drafters, PMs, and system owners"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Official billing invoices generated for projects"
+    },
+    "/discussions/{messageId}": {
+      "schema": "DiscussionMessage",
+      "description": "Live collaboration chat and project discussion threads"
+    },
+    "/settings/{settingId}": {
+      "schema": "CompanySettings",
+      "description": "Company operational parameters and defaults"
+    }
+  }
+}

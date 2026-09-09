@@ -2,6 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications } from './data/mockData';
 import { HeaderNav } from './components/HeaderNav';
+import {
+  testConnection,
+  subscribeToJobs,
+  saveJobToFirestore,
+  seedInitialJobsToFirestore,
+  subscribeToStaff,
+  saveStaffToFirestore,
+  seedStaffToFirestore,
+  subscribeToChat,
+  saveChatMessageToFirestore
+} from './services/firebase';
 import { DrafterDashboard } from './components/DrafterDashboard';
 import { AdminBillingDashboard } from './components/AdminBillingDashboard';
 import { CustomerPortal } from './components/CustomerPortal';
@@ -70,8 +81,9 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Initialize jobs, staff, chat, and time cards from local storage or mock dataset
+  // Initialize jobs, staff, chat, and time cards from local storage or cloud Firestore
   useEffect(() => {
+    // 1. Immediate local fallback load
     const loaded = getStoredJobs();
     setJobs(loaded);
     if (loaded.length > 0) {
@@ -85,12 +97,65 @@ export default function App() {
       setCurrentStaff(matchingStaff);
     }
     setTimeCards(getStoredTimeCards());
+
+    // 2. Test Firebase connection
+    testConnection();
+
+    // 3. Connect real-time Firestore synchronization
+    const unsubscribeJobs = subscribeToJobs(
+      (cloudJobs) => {
+        if (cloudJobs && cloudJobs.length > 0) {
+          setJobs(cloudJobs);
+          saveStoredJobs(cloudJobs);
+          setSelectedCustomerId(prev => prev || cloudJobs[0].id);
+        }
+      },
+      () => {
+        // Database collection is currently empty; seed initial jobs
+        const local = getStoredJobs();
+        if (local && local.length > 0) {
+          seedInitialJobsToFirestore(local);
+        }
+      }
+    );
+
+    const unsubscribeStaff = subscribeToStaff(
+      (cloudStaff) => {
+        if (cloudStaff && cloudStaff.length > 0) {
+          setStaffList(cloudStaff);
+          saveStoredStaff(cloudStaff);
+        }
+      },
+      () => {
+        seedStaffToFirestore(STAFF_USERS);
+      }
+    );
+
+    const unsubscribeChat = subscribeToChat((cloudMsgs) => {
+      if (cloudMsgs && cloudMsgs.length > 0) {
+        setChatMessages(cloudMsgs);
+        saveStoredChatMessages(cloudMsgs);
+      }
+    });
+
+    return () => {
+      unsubscribeJobs();
+      unsubscribeStaff();
+      unsubscribeChat();
+    };
   }, []);
 
-  // Sync jobs state to localStorage whenever modified
+  // Sync jobs state to localStorage and Firestore whenever modified
   const updateJobsState = (newJobs: Job[]) => {
     setJobs(newJobs);
     saveStoredJobs(newJobs);
+
+    // Sync to Firestore in background
+    newJobs.forEach(job => {
+      saveJobToFirestore(job).catch(err => {
+        console.warn('[Firestore] Sync warning for job:', job.job_number, err);
+      });
+    });
     
     // Update selected detail job reference if open
     if (selectedJobForDetail) {
@@ -591,6 +656,7 @@ export default function App() {
     const updated = [...staffList, newStaff];
     setStaffList(updated);
     saveStoredStaff(updated);
+    saveStaffToFirestore(newStaff).catch(err => console.warn('[Firestore] Error saving staff:', err));
   };
 
   const handleUpdateStaff = (updatedStaff: StaffUser) => {
@@ -600,6 +666,7 @@ export default function App() {
     if (currentStaff.id === updatedStaff.id) {
       setCurrentStaff(updatedStaff);
     }
+    saveStaffToFirestore(updatedStaff).catch(err => console.warn('[Firestore] Error updating staff:', err));
   };
 
   const handleDeleteStaff = (staffId: string) => {
@@ -648,6 +715,7 @@ export default function App() {
     const updated = [...chatMessages, newMsg];
     setChatMessages(updated);
     saveStoredChatMessages(updated);
+    saveChatMessageToFirestore(newMsg).catch(err => console.warn('[Firestore] Error saving chat message:', err));
 
     // If mentions exist, dispatch app notifications to the mentioned staff
     if (mentions && mentions.length > 0) {
