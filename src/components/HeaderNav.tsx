@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob } from '../data/mockData';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderNavProps {
@@ -488,15 +488,27 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 </button>
               )}
 
-              {/* Drafter Action: New Job Button */}
+              {/* Job Creation Action: Strictly Kyle or Jason Barnett */}
               {userRole !== 'customer' && (
-                <button
-                  onClick={onOpenNewJobModal}
-                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-sm border border-blue-400/20 active:scale-95 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>New Job</span>
-                </button>
+                canUserCreateJob(currentStaff) ? (
+                  <button
+                    onClick={onOpenNewJobModal}
+                    className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-sm border border-blue-400/20 active:scale-95 cursor-pointer"
+                    title="Create new project (Authorized for Kyle & Jason Barnett)"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>New Job</span>
+                  </button>
+                ) : (
+                  <div
+                    className="flex items-center gap-1.5 bg-slate-800/80 text-slate-500 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-not-allowed select-none"
+                    title="Creation Restricted: Only Kyle or Jason Barnett can create a new job"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden md:inline">New Job</span>
+                    <span className="text-[10px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.2 rounded">Kyle / Jason only</span>
+                  </div>
+                )
               )}
 
               {/* Reset Demo Data Button */}

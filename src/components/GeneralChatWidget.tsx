@@ -17,6 +17,8 @@ import {
   FileText, 
   Check, 
   CheckCheck, 
+  CheckSquare,
+  Square,
   Sparkles,
   Paperclip,
   Clock,
@@ -33,6 +35,7 @@ interface GeneralChatWidgetProps {
   jobs: Job[];
   onSendMessage: (text: string, mentions?: string[], referencedJobNumbers?: string[], replyToId?: string) => void;
   onDeleteMessage?: (messageId: string) => void;
+  onDeleteMultipleMessages?: (messageIds: string[]) => void;
   onSelectJob: (job: Job) => void;
   onMarkAsRead: () => void;
 }
@@ -45,6 +48,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   jobs,
   onSendMessage,
   onDeleteMessage,
+  onDeleteMultipleMessages,
   onSelectJob,
   onMarkAsRead
 }) => {
@@ -52,12 +56,17 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'mentions' | 'plans'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'mentions' | 'plans'>('all');
   const [isExpanded, setIsExpanded] = useState(false);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [showJobPicker, setShowJobPicker] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [jobQuery, setJobQuery] = useState('');
+
+  // Multi-message select and bulk delete state
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -195,6 +204,67 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   // Filter messages specifically relevant to current staff user
   const userRelevantMessages = messages.filter(msg => isMessageRelevantForUser(msg, currentStaff, jobs));
 
+  // Count unread and read messages for this user
+  const unreadCount = userRelevantMessages.filter(m => !(m.readByStaffIds || []).includes(currentStaff.id)).length;
+  const readCount = userRelevantMessages.filter(m => (m.readByStaffIds || []).includes(currentStaff.id)).length;
+
+  // Selection handlers
+  const toggleSelectMessage = (id: string) => {
+    setSelectedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = () => {
+    const visibleIds = filteredMessages.map(m => m.id);
+    setSelectedMessageIds(new Set(visibleIds));
+  };
+
+  const handleSelectAllRead = () => {
+    const readIds = userRelevantMessages
+      .filter(m => (m.readByStaffIds || []).includes(currentStaff.id))
+      .map(m => m.id);
+    setSelectedMessageIds(new Set(readIds));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedMessageIds(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  const executeBulkDelete = () => {
+    const ids = Array.from(selectedMessageIds);
+    if (ids.length === 0) return;
+    if (onDeleteMultipleMessages) {
+      onDeleteMultipleMessages(ids);
+    } else if (onDeleteMessage) {
+      ids.forEach(id => onDeleteMessage(id));
+    }
+    setSelectedMessageIds(new Set());
+    setConfirmBulkDelete(false);
+    setIsMultiSelectMode(false);
+  };
+
+  const handleQuickDeleteAllRead = () => {
+    const readIds = userRelevantMessages
+      .filter(m => (m.readByStaffIds || []).includes(currentStaff.id))
+      .map(m => m.id);
+    if (readIds.length === 0) return;
+    if (window.confirm(`Permanently delete all ${readIds.length} read messages from Studio Chat?`)) {
+      if (onDeleteMultipleMessages) {
+        onDeleteMultipleMessages(readIds);
+      } else if (onDeleteMessage) {
+        readIds.forEach(id => onDeleteMessage(id));
+      }
+    }
+  };
+
   // Filter messages by search and active tab
   const filteredMessages = userRelevantMessages.filter(msg => {
     if (searchQuery) {
@@ -203,6 +273,10 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       const matchSender = msg.senderName.toLowerCase().includes(q);
       const matchJob = (msg.referencedJobNumbers || []).some(j => j.toLowerCase().includes(q));
       if (!matchText && !matchSender && !matchJob) return false;
+    }
+
+    if (activeTab === 'unread') {
+      return !(msg.readByStaffIds || []).includes(currentStaff.id);
     }
 
     if (activeTab === 'mentions') {
@@ -347,10 +421,43 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Quick Clear All Read Messages Button */}
+          {readCount > 0 && !isMultiSelectMode && (
+            <button
+              type="button"
+              onClick={handleQuickDeleteAllRead}
+              className="px-2 py-1 text-slate-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition flex items-center gap-1 text-[11px] font-medium border border-transparent hover:border-red-500/30 cursor-pointer"
+              title={`Delete all ${readCount} read messages simultaneously`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span className="hidden sm:inline">Delete Read ({readCount})</span>
+            </button>
+          )}
+
+          {/* Multi-Select Messages Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsMultiSelectMode(!isMultiSelectMode);
+              if (isMultiSelectMode) {
+                handleClearSelection();
+              }
+            }}
+            className={`px-2 py-1 rounded-lg transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+              isMultiSelectMode
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700'
+            }`}
+            title={isMultiSelectMode ? "Exit selection mode" : "Select multiple messages to delete simultaneously"}
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            <span>{isMultiSelectMode ? 'Cancel Selection' : 'Select Messages'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
             title={isExpanded ? "Collapse width" : "Expand width"}
           >
             {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -378,7 +485,25 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            All Messages
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('unread')}
+            className={`flex-1 text-xs font-semibold py-1 px-2 rounded-lg transition flex items-center justify-center gap-1 ${
+              activeTab === 'unread'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>Unread</span>
+            {unreadCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeTab === 'unread' ? 'bg-white text-emerald-700' : 'bg-emerald-500/20 text-emerald-400'
+              }`}>
+                {unreadCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -390,7 +515,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             }`}
           >
             <AtSign className="w-3 h-3" />
-            <span>My Mentions</span>
+            <span>Mentions</span>
           </button>
           <button
             type="button"
@@ -425,6 +550,77 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             </button>
           )}
         </div>
+
+        {/* Multi-Select Action Banner */}
+        {isMultiSelectMode && (
+          <div className="bg-blue-950/90 border border-blue-500/40 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-bold text-blue-200 mr-1">
+                {selectedMessageIds.size} of {filteredMessages.length} selected
+              </span>
+              <button
+                type="button"
+                onClick={handleSelectAllVisible}
+                className="text-[11px] font-semibold text-blue-300 hover:text-white bg-blue-900/60 hover:bg-blue-800 px-2 py-0.5 rounded transition cursor-pointer"
+              >
+                Select All
+              </button>
+              {readCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSelectAllRead}
+                  className="text-[11px] font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-800 px-2 py-0.5 rounded transition cursor-pointer"
+                >
+                  Select Read ({readCount})
+                </button>
+              )}
+              {selectedMessageIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="text-[11px] text-slate-400 hover:text-white px-1.5 py-0.5 transition cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {selectedMessageIds.size > 0 && (
+                confirmBulkDelete ? (
+                  <div className="flex items-center gap-1.5 bg-red-950 border border-red-500/60 rounded-lg px-2 py-1">
+                    <span className="text-xs font-bold text-red-200">
+                      Delete {selectedMessageIds.size} message{selectedMessageIds.size > 1 ? 's' : ''}?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={executeBulkDelete}
+                      className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-2 py-0.5 rounded transition cursor-pointer"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBulkDelete(false)}
+                      className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmBulkDelete(true)}
+                    className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Selected ({selectedMessageIds.size})</span>
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Messages Feed */}
@@ -445,12 +641,23 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
           filteredMessages.map((msg) => {
             const isMe = msg.senderId === currentStaff.id || msg.senderName === currentStaff.name;
             const mentionsMe = (msg.mentions || []).some(m => m.toLowerCase().includes(currentStaff.name.toLowerCase()));
+            const isSelected = selectedMessageIds.has(msg.id);
+            const isRead = (msg.readByStaffIds || []).includes(currentStaff.id);
 
             return (
               <div
                 key={msg.id}
+                onClick={() => {
+                  if (isMultiSelectMode) {
+                    toggleSelectMessage(msg.id);
+                  }
+                }}
                 className={`group relative flex flex-col gap-1 rounded-xl p-2.5 transition ${
-                  mentionsMe
+                  isMultiSelectMode ? 'cursor-pointer' : ''
+                } ${
+                  isSelected
+                    ? 'bg-blue-600/20 border-2 border-blue-400 ring-2 ring-blue-500/20 shadow-md'
+                    : mentionsMe
                     ? 'bg-amber-500/10 border border-amber-500/30'
                     : isMe
                     ? 'bg-blue-600/10 border border-blue-500/20'
@@ -469,6 +676,22 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                 {/* Message Header */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
+                    {/* Multi-Select Checkbox */}
+                    {isMultiSelectMode && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectMessage(msg.id);
+                        }}
+                        className={`p-0.5 rounded transition cursor-pointer ${
+                          isSelected ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 fill-blue-500/20" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    )}
+
                     <div
                       className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-extrabold shadow-xs ${getStaffAvatarColor(
                         msg.senderName
@@ -485,66 +708,84 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {/* Read / New indicator */}
+                    {isRead ? (
+                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5" title="Read by you">
+                        <CheckCheck className="w-3 h-3 text-blue-400/80" />
+                        <span className="hidden sm:inline">Read</span>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 rounded-full">
+                        New
+                      </span>
+                    )}
+
                     <span className="text-[10px] text-slate-500 font-mono">
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
 
                     {/* Quick Action Buttons on Hover */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {/* Reply Button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReplyingTo(msg);
-                          inputRef.current?.focus();
-                        }}
-                        className="text-[11px] text-slate-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition cursor-pointer"
-                        title="Reply to this message"
-                      >
-                        <Reply className="w-3 h-3" />
-                        <span>Reply</span>
-                      </button>
+                    {!isMultiSelectMode && (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Reply Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReplyingTo(msg);
+                            inputRef.current?.focus();
+                          }}
+                          className="text-[11px] text-slate-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition cursor-pointer"
+                          title="Reply to this message"
+                        >
+                          <Reply className="w-3 h-3" />
+                          <span>Reply</span>
+                        </button>
 
-                      {/* Delete Button */}
-                      {onDeleteMessage && (
-                        deletingMessageId === msg.id ? (
-                          <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/40 rounded px-1.5 py-0.5 animate-fadeIn">
-                            <span className="text-[10px] text-red-300 font-bold">Delete?</span>
+                        {/* Delete Button */}
+                        {onDeleteMessage && (
+                          deletingMessageId === msg.id ? (
+                            <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/40 rounded px-1.5 py-0.5 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+                              <span className="text-[10px] text-red-300 font-bold">Delete?</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onDeleteMessage(msg.id);
+                                  setDeletingMessageId(null);
+                                }}
+                                className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.2 rounded transition cursor-pointer"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeletingMessageId(null)}
+                                className="text-[10px] text-slate-400 hover:text-white px-1 py-0.2 rounded transition cursor-pointer"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => {
-                                onDeleteMessage(msg.id);
-                                setDeletingMessageId(null);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeletingMessageId(msg.id);
                               }}
-                              className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.2 rounded transition cursor-pointer"
+                              className="text-[11px] text-slate-400 hover:text-red-400 p-1 hover:bg-red-500/10 rounded transition cursor-pointer"
+                              title="Delete message"
                             >
-                              Yes
+                              <Trash2 className="w-3 h-3" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeletingMessageId(null)}
-                              className="text-[10px] text-slate-400 hover:text-white px-1 py-0.2 rounded transition cursor-pointer"
-                            >
-                              No
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setDeletingMessageId(msg.id)}
-                            className="text-[11px] text-slate-400 hover:text-red-400 p-1 hover:bg-red-500/10 rounded transition cursor-pointer"
-                            title="Delete message"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )
-                      )}
-                    </div>
+                          )
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Message Body */}
-                <div className="text-xs text-slate-300 leading-relaxed pl-8 break-words">
+                <div className={`text-xs text-slate-300 leading-relaxed ${isMultiSelectMode ? 'pl-14' : 'pl-8'} break-words`}>
                   {renderMessageContent(msg.text)}
                 </div>
               </div>

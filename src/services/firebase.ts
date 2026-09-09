@@ -22,7 +22,9 @@ import {
   writeBatch,
   query,
   orderBy,
-  limit
+  limit,
+  updateDoc,
+  arrayUnion
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard } from '../types';
@@ -282,9 +284,7 @@ export function subscribeToChat(
           msgs.push({ ...(docSnap.data() as ChatMessage), id: docSnap.id });
         });
         msgs.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-        if (msgs.length > 0) {
-          onUpdate(msgs);
-        }
+        onUpdate(msgs);
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, path);
@@ -303,6 +303,117 @@ export async function saveChatMessageToFirestore(message: ChatMessage): Promise<
     await setDoc(doc(db, 'discussions', message.id), message, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteChatMessageFromFirestore(messageId: string): Promise<void> {
+  const path = `discussions/${messageId}`;
+  try {
+    await deleteDoc(doc(db, 'discussions', messageId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteMultipleChatMessagesFromFirestore(messageIds: string[]): Promise<void> {
+  if (!messageIds || messageIds.length === 0) return;
+  const path = 'discussions';
+  try {
+    const batch = writeBatch(db);
+    for (const id of messageIds) {
+      batch.delete(doc(db, 'discussions', id));
+    }
+    await batch.commit();
+    console.log(`[Firestore] Batch deleted ${messageIds.length} messages from discussions.`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function markChatMessagesAsReadInFirestore(messageIds: string[], staffId: string): Promise<void> {
+  if (!messageIds || messageIds.length === 0 || !staffId) return;
+  try {
+    const batch = writeBatch(db);
+    for (const id of messageIds) {
+      batch.update(doc(db, 'discussions', id), {
+        readByStaffIds: arrayUnion(staffId)
+      });
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn('[Firestore] Notice while syncing message read states:', err);
+  }
+}
+
+/**
+ * Clean up dummy data from Firestore (such as job-1 / M26-195 Testing Dummy,
+ * any dummy chat messages, and removing James from drafting assignments)
+ */
+export async function purgeDummyDataFromFirestore(): Promise<void> {
+  try {
+    // 1. Delete job-1 if present
+    try {
+      await deleteDoc(doc(db, 'jobs', 'job-1'));
+    } catch {
+      // Ignored if already deleted
+    }
+
+    // 2. Scan jobs collection to delete any remaining dummy job and remove James from jobs
+    try {
+      const jobsSnap = await getDocs(collection(db, 'jobs'));
+      for (const d of jobsSnap.docs) {
+        const j = d.data() as Job;
+        if (d.id === 'job-1' || j.job_number === 'M26-195' || (j.customer_name || '').toLowerCase().includes('testing dummy')) {
+          await deleteDoc(doc(db, 'jobs', d.id));
+          console.log(`[Firestore] Purged dummy job doc: ${d.id}`);
+        } else if ((j.assigned_drafter || '').toLowerCase().includes('james')) {
+          const sanitizedLogs = (j.time_logs || []).map(tl => 
+            (tl.drafterName || '').toLowerCase().includes('james') ? { ...tl, drafterName: 'Kyle' } : tl
+          );
+          const sanitizedDelegated = (j.delegated_tasks || []).filter(
+            dt => !(dt.assignedTo || '').toLowerCase().includes('james')
+          );
+          await updateDoc(doc(db, 'jobs', d.id), {
+            assigned_drafter: 'Kyle',
+            time_logs: sanitizedLogs,
+            delegated_tasks: sanitizedDelegated
+          });
+          console.log(`[Firestore] Purged James assignment on job: ${d.id}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Firestore] Notice during jobs purge:', e);
+    }
+
+    // 3. Scan discussions to purge mock/dummy messages
+    try {
+      const chatSnap = await getDocs(collection(db, 'discussions'));
+      const batch = writeBatch(db);
+      let purgeCount = 0;
+      chatSnap.forEach((d) => {
+        const m = d.data() as ChatMessage;
+        const text = (m.text || '').toLowerCase();
+        const isDummy = d.id.startsWith('msg-ethan-') || 
+                        d.id.startsWith('msg-jm-') || 
+                        d.id.startsWith('msg-dr-') || 
+                        ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(d.id) ||
+                        text.includes('m26-195') || 
+                        text.includes('testing dummy') ||
+                        (m.referencedJobNumbers || []).some(j => j.includes('195'));
+        if (isDummy) {
+          batch.delete(doc(db, 'discussions', d.id));
+          purgeCount++;
+        }
+      });
+      if (purgeCount > 0) {
+        await batch.commit();
+        console.log(`[Firestore] Purged ${purgeCount} dummy chat messages from discussions.`);
+      }
+    } catch (e) {
+      console.warn('[Firestore] Notice during chat purge:', e);
+    }
+  } catch (err) {
+    console.warn('[Firestore] General notice during dummy data cleanup:', err);
   }
 }
 

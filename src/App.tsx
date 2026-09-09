@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, canUserCreateJob } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -21,6 +21,10 @@ import {
   seedStaffToFirestore,
   subscribeToChat,
   saveChatMessageToFirestore,
+  deleteChatMessageFromFirestore,
+  deleteMultipleChatMessagesFromFirestore,
+  markChatMessagesAsReadInFirestore,
+  purgeDummyDataFromFirestore,
   subscribeToAuth,
   syncAuthToStaffUser,
   logoutUser,
@@ -128,9 +132,10 @@ export default function App() {
     }
     setTimeCards(getStoredTimeCards());
 
-    // 2. Test Firebase connection & purge legacy mock staff from cloud
+    // 2. Test Firebase connection & purge legacy mock staff and dummy data from cloud
     testConnection();
     purgeRemovedMockStaff().catch(err => console.warn('Mock staff purge skipped/failed:', err));
+    purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
     // 3. Connect real-time Firestore synchronization
     const unsubscribeJobs = subscribeToJobs(
@@ -173,7 +178,7 @@ export default function App() {
     );
 
     const unsubscribeChat = subscribeToChat((cloudMsgs) => {
-      if (cloudMsgs && cloudMsgs.length > 0) {
+      if (cloudMsgs) {
         setChatMessages(cloudMsgs);
         saveStoredChatMessages(cloudMsgs);
       }
@@ -973,20 +978,37 @@ export default function App() {
       saveStoredChatMessages(updated);
       return updated;
     });
+    deleteChatMessageFromFirestore(messageId).catch(err => console.warn('[Firestore] Error deleting chat message:', err));
+  };
+
+  const handleDeleteMultipleChatMessages = (messageIds: string[]) => {
+    if (!messageIds || messageIds.length === 0) return;
+    const idSet = new Set(messageIds);
+    setChatMessages(prev => {
+      const updated = prev.filter(m => !idSet.has(m.id));
+      saveStoredChatMessages(updated);
+      return updated;
+    });
+    deleteMultipleChatMessagesFromFirestore(messageIds).catch(err => console.warn('[Firestore] Error deleting multiple chat messages:', err));
   };
 
   const handleMarkChatRead = () => {
     setChatMessages(prev => {
       const relevantMsgs = prev.filter(m => isMessageRelevantForUser(m, currentStaff, jobs));
-      const hasUnread = relevantMsgs.some(m => !m.readByStaffIds.includes(currentStaff.id));
-      if (!hasUnread) return prev;
+      const unreadIds = relevantMsgs
+        .filter(m => !(m.readByStaffIds || []).includes(currentStaff.id))
+        .map(m => m.id);
+
+      if (unreadIds.length === 0) return prev;
+
       const updated = prev.map(m => {
-        if (isMessageRelevantForUser(m, currentStaff, jobs) && !m.readByStaffIds.includes(currentStaff.id)) {
-          return { ...m, readByStaffIds: [...m.readByStaffIds, currentStaff.id] };
+        if (unreadIds.includes(m.id)) {
+          return { ...m, readByStaffIds: [...(m.readByStaffIds || []), currentStaff.id] };
         }
         return m;
       });
       saveStoredChatMessages(updated);
+      markChatMessagesAsReadInFirestore(unreadIds, currentStaff.id).catch(err => console.warn('[Firestore] Error syncing chat read status:', err));
       return updated;
     });
   };
@@ -1180,8 +1202,12 @@ export default function App() {
     updateJobsState(updatedJobs);
   };
 
-  // 6. Create New Job Intake
+  // 6. Create New Job Intake (Restricted strictly to Kyle or Jason Barnett)
   const handleCreateJob = (newJob: Job) => {
+    if (!canUserCreateJob(currentStaff)) {
+      alert('Permission Restricted: Only Kyle or Jason Barnett have authorization to create a new job.');
+      return;
+    }
     const updated = [newJob, ...jobs];
     updateJobsState(updated);
     setSelectedCustomerId(newJob.id);
@@ -1751,7 +1777,13 @@ export default function App() {
         notifications={notifications}
         onMarkNotificationRead={handleMarkNotificationRead}
         onSelectJob={handleOpenJobDetail}
-        onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
+        onOpenNewJobModal={() => {
+          if (!canUserCreateJob(currentStaff)) {
+            alert('Permission Restricted: Only Kyle or Jason Barnett are authorized to create a new job.');
+            return;
+          }
+          setIsNewJobModalOpen(true);
+        }}
         onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
         onResetData={handleResetData}
         onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
@@ -1924,6 +1956,7 @@ export default function App() {
         onClose={() => setIsNewJobModalOpen(false)}
         onCreateJob={handleCreateJob}
         staffList={staffList}
+        currentStaff={currentStaff}
       />
 
       {/* MODAL 4: Delegate Work Modal */}
@@ -1990,6 +2023,7 @@ export default function App() {
         jobs={jobs}
         onSendMessage={handleSendChatMessage}
         onDeleteMessage={handleDeleteChatMessage}
+        onDeleteMultipleMessages={handleDeleteMultipleChatMessages}
         onSelectJob={(job) => setSelectedJobForDetail(job)}
         onMarkAsRead={handleMarkChatRead}
       />

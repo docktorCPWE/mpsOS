@@ -1,22 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Compass, User, Mail, Phone, Home, DollarSign, Calendar, CheckCircle2, Receipt, ShieldCheck } from 'lucide-react';
 import { Job, JobPhase, StaffUser } from '../types';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, canUserCreateJob } from '../data/mockData';
 
 interface NewJobModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreateJob: (newJob: Job) => void;
   staffList?: StaffUser[];
+  currentStaff?: StaffUser;
 }
 
 export const NewJobModal: React.FC<NewJobModalProps> = ({ 
   isOpen, 
   onClose, 
   onCreateJob, 
-  staffList = STAFF_USERS 
+  staffList = STAFF_USERS,
+  currentStaff
 }) => {
   if (!isOpen) return null;
+
+  if (currentStaff && !canUserCreateJob(currentStaff)) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 font-sans">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Permission Restricted</h3>
+            <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+              Only <strong>Kyle</strong> or <strong>Jason Barnett</strong> are authorized to create and onboard new jobs.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const availableStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   

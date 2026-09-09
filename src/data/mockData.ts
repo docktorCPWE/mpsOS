@@ -97,6 +97,19 @@ export function canUserManageInvoices(userNameOrStaff?: string | StaffUser): boo
 }
 
 /**
+ * Strict role-based permission for Job Intake / Creation:
+ * Only Kyle or Jason Barnett are authorized to create a new job.
+ */
+export function canUserCreateJob(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  const name = typeof userNameOrStaff === 'object' ? userNameOrStaff.name : userNameOrStaff;
+  const lower = name.toLowerCase().trim();
+  const isKyle = lower.includes('kyle');
+  const isJasonBarnett = lower.includes('jason barnett') || lower === 'jason';
+  return isKyle || isJasonBarnett;
+}
+
+/**
  * Determines whether a chat message is specifically relevant to the currently logged in staff user.
  * A message is displayed for a staff profile if:
  * 1. The message was sent by the staff member
@@ -174,212 +187,6 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
 
 export const INITIAL_JOBS: Job[] = [
   {
-    id: 'job-1',
-    job_number: 'M26-195',
-    customer_name: 'Testing Dummy',
-    customer_email: 'testing.dummy@example.com',
-    customer_phone: '(555) 234-5678',
-    assigned_drafter: 'Kyle, Lead Project Manager & Senior Drafter',
-    sq_ft: 2850,
-    style: 'Modern Farmhouse',
-    lot_details: 'Sloped 0.75 acre lot with north rear orientation, 35ft set back requirement.',
-    current_status: 'Preliminary Layout',
-    roadblock: false,
-    layout_reviews_count: 1,
-    max_reviews_included: 3,
-    last_customer_contact: new Date(Date.now() - 3600000 * 4).toISOString(),
-    next_step: 'Reviewing Room Location, Master Suite Flow & Vaulted Great Room',
-    created_at: '2026-07-10T09:00:00Z',
-    target_completion_date: '2026-08-15',
-    estimated_cost: 3400,
-    hourly_rate: 85,
-    deposit_collected: true,
-    deposit_amount: 1500,
-    deposit_date: '2026-07-10',
-    deposit_notes: 'Initial 50% retainer paid via Stripe',
-    invoice_status: 'Invoiced',
-    invoice_number: 'INV-2026-001',
-    phase_entry_date: new Date(Date.now() - 3600000 * 72).toISOString(), // 3 days in current phase
-    delegated_tasks: [
-      {
-        id: 'del-1',
-        jobId: 'job-1',
-        jobNumber: 'M26-195',
-        customerName: 'Testing Dummy',
-        componentTitle: 'Foundation & Stem Wall Structural Detail',
-        category: 'Foundation Plan',
-        priority: 'High',
-        assignedTo: 'James',
-        assignedToEmail: 'james@myplanstore.com',
-        delegatedBy: 'Kyle',
-        delegatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-        dueDate: '2026-08-18',
-        neededWorkDescription: 'Engineer stem wall footing depth for 4ft slope on North boundary. Coordinate with civil grade report.',
-        notes: 'Customer specifically requested walkout basement access on northeast quadrant. Ensure 8ft clear headroom.',
-        status: 'In Progress',
-        attachments: [
-          {
-            id: 'att-1',
-            name: 'Civil_Slope_Topography_Survey.pdf',
-            size: '2.4 MB',
-            type: 'application/pdf',
-            url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
-          },
-          {
-            id: 'att-2',
-            name: 'Foundation_Redlines_Kyle.dwg',
-            size: '5.1 MB',
-            type: 'application/acad',
-            url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80'
-          }
-        ]
-      },
-      {
-        id: 'del-2',
-        jobId: 'job-1',
-        jobNumber: 'M26-195',
-        customerName: 'Testing Dummy',
-        componentTitle: 'Hidden Pantry Millwork & Kitchen Island CAD Detail',
-        category: 'Floor Plan',
-        priority: 'Normal',
-        assignedTo: 'Aaron',
-        assignedToEmail: 'aaron@myplanstore.com',
-        delegatedBy: 'Jason',
-        delegatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-        dueDate: '2026-08-20',
-        neededWorkDescription: 'Draft cabinet elevations showing integrated refrigerator panel and concealed pantry entry door.',
-        notes: 'Check client comment #c2 requesting 10ft ceiling matching millwork.',
-        status: 'Pending',
-        attachments: [
-          {
-            id: 'att-3',
-            name: 'Pantry_Millwork_Concept_Sketches.pdf',
-            size: '1.8 MB',
-            type: 'application/pdf',
-            url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
-          }
-        ]
-      }
-    ],
-    version_snapshots: [
-      {
-        id: 'snap-101',
-        versionLabel: 'v1.0 - Customer Inquiry',
-        timestamp: '2026-07-10T09:30:00Z',
-        phase: 'Customer Inquiry',
-        createdByName: 'Kyle',
-        note: 'Initial intake snapshot before layout drafting.',
-        comments: [
-          {
-            id: 'c0',
-            author: 'Testing Dummy',
-            role: 'customer',
-            text: 'Submitted request for 2,850 sq ft Modern Farmhouse floor plan.',
-            timestamp: '2026-07-10T09:15:00Z'
-          }
-        ]
-      },
-      {
-        id: 'snap-102',
-        versionLabel: 'v1.1 - Preliminary Layout Pass',
-        timestamp: new Date(Date.now() - 3600000 * 20).toISOString(),
-        phase: 'Preliminary Layout',
-        createdByName: 'Kyle',
-        note: 'First CAD pass with 10ft ceilings and open kitchen concept.',
-        comments: [
-          {
-            id: 'c1',
-            author: 'Kyle',
-            role: 'drafter',
-            text: 'Initial layout complete! Sent primary floorplan with open concept kitchen/dining and 10ft ceiling height across the main living area.',
-            timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-          }
-        ]
-      }
-    ],
-    time_logs: [
-      {
-        id: 'tl-1',
-        drafterName: 'Kyle',
-        startTime: new Date(Date.now() - 3600000 * 48).toISOString(),
-        endTime: new Date(Date.now() - 3600000 * 45).toISOString(),
-        durationSeconds: 10800, // 3 hours
-        taskDescription: 'Initial floorplan drafting & room layout scaling',
-        hourlyRate: 85
-      },
-      {
-        id: 'tl-2',
-        drafterName: 'James',
-        startTime: new Date(Date.now() - 3600000 * 24).toISOString(),
-        endTime: new Date(Date.now() - 3600000 * 21.5).toISOString(),
-        durationSeconds: 9000, // 2.5 hours
-        taskDescription: 'Vaulted ceiling trusses & kitchen island placement',
-        hourlyRate: 85
-      }
-    ],
-    comments: [
-      {
-        id: 'c1',
-        author: 'Kyle',
-        role: 'drafter',
-        text: 'Initial layout complete! Sent primary floorplan with open concept kitchen/dining and 10ft ceiling height across the main living area.',
-        timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-      },
-      {
-        id: 'c2',
-        author: 'Testing Dummy',
-        role: 'customer',
-        text: 'We love the island layout! Could we check if the pantry can be converted to a hidden walk-in pantry behind cabinet doors?',
-        timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-        pinnedLocation: { x: 42, y: 35 }
-      }
-    ],
-    deliverables: [
-      {
-        id: 'd1',
-        title: 'Preliminary Floor Plan - Main Level',
-        category: 'Floor Plan',
-        version: 'v1.1',
-        uploadedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-        fileSize: '4.2 MB',
-        previewType: 'canvas_floorplan',
-        fileUrl: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80',
-        fileName: 'Main_Level_Floorplan_v1.1.png',
-        changeNotes: 'Revised kitchen island footprint to 10ft length, added hidden walk-in pantry doorway concealed behind custom millwork cabinets.',
-        authorDrafter: 'Kyle'
-      },
-      {
-        id: 'd2',
-        title: 'Front & Rear Exterior Concept Render',
-        category: '3D Render',
-        version: 'v1.0',
-        uploadedAt: new Date(Date.now() - 3600000 * 18).toISOString(),
-        fileSize: '12.8 MB',
-        previewType: 'render_image',
-        fileUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
-        fileName: 'Modern_Farmhouse_Exterior_3D_Concept.jpg',
-        changeNotes: 'Initial 3D exterior perspective showcasing board-and-batten siding, dark bronze standing seam metal roof accents, and timber truss front porch.',
-        authorDrafter: 'James'
-      }
-    ],
-    audit_logs: [
-      {
-        id: 'a1',
-        action: 'Job Initialized',
-        performedBy: 'Kyle',
-        timestamp: '2026-07-10T09:00:00Z',
-        details: 'Created job M26-195 for Testing Dummy (Modern Farmhouse 2,850 sq ft)'
-      },
-      {
-        id: 'a2',
-        action: 'Status Changed',
-        performedBy: 'Kyle',
-        timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-        details: 'Advanced phase from Customer Inquiry to Preliminary Layout'
-      }
-    ]
-  },
-  {
     id: 'job-m26-214',
     job_number: 'M26-214',
     owner: 'JB',
@@ -443,7 +250,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-214-3',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-18T13:00:00.000Z',
         durationSeconds: 3600, // 60 min (1.00h)
         taskDescription: 'Roofline Geometry & Exterior Elevations Drafting',
@@ -454,7 +261,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-214-4',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-22T09:30:00.000Z',
         durationSeconds: 5400, // 90 min (1.50h)
         taskDescription: 'Foundation & Footing Structural Coordination',
@@ -566,12 +373,12 @@ export const INITIAL_JOBS: Job[] = [
     total_time_entries: 10,
     total_duration_minutes: 593,
     total_duration_hours: 9.88,
-    assigned_drafter: 'James',
+    assigned_drafter: 'Kyle',
     project_manager: 'Jason',
     time_logs: [
       {
         id: 't-218-1',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-21T09:00:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'As-Built Existing Measurements & Wall Verification',
@@ -582,7 +389,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-2',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-22T10:00:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Demolition Plan & Load-Bearing Wall Check',
@@ -593,7 +400,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-3',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-25T13:00:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Proposed Remodel Main Living & Kitchen Concept',
@@ -604,7 +411,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-4',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-08-27T11:00:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Master Bath Expansion & Plumbing Reroute Layout',
@@ -626,7 +433,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-6',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-01T09:30:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Structural Header & Beam Framing Specs',
@@ -637,7 +444,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-7',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-02T13:30:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Window & Door Alterations Schedule',
@@ -648,7 +455,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-8',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-03T10:00:00.000Z',
         durationSeconds: 3600, // 60m
         taskDescription: 'Elevation Changes for Rear Addition',
@@ -659,7 +466,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-9',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-04T15:00:00.000Z',
         durationSeconds: 4080, // 68m (1.13h)
         taskDescription: 'Client Changes & Kitchen Island Revision',
@@ -670,7 +477,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-10',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-06T11:00:00.000Z',
         durationSeconds: 3600, // 60m -> Sum: 60*7 + 45 + 68 + 60 = 593 mins = 9.88 hrs
         taskDescription: 'Prelim Set Assembly & Construction Note Callouts',
@@ -690,13 +497,13 @@ export const INITIAL_JOBS: Job[] = [
         uploadedAt: '2026-09-04T16:00:00.000Z',
         fileSize: '4.2 MB',
         previewType: 'canvas_floorplan',
-        authorDrafter: 'James'
+        authorDrafter: 'Kyle'
       }
     ],
     comments: [
       {
         id: 'c-218-1',
-        author: 'James',
+        author: 'Kyle',
         role: 'drafter',
         text: 'Received customer notes regarding kitchen pantry expansion. Updating preliminary drawings now.',
         timestamp: '2026-09-04T16:30:00.000Z'
@@ -938,12 +745,12 @@ export const INITIAL_JOBS: Job[] = [
     total_time_entries: 1,
     total_duration_minutes: 20,
     total_duration_hours: 0.33,
-    assigned_drafter: 'James',
+    assigned_drafter: 'Kyle',
     project_manager: 'Jason',
     time_logs: [
       {
         id: 't-252-1',
-        drafterName: 'James',
+        drafterName: 'Kyle',
         startTime: '2026-09-05T14:00:00.000Z',
         durationSeconds: 1200, // 20 min (0.33h)
         taskDescription: 'Final Review Changes & Construction Print QA Check',
@@ -963,13 +770,13 @@ export const INITIAL_JOBS: Job[] = [
         uploadedAt: '2026-09-05T15:00:00.000Z',
         fileSize: '8.4 MB',
         previewType: 'pdf_spec',
-        authorDrafter: 'James'
+        authorDrafter: 'Kyle'
       }
     ],
     comments: [
       {
         id: 'c-252-1',
-        author: 'James',
+        author: 'Kyle',
         role: 'drafter',
         text: 'Applied final review edits requested by CCI (AJ & Gwen). Ready for final invoicing and print delivery.',
         timestamp: '2026-09-05T15:15:00.000Z'
@@ -998,215 +805,12 @@ export const RESERVED_JOB_NUMBERS: string[] = [
   'M26-296', 'M26-297', 'M26-298', 'M26-299', 'M26-300'
 ];
 
-export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
-  // Ethan (Operations & Project Manager) Messages
-  {
-    id: 'msg-ethan-1',
-    senderId: 'staff-jason',
-    senderName: 'Jason',
-    senderRole: 'Project Manager & Operations',
-    text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #M26-195 before we send the customer invoice?',
-    timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
-    mentions: ['Ethan'],
-    referencedJobNumbers: ['M26-195'],
-    readByStaffIds: ['staff-jason'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-ethan-2',
-    senderId: 'staff-ethan',
-    senderName: 'Ethan',
-    senderRole: 'Operations & Project Manager',
-    text: 'Checked #M26-195. Truss layouts and engineering stamps look solid. Permitting packet is good to go for customer invoicing!',
-    timestamp: new Date(Date.now() - 3600000 * 1.8).toISOString(),
-    mentions: ['Jason'],
-    referencedJobNumbers: ['M26-195'],
-    replyToId: 'msg-ethan-1',
-    replyToMessage: {
-      id: 'msg-ethan-1',
-      senderName: 'Jason',
-      text: 'Hey @Ethan, can you review the Truss calculations and structural sign-off on #M26-195 before we send the customer invoice?'
-    },
-    readByStaffIds: ['staff-ethan', 'staff-jason'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-ethan-3',
-    senderId: 'staff-greg',
-    senderName: 'Greg Hyatt',
-    senderRole: 'Owner & Founder',
-    text: '@Ethan please check the operations schedule for the upcoming plan submissions.',
-    timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-    mentions: ['Ethan'],
-    readByStaffIds: ['staff-greg'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-ethan-4',
-    senderId: 'staff-ethan',
-    senderName: 'Ethan',
-    senderRole: 'Operations & Project Manager',
-    text: '@Greg Hyatt scheduled Aaron and James on the primary drafting queues. We are on track for this sprint.',
-    timestamp: new Date(Date.now() - 3600000 * 4.2).toISOString(),
-    mentions: ['Greg Hyatt'],
-    replyToId: 'msg-ethan-3',
-    replyToMessage: {
-      id: 'msg-ethan-3',
-      senderName: 'Greg Hyatt',
-      text: '@Ethan please check the operations schedule for the upcoming plan submissions.'
-    },
-    readByStaffIds: ['staff-ethan', 'staff-greg'],
-    channelId: 'general'
-  },
+export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [];
 
-  // Kyle & James
-  {
-    id: 'msg-1',
-    senderId: 'staff-kyle',
-    senderName: 'Kyle',
-    senderRole: 'Lead Project Manager & Senior Drafter',
-    text: 'Hey @James, can you double check the garage header heights on #M26-195? Customer asked if we can raise ceiling clearance to 10ft.',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    mentions: ['James'],
-    referencedJobNumbers: ['M26-195'],
-    readByStaffIds: ['staff-kyle', 'staff-james', 'staff-jason'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-2',
-    senderId: 'staff-james',
-    senderName: 'James',
-    senderRole: 'Architectural Drafter',
-    text: 'Checked #M26-195, updated the header spans and raised clearance to 10\'-4" clearance! Deliverables are uploaded for review.',
-    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    mentions: ['Kyle'],
-    referencedJobNumbers: ['M26-195'],
-    replyToId: 'msg-1',
-    replyToMessage: {
-      id: 'msg-1',
-      senderName: 'Kyle',
-      text: 'Hey @James, can you double check the garage header heights on #M26-195? Customer asked if we can raise ceiling clearance to 10ft.'
-    },
-    readByStaffIds: ['staff-james', 'staff-kyle'],
-    channelId: 'general'
-  },
-
-  // Jason & Greg Hyatt
-  {
-    id: 'msg-3',
-    senderId: 'staff-jason',
-    senderName: 'Jason',
-    senderRole: 'Project Manager & Operations',
-    text: '@Greg Hyatt the preliminary structural permit packet for #M26-195 is signed off by engineering. Ready for customer review stage.',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    mentions: ['Greg Hyatt'],
-    referencedJobNumbers: ['M26-195'],
-    readByStaffIds: ['staff-jason', 'staff-kyle'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-greg-resp',
-    senderId: 'staff-greg',
-    senderName: 'Greg Hyatt',
-    senderRole: 'Owner & Founder',
-    text: '@Jason verified and approved for customer review delivery.',
-    timestamp: new Date(Date.now() - 3600000 * 1.6).toISOString(),
-    mentions: ['Jason'],
-    referencedJobNumbers: ['M26-195'],
-    replyToId: 'msg-3',
-    readByStaffIds: ['staff-greg', 'staff-jason'],
-    channelId: 'general'
-  },
-
-  // Kyle & Aaron
-  {
-    id: 'msg-4',
-    senderId: 'staff-kyle',
-    senderName: 'Kyle',
-    senderRole: 'Lead Project Manager & Senior Drafter',
-    text: 'Hey @Aaron, please check the setback boundary on #M26-195 when you have a moment.',
-    timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-    mentions: ['Aaron'],
-    referencedJobNumbers: ['M26-195'],
-    readByStaffIds: ['staff-kyle', 'staff-aaron'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-5',
-    senderId: 'staff-aaron',
-    senderName: 'Aaron',
-    senderRole: 'Architectural Drafter',
-    text: 'Took a look at #M26-195, 35ft rear setback and 10ft side setbacks are all verified with local county code.',
-    timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(),
-    mentions: ['Kyle'],
-    referencedJobNumbers: ['M26-195'],
-    replyToId: 'msg-4',
-    replyToMessage: {
-      id: 'msg-4',
-      senderName: 'Kyle',
-      text: 'Hey @Aaron, please check the setback boundary on #M26-195 when you have a moment.'
-    },
-    readByStaffIds: ['staff-aaron', 'staff-kyle'],
-    channelId: 'general'
-  },
-
-  // James & Jason
-  {
-    id: 'msg-jm-1',
-    senderId: 'staff-jason',
-    senderName: 'Jason',
-    senderRole: 'Project Manager & Operations',
-    text: 'Hey @James, I delegated the hidden pantry CAD detail for #M26-195. Let me know if you need the sketch reference.',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    mentions: ['James'],
-    referencedJobNumbers: ['M26-195'],
-    readByStaffIds: ['staff-jason', 'staff-james'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-jm-2',
-    senderId: 'staff-james',
-    senderName: 'James',
-    senderRole: 'Architectural Drafter',
-    text: '@Jason got the concept sketches, drafting the millwork elevations and detail sections now.',
-    timestamp: new Date(Date.now() - 3600000 * 1.2).toISOString(),
-    mentions: ['Jason'],
-    referencedJobNumbers: ['M26-195'],
-    replyToId: 'msg-jm-1',
-    readByStaffIds: ['staff-james', 'staff-jason'],
-    channelId: 'general'
-  },
-
-  // Drew Lupkey & Greg Hyatt
-  {
-    id: 'msg-dr-1',
-    senderId: 'staff-greg',
-    senderName: 'Greg Hyatt',
-    senderRole: 'Owner & Founder',
-    text: '@Drew Lupkey can you run the weekly invoicing audit for the closed and pending projects?',
-    timestamp: new Date(Date.now() - 3600000 * 4.5).toISOString(),
-    mentions: ['Drew Lupkey'],
-    readByStaffIds: ['staff-greg', 'staff-drew'],
-    channelId: 'general'
-  },
-  {
-    id: 'msg-dr-2',
-    senderId: 'staff-drew',
-    senderName: 'Drew Lupkey',
-    senderRole: 'Finance & Project Admin',
-    text: '@Greg Hyatt billing audit complete and invoice summaries exported. Ready for distribution.',
-    timestamp: new Date(Date.now() - 3600000 * 3.8).toISOString(),
-    mentions: ['Greg Hyatt'],
-    replyToId: 'msg-dr-1',
-    readByStaffIds: ['staff-drew', 'staff-greg'],
-    channelId: 'general'
-  }
-];
-
-export const STORAGE_KEY = 'my_plan_store_os_jobs_v14';
-export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v14';
-export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v14';
-export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v14';
+export const STORAGE_KEY = 'my_plan_store_os_jobs_v15';
+export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v15';
+export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v15';
+export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v15';
 
 export const REMOVED_MOCK_STAFF_IDS = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'];
 
@@ -1256,12 +860,50 @@ export function resetStoredStaff(): StaffUser[] {
 
 export function getStoredJobs(): Job[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem('my_plan_store_os_jobs_v14');
+    }
     if (!raw) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_JOBS));
       return INITIAL_JOBS;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Filter out dummy job-1 or Testing Dummy or M26-195, and remove James assignments
+      const cleaned = parsed
+        .filter((j: Job) => j.id !== 'job-1' && j.job_number !== 'M26-195' && j.customer_name !== 'Testing Dummy')
+        .map((j: Job) => {
+          let updated = { ...j };
+          if ((updated.assigned_drafter || '').toLowerCase().includes('james')) {
+            updated.assigned_drafter = 'Kyle';
+          }
+          if (updated.time_logs && updated.time_logs.length > 0) {
+            updated.time_logs = updated.time_logs.map(tl => 
+              (tl.drafterName || '').toLowerCase().includes('james') ? { ...tl, drafterName: 'Kyle' } : tl
+            );
+          }
+          if (updated.delegated_tasks && updated.delegated_tasks.length > 0) {
+            updated.delegated_tasks = updated.delegated_tasks.filter(
+              dt => !(dt.assignedTo || '').toLowerCase().includes('james')
+            );
+          }
+          if (updated.deliverables && updated.deliverables.length > 0) {
+            updated.deliverables = updated.deliverables.map(d =>
+              (d.authorDrafter || '').toLowerCase().includes('james') ? { ...d, authorDrafter: 'Kyle' } : d
+            );
+          }
+          if (updated.comments && updated.comments.length > 0) {
+            updated.comments = updated.comments.map(c =>
+              (c.author || '').toLowerCase().includes('james') ? { ...c, author: 'Kyle' } : c
+            );
+          }
+          return updated;
+        });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+      return cleaned;
+    }
+    return INITIAL_JOBS;
   } catch (err) {
     console.error('Failed to load stored jobs:', err);
     return INITIAL_JOBS;
@@ -1278,12 +920,24 @@ export function saveStoredJobs(jobs: Job[]) {
 
 export function getStoredNotifications(): AppNotification[] {
   try {
-    const raw = localStorage.getItem(NOTIFS_STORAGE_KEY);
+    let raw = localStorage.getItem(NOTIFS_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem('my_plan_store_os_notifs_v14');
+    }
     if (!raw) {
       localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(INITIAL_NOTIFICATIONS));
       return INITIAL_NOTIFICATIONS;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const cleaned = parsed.filter(n => {
+        const text = (n.message || '').toLowerCase();
+        return !text.includes('m26-195') && !text.includes('testing dummy');
+      });
+      localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(cleaned));
+      return cleaned;
+    }
+    return INITIAL_NOTIFICATIONS;
   } catch (err) {
     console.error('Failed to load notifications:', err);
     return INITIAL_NOTIFICATIONS;
@@ -1300,12 +954,30 @@ export function saveStoredNotifications(notifs: AppNotification[]) {
 
 export function getStoredChatMessages(): ChatMessage[] {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    let raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem('my_plan_store_os_chat_v14');
+    }
     if (!raw) {
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(INITIAL_CHAT_MESSAGES));
       return INITIAL_CHAT_MESSAGES;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const cleaned = parsed.filter((m: ChatMessage) => {
+        const text = (m.text || '').toLowerCase();
+        const hasDummyJob = (m.referencedJobNumbers || []).some(j => j.includes('195'));
+        const isDummyText = text.includes('m26-195') || text.includes('testing dummy');
+        const isDummyId = m.id.startsWith('msg-ethan-') || 
+                          m.id.startsWith('msg-jm-') || 
+                          m.id.startsWith('msg-dr-') || 
+                          ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(m.id);
+        return !hasDummyJob && !isDummyText && !isDummyId;
+      });
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(cleaned));
+      return cleaned;
+    }
+    return INITIAL_CHAT_MESSAGES;
   } catch (err) {
     console.error('Failed to load chat messages:', err);
     return INITIAL_CHAT_MESSAGES;
