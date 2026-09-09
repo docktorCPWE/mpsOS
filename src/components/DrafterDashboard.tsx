@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
+import { EditCustomerContactModal } from './EditCustomerContactModal';
 
 interface DrafterDashboardProps {
   jobs: Job[];
@@ -22,6 +23,14 @@ interface DrafterDashboardProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   onOpenKyleInbox?: () => void;
+  onUpdateCustomerContact?: (customerName: string, updatedContact: {
+    customer_name?: string;
+    customer_email?: string;
+    customer_phone?: string;
+    project_address?: string;
+    updateAllPlans?: boolean;
+    currentJobId?: string;
+  }) => void;
   nowTimestamp?: number;
 }
 
@@ -50,10 +59,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onApproveTaskReview,
   onRequestTaskRevision,
   onOpenKyleInbox,
+  onUpdateCustomerContact,
   nowTimestamp = Date.now(),
 }) => {
   const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedJobForContactEdit, setSelectedJobForContactEdit] = useState<Job | null>(null);
   
   // Authorized users who can view all cards and switch between boards: Kyle, Jason, Drew, Ethan, Greg Hyatt
   const isAllCardsAuthorized = canViewAllProjectCards(currentStaff);
@@ -1303,6 +1314,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <JobCard
               key={job.id}
               job={job}
+              allJobs={jobs}
               onUpdateStatus={onUpdateStatus}
               onToggleRoadblock={onToggleRoadblock}
               onSelectJob={onSelectJob}
@@ -1313,6 +1325,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               canDelegate={canDelegate}
               onOpenDelegateModal={onOpenDelegateModal}
               onOpenCompleteTaskModal={onOpenCompleteTaskModal}
+              onUpdateCustomerContact={onUpdateCustomerContact}
             />
           ))}
 
@@ -1445,6 +1458,50 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                               <span>{delegatedCount} Delegated</span>
                             </span>
                           )}
+
+                          {/* Client Contact Shortcuts in Kanban with Edit */}
+                          <div className="flex items-center justify-between gap-1.5 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px] text-slate-600">
+                            <div className="flex items-center gap-2 truncate min-w-0">
+                              {job.customer_email && (
+                                <a 
+                                  href={`mailto:${job.customer_email.split(';')[0].trim()}`} 
+                                  onClick={(e) => e.stopPropagation()} 
+                                  className="flex items-center gap-0.5 text-blue-600 hover:underline truncate max-w-[120px]"
+                                  title={job.customer_email}
+                                >
+                                  <Mail className="w-2.5 h-2.5 shrink-0" />
+                                  <span className="truncate">{job.customer_email.split(';')[0].trim()}</span>
+                                </a>
+                              )}
+                              {job.customer_phone && (
+                                <a 
+                                  href={`tel:${job.customer_phone}`} 
+                                  onClick={(e) => e.stopPropagation()} 
+                                  className="flex items-center gap-0.5 text-slate-700 hover:underline font-mono shrink-0"
+                                  title={job.customer_phone}
+                                >
+                                  <Phone className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                  <span>{job.customer_phone}</span>
+                                </a>
+                              )}
+                              {!job.customer_email && !job.customer_phone && (
+                                <span className="text-slate-400 italic text-[9px]">No contact info</span>
+                              )}
+                            </div>
+                            {onUpdateCustomerContact && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedJobForContactEdit(job);
+                                }}
+                                className="text-slate-400 hover:text-blue-600 p-0.5 rounded transition shrink-0"
+                                title="Update Customer Contact Info"
+                              >
+                                <Edit3 className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {/* Kanban Quick Timer Control */}
@@ -1563,6 +1620,30 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                               <span className="truncate">{job.project_address}</span>
                             </div>
                           )}
+                          <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-600">
+                            {job.customer_email && (
+                              <a href={`mailto:${job.customer_email.split(';')[0].trim()}`} className="text-blue-600 hover:underline flex items-center gap-0.5 truncate max-w-[130px]" title={job.customer_email}>
+                                <Mail className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{job.customer_email.split(';')[0].trim()}</span>
+                              </a>
+                            )}
+                            {job.customer_phone && (
+                              <a href={`tel:${job.customer_phone}`} className="text-slate-700 hover:underline font-mono flex items-center gap-0.5" title={job.customer_phone}>
+                                <Phone className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                <span>{job.customer_phone}</span>
+                              </a>
+                            )}
+                            {onUpdateCustomerContact && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedJobForContactEdit(job)}
+                                className="text-slate-400 hover:text-blue-600 p-0.5 rounded transition"
+                                title="Update Customer Contact Info"
+                              >
+                                <Edit3 className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="p-3.5">
@@ -1694,6 +1775,21 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             }
             setRevisionModalTask(null);
           }}
+        />
+      )}
+
+      {/* Customer Contact Update Modal */}
+      {selectedJobForContactEdit && onUpdateCustomerContact && (
+        <EditCustomerContactModal
+          job={selectedJobForContactEdit}
+          allJobs={jobs}
+          isOpen={Boolean(selectedJobForContactEdit)}
+          onClose={() => setSelectedJobForContactEdit(null)}
+          onSaveContact={(contact) => {
+            onUpdateCustomerContact(selectedJobForContactEdit.customer_name, contact);
+            setSelectedJobForContactEdit(null);
+          }}
+          performedByRole="staff"
         />
       )}
 

@@ -28,14 +28,17 @@ import {
   Copy,
   Check,
   Calendar,
-  Building
+  Building,
+  Edit3
 } from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
 import { isJobArchived } from '../data/mockData';
+import { EditCustomerContactModal } from './EditCustomerContactModal';
 
 interface JobCardProps {
   job: Job;
+  allJobs?: Job[];
   onUpdateStatus: (jobId: string, newStatus: JobPhase) => void;
   onToggleRoadblock: (jobId: string) => void;
   onSelectJob: (job: Job) => void;
@@ -46,6 +49,14 @@ interface JobCardProps {
   canDelegate?: boolean;
   onOpenDelegateModal?: (job: Job) => void;
   onOpenCompleteTaskModal?: (task: DelegatedWorkItem, job: Job) => void;
+  onUpdateCustomerContact?: (customerName: string, updatedContact: {
+    customer_name?: string;
+    customer_email?: string;
+    customer_phone?: string;
+    project_address?: string;
+    updateAllPlans?: boolean;
+    currentJobId?: string;
+  }) => void;
 }
 
 const PHASE_COLORS: Record<JobPhase, { bg: string; text: string; border: string }> = {
@@ -74,6 +85,7 @@ function getSheetStatusColor(status?: string): { bg: string; text: string; borde
 
 export const JobCard: React.FC<JobCardProps> = ({
   job,
+  allJobs = [],
   onUpdateStatus,
   onToggleRoadblock,
   onSelectJob,
@@ -84,11 +96,13 @@ export const JobCard: React.FC<JobCardProps> = ({
   canDelegate = false,
   onOpenDelegateModal,
   onOpenCompleteTaskModal,
+  onUpdateCustomerContact,
 }) => {
   const currentPhaseStyle = PHASE_COLORS[job.current_status] || PHASE_COLORS['Customer Inquiry'];
   const [taskInput, setTaskInput] = useState('');
   const [showLogs, setShowLogs] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
+  const [showEditContactModal, setShowEditContactModal] = useState(false);
 
   const isTimerRunning = Boolean(job.active_timer_start);
   const isTimerPaused = Boolean(job.paused_by_break);
@@ -294,21 +308,21 @@ export const JobCard: React.FC<JobCardProps> = ({
             )}
           </div>
 
-          {/* Direct Client Contact Shortcuts (Email & Phone) */}
-          {(primaryEmail || primaryPhone) && (
-            <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-600 pt-1.5 border-t border-slate-100">
-              {primaryEmail && (
+          {/* Direct Client Contact Shortcuts (Email & Phone) with quick edit */}
+          <div className="flex items-center justify-between gap-2 mt-2 text-[11px] text-slate-600 pt-1.5 border-t border-slate-100">
+            <div className="flex items-center gap-3 truncate min-w-0">
+              {primaryEmail ? (
                 <a
                   href={`mailto:${primaryEmail}`}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[180px]"
+                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[170px]"
                   title={job.customer_email}
                 >
                   <Mail className="w-3 h-3 shrink-0" />
                   <span className="truncate">{primaryEmail}</span>
                 </a>
-              )}
-              {primaryPhone && (
+              ) : null}
+              {primaryPhone ? (
                 <a
                   href={`tel:${primaryPhone}`}
                   onClick={(e) => e.stopPropagation()}
@@ -318,9 +332,27 @@ export const JobCard: React.FC<JobCardProps> = ({
                   <Phone className="w-3 h-3 text-slate-400 shrink-0" />
                   <span>{primaryPhone}</span>
                 </a>
+              ) : null}
+              {!primaryEmail && !primaryPhone && (
+                <span className="text-slate-400 italic text-[10px]">No contact info on file</span>
               )}
             </div>
-          )}
+
+            {onUpdateCustomerContact && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowEditContactModal(true);
+                }}
+                className="shrink-0 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition flex items-center gap-1 text-[10px] font-semibold"
+                title="Update Customer Contact Info (Email/Phone)"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span className="hidden sm:inline">Edit</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* --- DRAFTER START/STOP TIMER WIDGET CARD --- */}
@@ -557,6 +589,20 @@ export const JobCard: React.FC<JobCardProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Customer Contact Update Modal */}
+      {showEditContactModal && onUpdateCustomerContact && (
+        <EditCustomerContactModal
+          job={job}
+          allJobs={allJobs}
+          isOpen={showEditContactModal}
+          onClose={() => setShowEditContactModal(false)}
+          onSaveContact={(contact) => {
+            onUpdateCustomerContact(job.customer_name, contact);
+          }}
+          performedByRole="staff"
+        />
+      )}
 
     </div>
   );

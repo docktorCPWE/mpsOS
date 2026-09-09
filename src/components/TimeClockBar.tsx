@@ -24,7 +24,9 @@ import {
   formatMinutesToReadable,
   exportSingleEmployeeTimeCardCSV,
   exportTeamTimeCardsSummaryCSV,
-  getEmployeeWeeklySummary
+  getEmployeeWeeklySummary,
+  getLocalDateString,
+  getWeekDateRangeLabel
 } from '../utils/timeCardExport';
 import { formatSecondsToHHMMSS } from '../utils/timeUtils';
 
@@ -67,11 +69,13 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   }, []);
 
   const isJason = isStaffExemptFromClock(currentStaff);
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString(new Date(nowMs));
 
-  // Find active or today's shift for current staff
+  // Find active or today's shift for current staff (strictly matching today's date)
   const staffShifts = timeCards.filter(s => s.staffId === currentStaff.id);
-  const activeShift = staffShifts.find(s => s.status === 'clocked_in' || s.status === 'on_break');
+  const activeShift = staffShifts.find(s => 
+    (s.status === 'clocked_in' || s.status === 'on_break') && s.date === todayStr
+  );
   const todayCompletedShifts = staffShifts.filter(s => s.date === todayStr && s.status === 'clocked_out');
 
   // Compute shift status

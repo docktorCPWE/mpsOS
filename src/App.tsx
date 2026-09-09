@@ -1613,6 +1613,73 @@ export default function App() {
     }
   };
 
+  // 12. Handle Updating Customer Contact Info (Email, Phone, Address, Name)
+  const handleUpdateCustomerContact = (
+    targetCustomerName: string,
+    updatedContact: {
+      customer_name?: string;
+      customer_email?: string;
+      customer_phone?: string;
+      project_address?: string;
+      updateAllPlans?: boolean;
+      currentJobId?: string;
+    }
+  ) => {
+    const nowIso = new Date().toISOString();
+    const updatedJobs = jobs.map((job) => {
+      const isTarget = updatedContact.updateAllPlans
+        ? (job.customer_name && job.customer_name.trim().toLowerCase() === targetCustomerName.trim().toLowerCase()) ||
+          (updatedContact.currentJobId && job.id === updatedContact.currentJobId)
+        : (updatedContact.currentJobId ? job.id === updatedContact.currentJobId : (job.customer_name && job.customer_name.trim().toLowerCase() === targetCustomerName.trim().toLowerCase()));
+
+      if (!isTarget) return job;
+
+      const changeAudit: string[] = [];
+      if (updatedContact.customer_name && updatedContact.customer_name !== job.customer_name) {
+        changeAudit.push(`Name: "${job.customer_name}" ➔ "${updatedContact.customer_name}"`);
+      }
+      if (updatedContact.customer_email !== undefined && updatedContact.customer_email !== job.customer_email) {
+        changeAudit.push(`Email: "${job.customer_email || 'none'}" ➔ "${updatedContact.customer_email || 'none'}"`);
+      }
+      if (updatedContact.customer_phone !== undefined && updatedContact.customer_phone !== job.customer_phone) {
+        changeAudit.push(`Phone: "${job.customer_phone || 'none'}" ➔ "${updatedContact.customer_phone || 'none'}"`);
+      }
+      if (updatedContact.project_address !== undefined && updatedContact.project_address !== job.project_address) {
+        changeAudit.push(`Address: "${job.project_address || 'none'}" ➔ "${updatedContact.project_address || 'none'}"`);
+      }
+
+      const updatedJob: Job = {
+        ...job,
+        customer_name: updatedContact.customer_name !== undefined ? updatedContact.customer_name : job.customer_name,
+        customer_email: updatedContact.customer_email !== undefined ? updatedContact.customer_email : job.customer_email,
+        customer_phone: updatedContact.customer_phone !== undefined ? updatedContact.customer_phone : job.customer_phone,
+        project_address: updatedContact.project_address !== undefined ? updatedContact.project_address : job.project_address,
+        audit_logs: [
+          {
+            id: `a-contact-${Date.now()}-${job.id}`,
+            action: 'Customer Contact Info Updated',
+            performedBy: currentStaff.name,
+            timestamp: nowIso,
+            details: changeAudit.length > 0 ? changeAudit.join('; ') : 'Contact information saved.'
+          },
+          ...job.audit_logs
+        ]
+      };
+
+      return updatedJob;
+    });
+
+    updateJobsState(updatedJobs);
+
+    // Keep selectedJobForDetail synchronized if open
+    if (selectedJobForDetail) {
+      const freshSelected = updatedJobs.find(j => j.id === selectedJobForDetail.id);
+      if (freshSelected) {
+        setSelectedJobForDetail(freshSelected);
+      }
+    }
+  };
+
   // Get active selected customer job object
   const activeCustomerJob = jobs.find(j => j.id === selectedCustomerId) || jobs[0];
 
@@ -1769,6 +1836,7 @@ export default function App() {
             onApproveTaskReview={handleApproveTaskReview}
             onRequestTaskRevision={handleRequestTaskRevision}
             onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
+            onUpdateCustomerContact={handleUpdateCustomerContact}
             nowTimestamp={nowTimestamp}
           />
         ) : userRole === 'admin' ? (
@@ -1783,6 +1851,9 @@ export default function App() {
             onUpdateJob={(updatedJob) => {
               const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
               updateJobsState(updatedList);
+              if (selectedJobForDetail && selectedJobForDetail.id === updatedJob.id) {
+                setSelectedJobForDetail(updatedJob);
+              }
             }}
             onDispatchNotifications={handleDispatchNotifications}
             nowTimestamp={nowTimestamp}
@@ -1791,9 +1862,11 @@ export default function App() {
           activeCustomerJob ? (
             <CustomerPortal
               job={activeCustomerJob}
+              allJobs={jobs}
               onAddComment={(text, loc) => handleAddComment(activeCustomerJob.id, text, loc)}
               onApprovePhase={() => handleApprovePhase(activeCustomerJob.id)}
               onRequestRevision={(notes) => handleRequestRevision(activeCustomerJob.id, notes)}
+              onUpdateCustomerContact={handleUpdateCustomerContact}
             />
           ) : (
             <div className="p-12 text-center text-slate-500">No active customer jobs found.</div>
@@ -1805,6 +1878,7 @@ export default function App() {
       {selectedJobForDetail && (
         <JobDetailModal
           job={selectedJobForDetail}
+          allJobs={jobs}
           onClose={() => {
             setSelectedJobForDetail(null);
             setJobDetailHighlightCommentId(undefined);
@@ -1812,7 +1886,9 @@ export default function App() {
           onUpdateJob={(updatedJob) => {
             const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
             updateJobsState(updatedList);
+            setSelectedJobForDetail(updatedJob);
           }}
+          onUpdateCustomerContact={handleUpdateCustomerContact}
           onDispatchNotifications={handleDispatchNotifications}
           onTriggerEmail={(email) => setEmailModalData(email)}
           onStartTimer={handleStartTimer}

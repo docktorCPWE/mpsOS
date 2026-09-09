@@ -1,4 +1,67 @@
-import { TimeCardShift, StaffUser, Job, EmployeeWeeklySummary } from '../types';
+import { TimeCardShift, StaffUser, Job, EmployeeWeeklySummary, TimeCardBreak } from '../types';
+
+/**
+ * Returns a date formatted as YYYY-MM-DD in local time (prevents UTC timezone date jumps)
+ */
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Returns Monday 00:00:00 of the week containing the given date
+ */
+export function getStartOfWeek(d: Date = new Date()): Date {
+  const date = new Date(d);
+  const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const diff = date.getDate() - (day === 0 ? 6 : day - 1);
+  const monday = new Date(date);
+  monday.setDate(diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+/**
+ * Returns Sunday 23:59:59.999 of the week containing the given date
+ */
+export function getEndOfWeek(d: Date = new Date()): Date {
+  const monday = getStartOfWeek(d);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return sunday;
+}
+
+/**
+ * Returns true if the YYYY-MM-DD date string falls inside the [weekStart, weekEnd] range
+ */
+export function isDateInWeek(dateStr: string, weekStart: Date, weekEnd: Date): boolean {
+  if (!dateStr) return false;
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) return false;
+  // Local noon to avoid DST or midnight edge crossings
+  const shiftDate = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+  return shiftDate.getTime() >= weekStart.getTime() && shiftDate.getTime() <= weekEnd.getTime();
+}
+
+/**
+ * Format date range e.g. "Sep 7 – Sep 13, 2026"
+ */
+export function getWeekDateRangeLabel(targetDate: Date = new Date()): string {
+  const start = getStartOfWeek(targetDate);
+  const end = getEndOfWeek(targetDate);
+  const sMonth = start.toLocaleDateString('en-US', { month: 'short' });
+  const sDay = start.getDate();
+  const eMonth = end.toLocaleDateString('en-US', { month: 'short' });
+  const eDay = end.getDate();
+  const year = end.getFullYear();
+  if (sMonth === eMonth) {
+    return `${sMonth} ${sDay} – ${eDay}, ${year}`;
+  }
+  return `${sMonth} ${sDay} – ${eMonth} ${eDay}, ${year}`;
+}
 
 /**
  * Format ISO date string into standard time "8:30 AM"
@@ -41,7 +104,7 @@ export function formatDateOnly(dateStr: string): string {
  * Format minutes into readable hours & mins
  */
 export function formatMinutesToReadable(totalMinutes: number): string {
-  if (!totalMinutes || totalMinutes <= 0) return '0 hrs 0 mins';
+  if (!totalMinutes || totalMinutes <= 0) return '0h 0m';
   const hrs = Math.floor(totalMinutes / 60);
   const mins = Math.round(totalMinutes % 60);
   if (hrs === 0) return `${mins}m`;
@@ -51,12 +114,35 @@ export function formatMinutesToReadable(totalMinutes: number): string {
 
 /**
  * Calculate total work seconds for a shift (excluding breaks).
- * If currently clocked in, includes live ticking time.
+ * - For completed shifts with recorded totalWorkSeconds, uses recorded value.
+ * - For active shifts, protects against runaway timers (caps past-day or >16h shifts).
  */
 export function calculateShiftWorkSeconds(shift: TimeCardShift, nowMs: number = Date.now()): number {
   if (!shift.clockInTime) return 0;
+
+  // If already clocked out with a valid recorded total, use it directly
+  if (shift.status === 'clocked_out' && typeof shift.totalWorkSeconds === 'number' && shift.totalWorkSeconds >= 0 && shift.clockOutTime) {
+    return shift.totalWorkSeconds;
+  }
+
   const startMs = new Date(shift.clockInTime).getTime();
-  const endMs = shift.clockOutTime ? new Date(shift.clockOutTime).getTime() : nowMs;
+  if (isNaN(startMs)) return 0;
+
+  let endMs: number;
+  if (shift.clockOutTime) {
+    endMs = new Date(shift.clockOutTime).getTime();
+  } else {
+    // Active shift (clocked_in or on_break)
+    const elapsedMs = Math.max(0, nowMs - startMs);
+    // Anti-runaway protection: If shift started over 16 hours ago or on a prior day without clocking out,
+    // cap at standard 8-hour shift (28,800 sec) so it never blows out to 300+ hours!
+    const maxShiftMs = 16 * 3600 * 1000;
+    if (elapsedMs > maxShiftMs) {
+      endMs = startMs + (8 * 3600 * 1000);
+    } else {
+      endMs = nowMs;
+    }
+  }
 
   const grossSeconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
   const breakSeconds = calculateShiftBreakSeconds(shift, nowMs);
@@ -66,22 +152,69 @@ export function calculateShiftWorkSeconds(shift: TimeCardShift, nowMs: number = 
 
 /**
  * Calculate total break seconds for a shift.
- * If currently on break, includes live break time.
+ * If currently on break, includes live break time (with safety ceiling).
  */
-export function calculateShiftBreakSeconds(shift: TimeCardShift, nowMs: number = Date.now()): number {
-  if (!shift.breaks || shift.breaks.length === 0) return 0;
+export function calculateShiftBreakSeconds(shift: TimeCardBreak[] | TimeCardShift, nowMs: number = Date.now()): number {
+  const breaks: TimeCardBreak[] = Array.isArray(shift) ? shift : (shift.breaks || []);
+  const isShiftOnBreak = !Array.isArray(shift) && shift.status === 'on_break';
 
-  return shift.breaks.reduce((sum, b) => {
+  if (!breaks || breaks.length === 0) return 0;
+
+  return breaks.reduce((sum, b) => {
     if (!b.startTime) return sum;
+    if (b.endTime && typeof b.durationSeconds === 'number' && b.durationSeconds >= 0) {
+      return sum + b.durationSeconds;
+    }
     const startMs = new Date(b.startTime).getTime();
-    const endMs = b.endTime ? new Date(b.endTime).getTime() : (shift.status === 'on_break' ? nowMs : startMs);
+    if (isNaN(startMs)) return sum;
+
+    let endMs: number;
+    if (b.endTime) {
+      endMs = new Date(b.endTime).getTime();
+    } else if (isShiftOnBreak) {
+      // Break currently in progress: cap runaway breaks at 2 hours
+      const elapsedBreak = Math.max(0, nowMs - startMs);
+      endMs = elapsedBreak > 4 * 3600 * 1000 ? startMs + (1800 * 1000) : nowMs;
+    } else {
+      endMs = startMs;
+    }
+
     const duration = Math.max(0, Math.floor((endMs - startMs) / 1000));
     return sum + duration;
   }, 0);
 }
 
 /**
- * Calculate project hours logged by this staff member on jobs
+ * Calculate project hours logged by this staff member on jobs within a specific week
+ */
+export function calculateEmployeeProjectSecondsInWeek(
+  staffName: string, 
+  jobs: Job[], 
+  weekStart: Date, 
+  weekEnd: Date
+): number {
+  const staffLower = staffName.toLowerCase();
+  let totalSeconds = 0;
+
+  jobs.forEach(job => {
+    (job.time_logs || []).forEach(log => {
+      const logDrafter = (log.drafterName || '').toLowerCase();
+      if (logDrafter.includes(staffLower) || staffLower.includes(logDrafter)) {
+        if (log.startTime) {
+          const logDate = new Date(log.startTime);
+          if (logDate.getTime() >= weekStart.getTime() && logDate.getTime() <= weekEnd.getTime()) {
+            totalSeconds += log.durationSeconds || 0;
+          }
+        }
+      }
+    });
+  });
+
+  return totalSeconds;
+}
+
+/**
+ * Calculate all-time project hours logged by this staff member on jobs
  */
 export function calculateEmployeeProjectSeconds(staffName: string, jobs: Job[]): number {
   const staffLower = staffName.toLowerCase();
@@ -89,7 +222,8 @@ export function calculateEmployeeProjectSeconds(staffName: string, jobs: Job[]):
 
   jobs.forEach(job => {
     (job.time_logs || []).forEach(log => {
-      if ((log.drafterName || '').toLowerCase().includes(staffLower) || staffLower.includes((log.drafterName || '').toLowerCase())) {
+      const logDrafter = (log.drafterName || '').toLowerCase();
+      if (logDrafter.includes(staffLower) || staffLower.includes(logDrafter)) {
         totalSeconds += log.durationSeconds || 0;
       }
     });
@@ -99,15 +233,22 @@ export function calculateEmployeeProjectSeconds(staffName: string, jobs: Job[]):
 }
 
 /**
- * Generate weekly summary for an employee
+ * Generate weekly summary for an employee for a specific week (defaults to CURRENT calendar week)
  */
 export function getEmployeeWeeklySummary(
   staff: StaffUser,
   allShifts: TimeCardShift[],
   jobs: Job[],
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  targetDate: Date = new Date(nowMs)
 ): EmployeeWeeklySummary {
-  const staffShifts = allShifts.filter(s => s.staffId === staff.id);
+  const weekStart = getStartOfWeek(targetDate);
+  const weekEnd = getEndOfWeek(targetDate);
+
+  // CRITICAL FIX: Filter shifts strictly to this employee AND within the specified week!
+  const staffShifts = allShifts.filter(s => 
+    s.staffId === staff.id && isDateInWeek(s.date, weekStart, weekEnd)
+  );
 
   let totalWorkSec = 0;
   let totalBreakSec = 0;
@@ -119,11 +260,11 @@ export function getEmployeeWeeklySummary(
 
   const totalShiftHours = Math.round((totalWorkSec / 3600) * 100) / 100;
   const totalBreakHours = Math.round((totalBreakSec / 3600) * 100) / 100;
-  const projectSec = calculateEmployeeProjectSeconds(staff.name, jobs);
+  const projectSec = calculateEmployeeProjectSecondsInWeek(staff.name, jobs, weekStart, weekEnd);
   const totalProjectHours = Math.round((projectSec / 3600) * 100) / 100;
 
   const regularHours = Math.min(40, totalShiftHours);
-  const overtimeHours = Math.max(0, totalShiftHours - 40);
+  const overtimeHours = Math.max(0, Math.round((totalShiftHours - 40) * 100) / 100);
   const rate = staff.hourlyRate || 75;
   const regularPay = regularHours * rate;
   const overtimePay = overtimeHours * (rate * 1.5);
@@ -146,16 +287,118 @@ export function getEmployeeWeeklySummary(
 }
 
 /**
+ * Generate all-time historical summary for an employee across all shifts ever recorded
+ */
+export function getEmployeeAllTimeSummary(
+  staff: StaffUser,
+  allShifts: TimeCardShift[],
+  jobs: Job[],
+  nowMs: number = Date.now()
+): EmployeeWeeklySummary {
+  const staffShifts = allShifts.filter(s => s.staffId === staff.id);
+
+  let totalWorkSec = 0;
+  let totalBreakSec = 0;
+
+  staffShifts.forEach(shift => {
+    totalWorkSec += calculateShiftWorkSeconds(shift, nowMs);
+    totalBreakSec += calculateShiftBreakSeconds(shift, nowMs);
+  });
+
+  const totalShiftHours = Math.round((totalWorkSec / 3600) * 100) / 100;
+  const totalBreakHours = Math.round((totalBreakSec / 3600) * 100) / 100;
+  const projectSec = calculateEmployeeProjectSeconds(staff.name, jobs);
+  const totalProjectHours = Math.round((projectSec / 3600) * 100) / 100;
+
+  const regularHours = Math.min(40, totalShiftHours);
+  const overtimeHours = Math.max(0, Math.round((totalShiftHours - 40) * 100) / 100);
+  const rate = staff.hourlyRate || 75;
+  const regularPay = regularHours * rate;
+  const overtimePay = overtimeHours * (rate * 1.5);
+  const estimatedGrossPay = Math.round((regularPay + overtimePay) * 100) / 100;
+
+  return {
+    staffId: staff.id,
+    staffName: staff.name,
+    title: staff.title,
+    department: staff.department || 'Drafting',
+    hourlyRate: rate,
+    totalShiftHours,
+    totalBreakHours,
+    totalProjectHours,
+    regularHours,
+    overtimeHours,
+    estimatedGrossPay,
+    shifts: staffShifts
+  };
+}
+
+export interface AvailableWeekOption {
+  id: string;
+  label: string;
+  weekStart: Date;
+  weekEnd: Date;
+  isCurrent: boolean;
+}
+
+/**
+ * Returns available weeks derived from shift records, with the current week always present and first.
+ */
+export function getAvailableWeeks(allShifts: TimeCardShift[] = []): AvailableWeekOption[] {
+  const currentStart = getStartOfWeek(new Date());
+  const weekMap = new Map<string, Date>();
+
+  // Always include current week
+  weekMap.set(getLocalDateString(currentStart), currentStart);
+
+  // Add all shift dates
+  allShifts.forEach(s => {
+    if (s.date) {
+      const parts = s.date.split('-').map(Number);
+      if (parts[0] && parts[1] && parts[2]) {
+        const d = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+        const start = getStartOfWeek(d);
+        weekMap.set(getLocalDateString(start), start);
+      }
+    }
+  });
+
+  // Sort descending (most recent week first)
+  const sortedStarts = Array.from(weekMap.values()).sort((a, b) => b.getTime() - a.getTime());
+
+  return sortedStarts.map(start => {
+    const end = getEndOfWeek(start);
+    const isCurrent = start.getTime() === currentStart.getTime();
+    const rangeLabel = getWeekDateRangeLabel(start);
+    const label = isCurrent ? `Current Week (${rangeLabel})` : `Week of ${rangeLabel}`;
+    return {
+      id: getLocalDateString(start),
+      label,
+      weekStart: start,
+      weekEnd: end,
+      isCurrent
+    };
+  });
+}
+
+/**
  * Export Individual Employee Time Card to CSV
  */
 export function exportSingleEmployeeTimeCardCSV(
   staff: StaffUser,
   allShifts: TimeCardShift[],
-  jobs: Job[]
+  jobs: Job[],
+  weekStart?: Date,
+  weekEnd?: Date,
+  periodLabel?: string
 ) {
-  const staffShifts = allShifts
-    .filter(s => s.staffId === staff.id)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  let staffShifts = allShifts.filter(s => s.staffId === staff.id);
+
+  if (weekStart && weekEnd) {
+    staffShifts = staffShifts.filter(s => isDateInWeek(s.date, weekStart, weekEnd));
+  }
+
+  staffShifts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const rate = staff.hourlyRate || 75;
   const headers = [
@@ -241,6 +484,7 @@ export function exportSingleEmployeeTimeCardCSV(
   const csvContent = [
     `# MY PLAN STORE OS - EMPLOYEE TIME CARD REPORT`,
     `# Employee: ${staff.name} (${staff.title})`,
+    `# Period: ${periodLabel || (weekStart ? getWeekDateRangeLabel(weekStart) : 'All History')}`,
     `# Export Date: ${new Date().toLocaleString()}`,
     `# Base Hourly Rate: $${rate}/hr`,
     '',
@@ -258,7 +502,9 @@ export function exportTeamTimeCardsSummaryCSV(
   staffList: StaffUser[],
   allShifts: TimeCardShift[],
   jobs: Job[],
-  dateRangeLabel: string = 'Current Pay Period'
+  dateRangeLabel: string = 'Current Pay Period',
+  weekStart?: Date,
+  weekEnd?: Date
 ) {
   const headers = [
     'Employee ID',
@@ -280,11 +526,14 @@ export function exportTeamTimeCardsSummaryCSV(
   let grandTotalBreakHours = 0;
   let grandTotalProjectHours = 0;
   let grandTotalPay = 0;
+  let grandTotalShiftsCount = 0;
 
   const rows = staffList.map(staff => {
     // Jason is salaried exempt
     const isJason = staff.name.toLowerCase().includes('jason');
-    const summary = getEmployeeWeeklySummary(staff, allShifts, jobs);
+    const summary = weekStart
+      ? getEmployeeWeeklySummary(staff, allShifts, jobs, Date.now(), weekStart)
+      : getEmployeeAllTimeSummary(staff, allShifts, jobs, Date.now());
 
     if (isJason) {
       return [
@@ -308,6 +557,7 @@ export function exportTeamTimeCardsSummaryCSV(
     grandTotalBreakHours += summary.totalBreakHours;
     grandTotalProjectHours += summary.totalProjectHours;
     grandTotalPay += summary.estimatedGrossPay;
+    grandTotalShiftsCount += summary.shifts.length;
 
     return [
       `"${staff.id}"`,
@@ -334,7 +584,7 @@ export function exportTeamTimeCardsSummaryCSV(
     '""',
     '""',
     '""',
-    allShifts.length,
+    grandTotalShiftsCount,
     grandTotalBreakHours.toFixed(2),
     grandTotalHours.toFixed(2),
     '""',

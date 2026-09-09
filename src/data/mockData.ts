@@ -1320,12 +1320,12 @@ export function saveStoredChatMessages(messages: ChatMessage[]) {
   }
 }
 
-export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v14';
+export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v15';
 
 const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
-  // Kyle (Lead Drafter)
+  // Kyle (Lead Drafter) - Previous Week (Aug 24-28, 2026)
   {
-    id: 'shift-kyle-mon',
+    id: 'shift-kyle-mon-prev',
     staffId: 'staff-kyle',
     staffName: 'Kyle',
     date: '2026-08-24',
@@ -1345,7 +1345,7 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Workload delegation and QA review of completed sheets'
   },
   {
-    id: 'shift-kyle-tue',
+    id: 'shift-kyle-tue-prev',
     staffId: 'staff-kyle',
     staffName: 'Kyle',
     date: '2026-08-25',
@@ -1365,21 +1365,71 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Customer design consultation & revision signoffs'
   },
   {
-    id: 'shift-kyle-wed',
+    id: 'shift-kyle-wed-prev',
     staffId: 'staff-kyle',
     staffName: 'Kyle',
     date: '2026-08-26',
     clockInTime: '2026-08-26T07:50:00.000Z',
-    status: 'clocked_in',
-    breaks: [],
-    totalWorkSeconds: 0,
-    totalBreakSeconds: 0,
-    notes: 'Active shift'
+    clockOutTime: '2026-08-26T16:20:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-kyle-wed-1',
+        startTime: '2026-08-26T12:00:00.000Z',
+        endTime: '2026-08-26T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'CAD drafting & team coordination'
   },
 
-  // James (Drafter)
+  // Kyle - CURRENT WEEK (Sep 7 – Sep 13, 2026)
   {
-    id: 'shift-james-mon',
+    id: 'shift-kyle-cur-mon',
+    staffId: 'staff-kyle',
+    staffName: 'Kyle',
+    date: '2026-09-07',
+    clockInTime: '2026-09-07T07:45:00.000Z',
+    clockOutTime: '2026-09-07T16:15:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-kyle-cur-mon-1',
+        startTime: '2026-09-07T12:00:00.000Z',
+        endTime: '2026-09-07T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Floor plan layouts and draft review'
+  },
+  {
+    id: 'shift-kyle-cur-tue',
+    staffId: 'staff-kyle',
+    staffName: 'Kyle',
+    date: '2026-09-08',
+    clockInTime: '2026-09-08T07:45:00.000Z',
+    clockOutTime: '2026-09-08T16:15:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-kyle-cur-tue-1',
+        startTime: '2026-09-08T12:00:00.000Z',
+        endTime: '2026-09-08T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Structural revisions and customer redlines'
+  },
+
+  // James (Drafter) - Previous & Current Week
+  {
+    id: 'shift-james-prev-mon',
     staffId: 'staff-james',
     staffName: 'James',
     date: '2026-08-24',
@@ -1399,29 +1449,49 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Initial blueprint setup and dimensional stringing'
   },
   {
-    id: 'shift-james-tue',
+    id: 'shift-james-cur-mon',
     staffId: 'staff-james',
     staffName: 'James',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T08:00:00.000Z',
-    clockOutTime: '2026-08-25T16:30:00.000Z',
+    date: '2026-09-07',
+    clockInTime: '2026-09-07T08:00:00.000Z',
+    clockOutTime: '2026-09-07T16:30:00.000Z',
     status: 'clocked_out',
     breaks: [
       {
-        id: 'brk-james-tue-1',
-        startTime: '2026-08-25T12:00:00.000Z',
-        endTime: '2026-08-25T12:30:00.000Z',
+        id: 'brk-james-cur-mon-1',
+        startTime: '2026-09-07T12:00:00.000Z',
+        endTime: '2026-09-07T12:30:00.000Z',
         durationSeconds: 1800
       }
     ],
     totalWorkSeconds: 28800,
     totalBreakSeconds: 1800,
-    notes: 'Roof framing and section cuts'
+    notes: 'Section cuts and roof details'
+  },
+  {
+    id: 'shift-james-cur-tue',
+    staffId: 'staff-james',
+    staffName: 'James',
+    date: '2026-09-08',
+    clockInTime: '2026-09-08T08:00:00.000Z',
+    clockOutTime: '2026-09-08T16:30:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-james-cur-tue-1',
+        startTime: '2026-09-08T12:00:00.000Z',
+        endTime: '2026-09-08T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Framing geometry & wall schedule updates'
   },
 
-  // Aaron (Drafter)
+  // Aaron (Drafter) - Previous & Current Week
   {
-    id: 'shift-aaron-mon',
+    id: 'shift-aaron-prev-mon',
     staffId: 'staff-aaron',
     staffName: 'Aaron',
     date: '2026-08-24',
@@ -1441,29 +1511,49 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Electrical layouts and ceiling plan layers'
   },
   {
-    id: 'shift-aaron-tue',
+    id: 'shift-aaron-cur-mon',
     staffId: 'staff-aaron',
     staffName: 'Aaron',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T08:10:00.000Z',
-    clockOutTime: '2026-08-25T16:40:00.000Z',
+    date: '2026-09-07',
+    clockInTime: '2026-09-07T08:15:00.000Z',
+    clockOutTime: '2026-09-07T16:45:00.000Z',
     status: 'clocked_out',
     breaks: [
       {
-        id: 'brk-aaron-tue-1',
-        startTime: '2026-08-25T12:00:00.000Z',
-        endTime: '2026-08-25T12:30:00.000Z',
+        id: 'brk-aaron-cur-mon-1',
+        startTime: '2026-09-07T12:00:00.000Z',
+        endTime: '2026-09-07T12:30:00.000Z',
         durationSeconds: 1800
       }
     ],
     totalWorkSeconds: 28800,
     totalBreakSeconds: 1800,
-    notes: 'Window and door scheduling'
+    notes: 'Reflected ceiling plans and plumbing runs'
+  },
+  {
+    id: 'shift-aaron-cur-tue',
+    staffId: 'staff-aaron',
+    staffName: 'Aaron',
+    date: '2026-09-08',
+    clockInTime: '2026-09-08T08:10:00.000Z',
+    clockOutTime: '2026-09-08T16:40:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-aaron-cur-tue-1',
+        startTime: '2026-09-08T12:00:00.000Z',
+        endTime: '2026-09-08T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Window and door schedule coordination'
   },
 
-  // Drew Lupkey (Finance)
+  // Drew Lupkey (Finance) - Previous & Current Week
   {
-    id: 'shift-drew-mon',
+    id: 'shift-drew-prev-mon',
     staffId: 'staff-drew',
     staffName: 'Drew Lupkey',
     date: '2026-08-24',
@@ -1483,18 +1573,38 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Invoice reconciliations and time log audits'
   },
   {
-    id: 'shift-drew-tue',
+    id: 'shift-drew-cur-mon',
     staffId: 'staff-drew',
     staffName: 'Drew Lupkey',
-    date: '2026-08-25',
-    clockInTime: '2026-08-25T08:30:00.000Z',
-    clockOutTime: '2026-08-25T17:00:00.000Z',
+    date: '2026-09-07',
+    clockInTime: '2026-09-07T08:30:00.000Z',
+    clockOutTime: '2026-09-07T17:00:00.000Z',
     status: 'clocked_out',
     breaks: [
       {
-        id: 'brk-drew-tue-1',
-        startTime: '2026-08-25T12:30:00.000Z',
-        endTime: '2026-08-25T13:00:00.000Z',
+        id: 'brk-drew-cur-mon-1',
+        startTime: '2026-09-07T12:30:00.000Z',
+        endTime: '2026-09-07T13:00:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800,
+    totalBreakSeconds: 1800,
+    notes: 'Accounts receivable tracking and customer retainers'
+  },
+  {
+    id: 'shift-drew-cur-tue',
+    staffId: 'staff-drew',
+    staffName: 'Drew Lupkey',
+    date: '2026-09-08',
+    clockInTime: '2026-09-08T08:30:00.000Z',
+    clockOutTime: '2026-09-08T17:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-drew-cur-tue-1',
+        startTime: '2026-09-08T12:30:00.000Z',
+        endTime: '2026-09-08T13:00:00.000Z',
         durationSeconds: 1800
       }
     ],
@@ -1503,9 +1613,10 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Customer payment processing and contractor timesheets'
   },
 
-  // Greg Hyatt (Owner & Architect)
+  // Greg Hyatt (Owner & Principal Architect)
+  // Previous Week (Aug 24-28, 2026)
   {
-    id: 'shift-greg-mon',
+    id: 'shift-greg-prev-mon',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     date: '2026-08-24',
@@ -1525,7 +1636,7 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Principal architect reviews and client onboarding meetings'
   },
   {
-    id: 'shift-greg-tue',
+    id: 'shift-greg-prev-tue',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     date: '2026-08-25',
@@ -1545,33 +1656,162 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Plan approval reviews and operations coordination'
   },
   {
-    id: 'shift-greg-wed',
+    id: 'shift-greg-prev-wed',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     date: '2026-08-26',
     clockInTime: '2026-08-26T07:30:00.000Z',
-    status: 'clocked_in',
-    breaks: [],
-    totalWorkSeconds: 0,
-    totalBreakSeconds: 0,
-    notes: 'Active shift'
+    clockOutTime: '2026-08-26T16:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-greg-wed-1',
+        startTime: '2026-08-26T12:00:00.000Z',
+        endTime: '2026-08-26T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Architectural specifications & design reviews'
+  },
+
+  // Greg Hyatt - CURRENT WEEK (Sep 7 – Sep 13, 2026)
+  {
+    id: 'shift-greg-cur-mon',
+    staffId: 'staff-greg',
+    staffName: 'Greg Hyatt',
+    date: '2026-09-07',
+    clockInTime: '2026-09-07T07:30:00.000Z',
+    clockOutTime: '2026-09-07T16:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-greg-cur-mon-1',
+        startTime: '2026-09-07T12:00:00.000Z',
+        endTime: '2026-09-07T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'MPS OS system architecture review & project intake'
+  },
+  {
+    id: 'shift-greg-cur-tue',
+    staffId: 'staff-greg',
+    staffName: 'Greg Hyatt',
+    date: '2026-09-08',
+    clockInTime: '2026-09-08T07:30:00.000Z',
+    clockOutTime: '2026-09-08T16:00:00.000Z',
+    status: 'clocked_out',
+    breaks: [
+      {
+        id: 'brk-greg-cur-tue-1',
+        startTime: '2026-09-08T12:00:00.000Z',
+        endTime: '2026-09-08T12:30:00.000Z',
+        durationSeconds: 1800
+      }
+    ],
+    totalWorkSeconds: 28800, // 8.0 hrs
+    totalBreakSeconds: 1800,
+    notes: 'Quality control reviews and preliminary plan approvals'
   }
 ];
 
-export const INITIAL_TIME_CARDS: TimeCardShift[] = ALL_RAW_TIME_CARDS.filter(s => s.staffId === 'staff-greg');
+export const INITIAL_TIME_CARDS: TimeCardShift[] = ALL_RAW_TIME_CARDS;
+
+/**
+ * Automatically inspects and reconciles shifts to prevent runaway timers or missed clock-outs from corrupting data.
+ * Closes any shift that was left clocked in on a past date or exceeded 16 continuous hours.
+ */
+export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: number = Date.now()): { shifts: TimeCardShift[]; wasReconciled: boolean } {
+  const d = new Date(nowMs);
+  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  let wasReconciled = false;
+
+  const reconciled = shifts.map(shift => {
+    // If shift is marked clocked_in or on_break but belongs to a past date or is runaway (>16 hrs)
+    if (shift.status === 'clocked_in' || shift.status === 'on_break') {
+      const isPastDate = shift.date && shift.date < todayStr;
+      const startMs = shift.clockInTime ? new Date(shift.clockInTime).getTime() : 0;
+      const elapsedHours = startMs ? (nowMs - startMs) / (3600 * 1000) : 0;
+
+      if (isPastDate || elapsedHours > 16) {
+        wasReconciled = true;
+        const standardWorkSec = 28800; // 8.0 hrs standard capped shift
+        const standardBreakSec = 1800; // 30 min lunch break
+        const autoOutMs = startMs ? startMs + (8.5 * 3600 * 1000) : nowMs;
+
+        const fixedBreaks = (shift.breaks && shift.breaks.length > 0)
+          ? shift.breaks.map(b => ({
+              ...b,
+              endTime: b.endTime || (startMs ? new Date(startMs + 4 * 3600 * 1000).toISOString() : new Date().toISOString()),
+              durationSeconds: b.durationSeconds || standardBreakSec
+            }))
+          : [
+              {
+                id: `brk-auto-${shift.id}`,
+                startTime: startMs ? new Date(startMs + 4 * 3600 * 1000).toISOString() : new Date().toISOString(),
+                endTime: startMs ? new Date(startMs + 4.5 * 3600 * 1000).toISOString() : new Date().toISOString(),
+                durationSeconds: standardBreakSec
+              }
+            ];
+
+        return {
+          ...shift,
+          status: 'clocked_out' as const,
+          clockOutTime: shift.clockOutTime || new Date(autoOutMs).toISOString(),
+          breaks: fixedBreaks,
+          totalWorkSeconds: standardWorkSec,
+          totalBreakSeconds: standardBreakSec,
+          notes: shift.notes && shift.notes !== 'Active shift'
+            ? `${shift.notes} (Auto-closed: Missed clock out)`
+            : 'Regular Shift (Auto-closed: Missed clock out)',
+          missedClockOut: true
+        };
+      }
+    }
+    return shift;
+  });
+
+  return { shifts: reconciled, wasReconciled };
+}
 
 export function getStoredTimeCards(): TimeCardShift[] {
   try {
     const raw = localStorage.getItem(TIME_CARDS_STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(INITIAL_TIME_CARDS));
-      return INITIAL_TIME_CARDS;
+      // Check if previous version v14 exists to migrate custom punches smoothly
+      const oldRaw = localStorage.getItem('my_plan_store_os_timecards_v14');
+      let baseCards: TimeCardShift[] = INITIAL_TIME_CARDS;
+      if (oldRaw) {
+        try {
+          const oldParsed = JSON.parse(oldRaw);
+          if (Array.isArray(oldParsed) && oldParsed.length > 0) {
+            baseCards = oldParsed;
+          }
+        } catch {
+          baseCards = INITIAL_TIME_CARDS;
+        }
+      }
+      const { shifts: cleanCards } = sanitizeAndReconcileTimeCards(baseCards);
+      localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(cleanCards));
+      return cleanCards;
     }
+
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      const { shifts: cleanCards, wasReconciled } = sanitizeAndReconcileTimeCards(parsed);
+      if (wasReconciled) {
+        localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(cleanCards));
+      }
+      return cleanCards;
     }
-    return INITIAL_TIME_CARDS;
+
+    const { shifts: initialClean } = sanitizeAndReconcileTimeCards(INITIAL_TIME_CARDS);
+    localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(initialClean));
+    return initialClean;
   } catch (err) {
     console.error('Failed to load stored time cards:', err);
     return INITIAL_TIME_CARDS;

@@ -1,13 +1,23 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Clock, FileText, Send, Download, Sparkles, MessageSquare, AlertCircle, ArrowRight, Layers, ShieldCheck, UserCheck, Pin, ThumbsUp, ShieldAlert, Maximize2, X, Paperclip, Image } from 'lucide-react';
+import { CheckCircle2, Clock, FileText, Send, Download, Sparkles, MessageSquare, AlertCircle, ArrowRight, Layers, ShieldCheck, UserCheck, Pin, ThumbsUp, ShieldAlert, Maximize2, X, Paperclip, Image, Mail, Phone, MapPin, Edit3, User, Check } from 'lucide-react';
 import { Job, PinnedLocation, DeliverableFile } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
+import { EditCustomerContactModal } from './EditCustomerContactModal';
 
 interface CustomerPortalProps {
   job: Job;
+  allJobs?: Job[];
   onAddComment: (text: string, pinnedLoc?: PinnedLocation, attachmentUrl?: string, attachmentName?: string) => void;
   onApprovePhase: () => void;
   onRequestRevision: (notes: string) => void;
+  onUpdateCustomerContact?: (customerName: string, updatedContact: {
+    customer_name?: string;
+    customer_email?: string;
+    customer_phone?: string;
+    project_address?: string;
+    updateAllPlans?: boolean;
+    currentJobId?: string;
+  }) => void;
 }
 
 const PHASES = [
@@ -22,14 +32,17 @@ const PHASES = [
 
 export const CustomerPortal: React.FC<CustomerPortalProps> = ({
   job,
+  allJobs = [],
   onAddComment,
   onApprovePhase,
   onRequestRevision,
+  onUpdateCustomerContact,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [revisionNotes, setRevisionNotes] = useState('');
   const [showRevisionModal, setShowRevisionModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'blueprint' | 'deliverables' | 'discussion'>('blueprint');
   const [selectedDeliverable, setSelectedDeliverable] = useState<DeliverableFile | null>(null);
 
@@ -144,6 +157,49 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
               <p className="text-[10px] font-semibold text-slate-400 uppercase">What We're Working On Next:</p>
               <p className="font-medium text-slate-200 mt-0.5">{job.next_step}</p>
             </div>
+          </div>
+
+          {/* Customer Contact & Notification Bar */}
+          <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-slate-300">
+              <div className="flex items-center gap-1.5 font-medium text-white">
+                <User className="w-3.5 h-3.5 text-blue-400" />
+                <span>{job.customer_name}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-blue-400" />
+                {job.customer_email ? (
+                  <span className="text-slate-200">{job.customer_email}</span>
+                ) : (
+                  <span className="text-slate-400 italic">No email on file</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-blue-400" />
+                {job.customer_phone ? (
+                  <span className="text-slate-200 font-mono">{job.customer_phone}</span>
+                ) : (
+                  <span className="text-slate-400 italic">No phone on file</span>
+                )}
+              </div>
+              {job.project_address && (
+                <div className="flex items-center gap-1.5 text-slate-400 truncate max-w-[240px]">
+                  <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span className="truncate">{job.project_address}</span>
+                </div>
+              )}
+            </div>
+
+            {onUpdateCustomerContact && (
+              <button
+                type="button"
+                onClick={() => setShowContactModal(true)}
+                className="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                <span>Update Contact Info</span>
+              </button>
+            )}
           </div>
 
         </div>
@@ -622,6 +678,20 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Customer Contact Update Modal */}
+      {showContactModal && onUpdateCustomerContact && (
+        <EditCustomerContactModal
+          job={job}
+          allJobs={allJobs}
+          isOpen={showContactModal}
+          onClose={() => setShowContactModal(false)}
+          onSaveContact={(contact) => {
+            onUpdateCustomerContact(job.customer_name, contact);
+          }}
+          performedByRole="customer"
+        />
       )}
 
     </div>

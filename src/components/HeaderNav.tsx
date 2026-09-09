@@ -109,22 +109,29 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   return (
     <>
       <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-30 shadow-md">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between py-2.5 sm:py-3 gap-3">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between py-3.5 sm:py-4 gap-4">
             
-            {/* Logo & OS Branding */}
-            <div className="flex items-center space-x-3 shrink-0">
-              <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 ring-1 ring-blue-400/30 shrink-0">
-                <Compass className="w-6 h-6 animate-spin-slow shrink-0" />
+            {/* Logo & OS Branding - Spacious, Prominent & Unsqueezed */}
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-600/30 ring-1 ring-white/20 shrink-0">
+                <Compass className="w-7 h-7 sm:w-8 sm:h-8 animate-spin-slow shrink-0 text-white" />
               </div>
-              <div className="shrink-0">
-                <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold tracking-tight text-white font-mono whitespace-nowrap">My Plan Store OS</h1>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-950 text-blue-300 border border-blue-800/80 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
-                    v2.4 Pro Edition
+              <div className="flex flex-col justify-center shrink-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white font-sans">
+                    My Plan Store
+                  </h1>
+                  <span className="text-xs sm:text-sm font-mono font-bold text-sky-300 px-2 py-0.5 rounded-lg bg-sky-950/90 border border-sky-800/80 uppercase shadow-xs">
+                    OS
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full hidden sm:inline-block">
+                    v2.4 Pro
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 whitespace-nowrap">Architectural Drafting & Customer Workflow Engine</p>
+                <p className="text-xs sm:text-sm text-slate-300 font-medium tracking-normal mt-0.5">
+                  Architectural Drafting & Customer Workflow Engine
+                </p>
               </div>
             </div>
 
@@ -142,7 +149,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     ).length;
 
                 return (
-                  <div className="hidden xl:flex items-center gap-4 bg-slate-950/70 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 shrink-0">
+                  <div className="hidden 2xl:flex items-center gap-4 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-300 shrink-0 shadow-inner">
                     <div className="flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-blue-400" />
                       <span>{isAllAuthorized ? 'Active Plans' : `${currentStaff.name.split(' ')[0]}'s Plans`}: <strong className="text-white">{relevantCount}</strong></span>
@@ -186,7 +193,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             )}
 
             {/* Right Controls: Staff Switcher, Notifications & Role Switcher */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 justify-start md:justify-end">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-start lg:justify-end">
               
               {/* Active Staff User Switcher */}
               <div className="relative">

@@ -153,6 +153,7 @@ export interface TimeCardShift {
   totalBreakSeconds: number;
   notes?: string;
   pausedProjectJobIds?: string[];
+  missedClockOut?: boolean;
 }
 
 export interface EmployeeWeeklySummary {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
@@ -255,6 +255,182 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
     };
     onUpdateJob(updated);
     setIsEditingMpsNumber(false);
+  };
+
+  // Customer Contact & Site Information Editing State
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState(job.customer_email || '');
+
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [phoneInput, setPhoneInput] = useState(job.customer_phone || '');
+
+  const [isEditingLotDetails, setIsEditingLotDetails] = useState(false);
+  const [lotDetailsInput, setLotDetailsInput] = useState(job.lot_details || '');
+
+  // Full Customer & Site Information Edit Modal State
+  const [isEditCustomerModalOpen, setIsEditCustomerModalOpen] = useState(false);
+  const [custModalName, setCustModalName] = useState(job.customer_name || '');
+  const [custModalEmail, setCustModalEmail] = useState(job.customer_email || '');
+  const [custModalPhone, setCustModalPhone] = useState(job.customer_phone || '');
+  const [custModalAddress, setCustModalAddress] = useState(job.project_address || '');
+  const [custModalBuilder, setCustModalBuilder] = useState(job.builder || '');
+  const [custModalLotDetails, setCustModalLotDetails] = useState(job.lot_details || '');
+  const [customerUpdateFeedback, setCustomerUpdateFeedback] = useState<string | null>(null);
+
+  // Synchronize inputs when job changes
+  React.useEffect(() => {
+    setEmailInput(job.customer_email || '');
+    setPhoneInput(job.customer_phone || '');
+    setLotDetailsInput(job.lot_details || '');
+    setCustModalName(job.customer_name || '');
+    setCustModalEmail(job.customer_email || '');
+    setCustModalPhone(job.customer_phone || '');
+    setCustModalAddress(job.project_address || '');
+    setCustModalBuilder(job.builder || '');
+    setCustModalLotDetails(job.lot_details || '');
+  }, [job.id, job.customer_name, job.customer_email, job.customer_phone, job.project_address, job.builder, job.lot_details]);
+
+  const handleSaveEmail = () => {
+    const trimmed = emailInput.trim();
+    if (trimmed === (job.customer_email || '')) {
+      setIsEditingEmail(false);
+      return;
+    }
+    const performer = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Staff';
+    const oldEmail = job.customer_email || 'None';
+    const updated: Job = {
+      ...job,
+      customer_email: trimmed,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Customer Email Updated',
+          performedBy: performer,
+          timestamp: new Date().toISOString(),
+          details: `Updated customer email from "${oldEmail}" to "${trimmed || 'None'}"`
+        },
+        ...job.audit_logs
+      ]
+    };
+    onUpdateJob(updated);
+    setIsEditingEmail(false);
+    setCustomerUpdateFeedback('Customer email updated');
+    setTimeout(() => setCustomerUpdateFeedback(null), 3500);
+  };
+
+  const handleSavePhone = () => {
+    const trimmed = phoneInput.trim();
+    if (trimmed === (job.customer_phone || '')) {
+      setIsEditingPhone(false);
+      return;
+    }
+    const performer = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Staff';
+    const oldPhone = job.customer_phone || 'None';
+    const updated: Job = {
+      ...job,
+      customer_phone: trimmed,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Customer Phone Updated',
+          performedBy: performer,
+          timestamp: new Date().toISOString(),
+          details: `Updated customer phone from "${oldPhone}" to "${trimmed || 'None'}"`
+        },
+        ...job.audit_logs
+      ]
+    };
+    onUpdateJob(updated);
+    setIsEditingPhone(false);
+    setCustomerUpdateFeedback('Customer phone updated');
+    setTimeout(() => setCustomerUpdateFeedback(null), 3500);
+  };
+
+  const handleSaveLotDetails = () => {
+    const trimmed = lotDetailsInput.trim();
+    if (trimmed === (job.lot_details || '')) {
+      setIsEditingLotDetails(false);
+      return;
+    }
+    const performer = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Staff';
+    const updated: Job = {
+      ...job,
+      lot_details: trimmed,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Lot & Site Details Updated',
+          performedBy: performer,
+          timestamp: new Date().toISOString(),
+          details: `Updated lot and site setback/slope notes.`
+        },
+        ...job.audit_logs
+      ]
+    };
+    onUpdateJob(updated);
+    setIsEditingLotDetails(false);
+    setCustomerUpdateFeedback('Lot details updated');
+    setTimeout(() => setCustomerUpdateFeedback(null), 3500);
+  };
+
+  const handleOpenCustomerModal = () => {
+    setCustModalName(job.customer_name || '');
+    setCustModalEmail(job.customer_email || '');
+    setCustModalPhone(job.customer_phone || '');
+    setCustModalAddress(job.project_address || '');
+    setCustModalBuilder(job.builder || '');
+    setCustModalLotDetails(job.lot_details || '');
+    setIsEditCustomerModalOpen(true);
+  };
+
+  const handleSaveFullCustomerModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    const performer = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Staff';
+    const changes: string[] = [];
+
+    const newName = custModalName.trim() || job.customer_name;
+    const newEmail = custModalEmail.trim();
+    const newPhone = custModalPhone.trim();
+    const newAddress = custModalAddress.trim();
+    const newBuilder = custModalBuilder.trim();
+    const newLotDetails = custModalLotDetails.trim() || job.lot_details;
+
+    if (newName !== job.customer_name) changes.push(`Name from "${job.customer_name}" to "${newName}"`);
+    if (newEmail !== (job.customer_email || '')) changes.push(`Email from "${job.customer_email || 'None'}" to "${newEmail || 'None'}"`);
+    if (newPhone !== (job.customer_phone || '')) changes.push(`Phone from "${job.customer_phone || 'None'}" to "${newPhone || 'None'}"`);
+    if (newAddress !== (job.project_address || '')) changes.push(`Site Address from "${job.project_address || 'None'}" to "${newAddress || 'None'}"`);
+    if (newBuilder !== (job.builder || '')) changes.push(`Builder from "${job.builder || 'None'}" to "${newBuilder || 'None'}"`);
+    if (newLotDetails !== (job.lot_details || '')) changes.push(`Lot Details updated`);
+
+    if (changes.length === 0) {
+      setIsEditCustomerModalOpen(false);
+      return;
+    }
+
+    const updated: Job = {
+      ...job,
+      customer_name: newName,
+      customer_email: newEmail,
+      customer_phone: newPhone,
+      project_address: newAddress || undefined,
+      builder: newBuilder || undefined,
+      lot_details: newLotDetails,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Customer & Site Info Updated',
+          performedBy: performer,
+          timestamp: new Date().toISOString(),
+          details: `Updated customer information: ${changes.join(', ')}`
+        },
+        ...job.audit_logs
+      ]
+    };
+
+    onUpdateJob(updated);
+    setIsEditCustomerModalOpen(false);
+    setCustomerUpdateFeedback('Customer details updated');
+    setTimeout(() => setCustomerUpdateFeedback(null), 3500);
   };
 
   // Manual Time Log / Additional Billing Form State
@@ -1389,15 +1565,35 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
               {/* Customer Info & Lot Details */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-3">
                 <div className="flex items-center justify-between border-b pb-2">
-                  <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                    Customer & Site Details
-                  </h4>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    Project Identifier
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                      Customer & Site Details
+                    </h4>
+                    {customerUpdateFeedback && (
+                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1 animate-in fade-in">
+                        <Check className="w-3 h-3 text-emerald-600" />
+                        {customerUpdateFeedback}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenCustomerModal}
+                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 shadow-2xs"
+                      title="Edit all customer contact, address & lot details"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit Customer Details</span>
+                    </button>
+                    <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
+                      Project Identifier
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Field 1: Job # / MPS Number */}
                   <div className="bg-blue-50/80 p-2.5 rounded-xl border border-blue-200">
                     <span className="text-[10px] text-blue-800 font-bold uppercase block font-mono">Job # / MPS Number:</span>
                     {isEditingMpsNumber ? (
@@ -1407,6 +1603,7 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                           value={mpsNumberInput}
                           onChange={(e) => setMpsNumberInput(e.target.value)}
                           className="w-full bg-white border border-blue-400 rounded px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          autoFocus
                         />
                         <button
                           type="button"
@@ -1442,32 +1639,227 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
                     )}
                   </div>
 
-                  <div>
-                    <span className="text-slate-400 block font-semibold">Email:</span>
-                    <span className="font-medium text-slate-800">{job.customer_email}</span>
+                  {/* Field 2: Email (with inline edit) */}
+                  <div className="bg-slate-50/70 p-2.5 rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 block font-semibold">Email:</span>
+                      {!isEditingEmail && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmailInput(job.customer_email || '');
+                            setIsEditingEmail(true);
+                          }}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-0.5"
+                          title="Edit Customer Email"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                    </div>
+                    {isEditingEmail ? (
+                      <div className="mt-1 space-y-1">
+                        <input
+                          type="text"
+                          value={emailInput}
+                          onChange={(e) => setEmailInput(e.target.value)}
+                          placeholder="client@example.com"
+                          className="w-full bg-white border border-blue-400 rounded px-2 py-1 text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleSaveEmail}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-bold shadow-2xs"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmailInput(job.customer_email || '');
+                              setIsEditingEmail(false);
+                            }}
+                            className="text-slate-500 hover:text-slate-800 px-1 py-0.5 text-[11px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1">
+                        {job.customer_email ? (
+                          <a
+                            href={`mailto:${job.customer_email.split(';')[0].trim()}`}
+                            className="font-medium text-slate-800 hover:text-blue-600 break-all block"
+                            title={`Send email to ${job.customer_email}`}
+                          >
+                            {job.customer_email}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 italic font-normal">Not specified</span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  <div>
-                    <span className="text-slate-400 block font-semibold">Phone:</span>
-                    <span className="font-medium text-slate-800">{job.customer_phone}</span>
+                  {/* Field 3: Phone (with inline edit) */}
+                  <div className="bg-slate-50/70 p-2.5 rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 block font-semibold">Phone:</span>
+                      {!isEditingPhone && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPhoneInput(job.customer_phone || '');
+                            setIsEditingPhone(true);
+                          }}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-0.5"
+                          title="Edit Customer Phone"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                    </div>
+                    {isEditingPhone ? (
+                      <div className="mt-1 space-y-1">
+                        <input
+                          type="text"
+                          value={phoneInput}
+                          onChange={(e) => setPhoneInput(e.target.value)}
+                          placeholder="(555) 234-5678"
+                          className="w-full bg-white border border-blue-400 rounded px-2 py-1 text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleSavePhone}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-bold shadow-2xs"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPhoneInput(job.customer_phone || '');
+                              setIsEditingPhone(false);
+                            }}
+                            className="text-slate-500 hover:text-slate-800 px-1 py-0.5 text-[11px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1">
+                        {job.customer_phone ? (
+                          <a
+                            href={`tel:${job.customer_phone.split(';')[0].replace(/[^0-9+]/g, '')}`}
+                            className="font-medium text-slate-800 hover:text-blue-600 block"
+                            title={`Call ${job.customer_phone}`}
+                          >
+                            {job.customer_phone}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 italic font-normal">Not specified</span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {canAccessFinancials ? (
-                    <div>
-                      <span className="text-slate-400 block font-semibold">Estimated Fee:</span>
-                      <span className="font-medium text-slate-800">${job.estimated_cost}</span>
-                    </div>
-                  ) : (
-                    <div>
-                      <span className="text-slate-400 block font-semibold">Square Footage:</span>
-                      <span className="font-medium text-slate-800">{job.sq_ft} sq ft</span>
-                    </div>
-                  )}
+                  {/* Field 4: Estimated Fee / Square Footage */}
+                  <div className="bg-slate-50/70 p-2.5 rounded-xl border border-slate-200">
+                    <span className="text-slate-400 block font-semibold">
+                      {canAccessFinancials ? 'Estimated Fee:' : 'Square Footage:'}
+                    </span>
+                    <span className="font-medium text-slate-800 block mt-1">
+                      {canAccessFinancials ? `$${job.estimated_cost}` : `${job.sq_ft} sq ft`}
+                    </span>
+                  </div>
                 </div>
 
+                {/* Optional Site Address & Builder row */}
+                {(job.project_address || job.builder) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                    {job.project_address && (
+                      <div className="flex items-start gap-1.5 text-xs">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="text-slate-400 font-semibold block text-[11px]">Site Address:</span>
+                          <span className="font-medium text-slate-800">{job.project_address}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.builder && (
+                      <div className="flex items-start gap-1.5 text-xs">
+                        <Building className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="text-slate-400 font-semibold block text-[11px]">Builder / Contractor:</span>
+                          <span className="font-medium text-slate-800">{job.builder}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Field 5: Lot & Site Details (with inline edit) */}
                 <div className="pt-2 border-t">
-                  <span className="text-slate-400 block font-semibold">Lot & Site Details:</span>
-                  <p className="text-slate-700 mt-0.5">{job.lot_details}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 block font-semibold">Lot & Site Details:</span>
+                    {!isEditingLotDetails && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLotDetailsInput(job.lot_details || '');
+                          setIsEditingLotDetails(true);
+                        }}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-0.5"
+                        title="Edit Lot & Site Details"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                  </div>
+                  {isEditingLotDetails ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      <textarea
+                        rows={3}
+                        value={lotDetailsInput}
+                        onChange={(e) => setLotDetailsInput(e.target.value)}
+                        className="w-full bg-white border border-blue-400 rounded-lg p-2 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="Sloped lot, setbacks, easements, orientation..."
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleSaveLotDetails}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-[11px] font-bold shadow-2xs"
+                        >
+                          Save Lot Details
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLotDetailsInput(job.lot_details || '');
+                            setIsEditingLotDetails(false);
+                          }}
+                          className="text-slate-500 hover:text-slate-800 px-1.5 py-0.5 text-[11px]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-700 mt-0.5 leading-relaxed">
+                      {job.lot_details || <span className="text-slate-400 italic">No lot details specified.</span>}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -4119,6 +4511,146 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
           </div>
         );
       })()}
+
+      {/* Comprehensive Edit Customer & Site Details Modal */}
+      {isEditCustomerModalOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden text-slate-900 animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-slate-900 text-white px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-blue-600 text-white">
+                  <User className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">Edit Customer & Site Information</h3>
+                  <p className="text-[11px] text-slate-400">Job #{job.job_number} • {job.customer_name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditCustomerModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFullCustomerModal} className="p-5 space-y-4 text-xs">
+              <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-3 text-[11px] text-blue-900">
+                Update customer contact details whenever the client provides new emails or phone numbers. All automated notifications, customer portal records, and official invoices will reflect these changes.
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Customer / Client Name <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <User className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    required
+                    value={custModalName}
+                    onChange={(e) => setCustModalName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                    placeholder="e.g. Ceci McFee"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email Address(es)</label>
+                  <div className="relative">
+                    <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      value={custModalEmail}
+                      onChange={(e) => setCustModalEmail(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      placeholder="client@example.com (or ; for multiple)"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Separate multiple emails with semicolons</span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Phone Number(s)</label>
+                  <div className="relative">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      value={custModalPhone}
+                      onChange={(e) => setCustModalPhone(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      placeholder="(555) 234-5678"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Client mobile, home, or office line</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Site / Project Address</label>
+                  <div className="relative">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      value={custModalAddress}
+                      onChange={(e) => setCustModalAddress(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      placeholder="e.g. 203 Tom Miller Lane, Bismarck"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Builder / General Contractor</label>
+                  <div className="relative">
+                    <Building className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      value={custModalBuilder}
+                      onChange={(e) => setCustModalBuilder(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      placeholder="e.g. Zach Ritter, CCI"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Lot & Site Details / Setbacks</label>
+                <textarea
+                  rows={3}
+                  value={custModalLotDetails}
+                  onChange={(e) => setCustModalLotDetails(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none"
+                  placeholder="Sloped 0.75 acre lot with north rear orientation, 35ft setback requirement..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsEditCustomerModalOpen(false)}
+                  className="px-4 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Official Invoice Modal */}
       {isOfficialInvoiceModalOpen && (
