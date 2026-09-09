@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak } from './types';
+import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications } from './data/mockData';
+import { 
+  isUserGregHyatt, 
+  getStoredGregDevCards, 
+  saveStoredGregDevCards, 
+  getStoredGregDevEntries, 
+  saveStoredGregDevEntries 
+} from './utils/gregDevTimeService';
 import { HeaderNav } from './components/HeaderNav';
 import { AuthScreen } from './components/AuthScreen';
 import {
@@ -10,12 +17,18 @@ import {
   seedInitialJobsToFirestore,
   subscribeToStaff,
   saveStaffToFirestore,
+  deleteStaffFromFirestore,
   seedStaffToFirestore,
   subscribeToChat,
   saveChatMessageToFirestore,
   subscribeToAuth,
   syncAuthToStaffUser,
-  logoutUser
+  logoutUser,
+  purgeRemovedMockStaff,
+  subscribeToDevTimeEntries,
+  saveDevTimeEntryToFirestore,
+  subscribeToDevProjectCards,
+  saveDevProjectCardsToFirestore
 } from './services/firebase';
 import { User as FirebaseUser } from 'firebase/auth';
 import { DrafterDashboard } from './components/DrafterDashboard';
@@ -32,6 +45,8 @@ import { GeneralChatWidget } from './components/GeneralChatWidget';
 import { StaffManagementModal } from './components/StaffManagementModal';
 import { TimeClockBar } from './components/TimeClockBar';
 import { TimeCardModal } from './components/TimeCardModal';
+import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
+import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -57,6 +72,11 @@ export default function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
   const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
+
+  // Greg Hyatt Dev Project Cards & Timesheet State
+  const [devCards, setDevCards] = useState<GregDevProjectCard[]>(() => getStoredGregDevCards());
+  const [devEntries, setDevEntries] = useState<GregDevTimeEntry[]>(() => getStoredGregDevEntries());
+  const [isDevReviewModalOpen, setIsDevReviewModalOpen] = useState(false);
 
   // Firebase Authentication State
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
@@ -108,8 +128,9 @@ export default function App() {
     }
     setTimeCards(getStoredTimeCards());
 
-    // 2. Test Firebase connection
+    // 2. Test Firebase connection & purge legacy mock staff from cloud
     testConnection();
+    purgeRemovedMockStaff().catch(err => console.warn('Mock staff purge skipped/failed:', err));
 
     // 3. Connect real-time Firestore synchronization
     const unsubscribeJobs = subscribeToJobs(
@@ -132,8 +153,18 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          setStaffList(cloudStaff);
-          saveStoredStaff(cloudStaff);
+          const filtered = cloudStaff.filter((s) => {
+            const isRemovedMockId = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'].includes(s.id);
+            const nameLower = (s.name || '').toLowerCase();
+            const isRemovedMockName = ['jason', 'drew lupkey', 'kyle', 'james', 'aaron', 'ethan'].includes(nameLower) && (s.email?.includes('myplanstore.com') || !s.email);
+            return !isRemovedMockId && !isRemovedMockName;
+          });
+          const hasGreg = filtered.some(s => s.name.toLowerCase().includes('greg hyatt') || s.id === 'staff-greg');
+          if (!hasGreg) {
+            filtered.unshift(STAFF_USERS[0]);
+          }
+          setStaffList(filtered);
+          saveStoredStaff(filtered);
         }
       },
       () => {
@@ -148,10 +179,26 @@ export default function App() {
       }
     });
 
+    const unsubscribeDevEntries = subscribeToDevTimeEntries((entries) => {
+      if (entries && entries.length > 0) {
+        setDevEntries(entries);
+        saveStoredGregDevEntries(entries);
+      }
+    });
+
+    const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
+      if (cards && cards.length > 0) {
+        setDevCards(cards);
+        saveStoredGregDevCards(cards);
+      }
+    });
+
     return () => {
       unsubscribeJobs();
       unsubscribeStaff();
       unsubscribeChat();
+      unsubscribeDevEntries();
+      unsubscribeDevCards();
     };
   }, []);
 
@@ -477,6 +524,62 @@ export default function App() {
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
+
+    // For Greg Hyatt: Pause any active Dev Project Card timers during shift break
+    if (isUserGregHyatt(currentStaff)) {
+      const runningCards = devCards.filter(c => c.isActive && c.activeTimerStart);
+      if (runningCards.length > 0) {
+        const newDevLogs: GregDevTimeEntry[] = [];
+        const updatedDevCards = devCards.map(c => {
+          if (c.isActive && c.activeTimerStart) {
+            const startMs = new Date(c.activeTimerStart).getTime();
+            const endMs = Date.now();
+            const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+            const hours = durationSeconds / 3600;
+            const rate = currentStaff.hourlyRate || 150;
+            const billableAmount = Number((hours * rate).toFixed(2));
+
+            const log: GregDevTimeEntry = {
+              id: `dev-entry-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              staffId: currentStaff.id,
+              staffName: currentStaff.name,
+              projectType: c.projectType,
+              date: new Date().toISOString().split('T')[0],
+              startTime: c.activeTimerStart,
+              endTime: new Date(endMs).toISOString(),
+              durationSeconds,
+              notes: `${c.currentNotes || c.projectType} (Paused for shift break)`,
+              hourlyRate: rate,
+              billableAmount,
+              shiftId: existingActiveShift?.id,
+              createdAt: new Date().toISOString()
+            };
+            newDevLogs.push(log);
+            saveDevTimeEntryToFirestore(log);
+
+            return {
+              ...c,
+              isActive: false,
+              isPausedByBreak: true,
+              activeTimerStart: undefined,
+              todaySeconds: (c.todaySeconds || 0) + durationSeconds,
+              totalSeconds: (c.totalSeconds || 0) + durationSeconds,
+              lastStoppedAt: new Date(endMs).toISOString()
+            };
+          }
+          return c;
+        });
+
+        if (newDevLogs.length > 0) {
+          const allEntries = [...newDevLogs, ...devEntries];
+          setDevEntries(allEntries);
+          saveStoredGregDevEntries(allEntries);
+        }
+        setDevCards(updatedDevCards);
+        saveStoredGregDevCards(updatedDevCards);
+        saveDevProjectCardsToFirestore(updatedDevCards);
+      }
+    }
   };
 
   const handleResumeFromBreak = () => {
@@ -566,6 +669,28 @@ export default function App() {
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
+
+    // For Greg Hyatt: Automatically resume Dev Project Card timers that were paused by break
+    if (isUserGregHyatt(currentStaff)) {
+      const pausedDevCards = devCards.filter(c => c.isPausedByBreak);
+      if (pausedDevCards.length > 0) {
+        const updatedDevCards = devCards.map(c => {
+          if (c.isPausedByBreak) {
+            return {
+              ...c,
+              isActive: true,
+              isPausedByBreak: false,
+              activeTimerStart: new Date().toISOString(),
+              lastStartedAt: new Date().toISOString()
+            };
+          }
+          return c;
+        });
+        setDevCards(updatedDevCards);
+        saveStoredGregDevCards(updatedDevCards);
+        saveDevProjectCardsToFirestore(updatedDevCards);
+      }
+    }
   };
 
   const handleClockOut = (notes?: string) => {
@@ -677,6 +802,59 @@ export default function App() {
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
 
+    // For Greg Hyatt: Stop and finalize all active or paused Dev Project Card timers upon clocking out
+    if (isUserGregHyatt(currentStaff)) {
+      const activeDevCards = devCards.filter(c => c.isActive && c.activeTimerStart);
+      const newDevLogs: GregDevTimeEntry[] = [];
+      const updatedDevCards = devCards.map(c => {
+        let additionalSec = 0;
+        if (c.isActive && c.activeTimerStart) {
+          const startMs = new Date(c.activeTimerStart).getTime();
+          const curEndMs = Date.now();
+          additionalSec = Math.max(1, Math.floor((curEndMs - startMs) / 1000));
+          const hours = additionalSec / 3600;
+          const rate = currentStaff.hourlyRate || 150;
+          const billableAmount = Number((hours * rate).toFixed(2));
+
+          const log: GregDevTimeEntry = {
+            id: `dev-entry-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            staffId: currentStaff.id,
+            staffName: currentStaff.name,
+            projectType: c.projectType,
+            date: new Date().toISOString().split('T')[0],
+            startTime: c.activeTimerStart,
+            endTime: new Date(curEndMs).toISOString(),
+            durationSeconds: additionalSec,
+            notes: `${c.currentNotes || c.projectType} (Shift Clock-Out Finalized)`,
+            hourlyRate: rate,
+            billableAmount,
+            createdAt: new Date().toISOString()
+          };
+          newDevLogs.push(log);
+          saveDevTimeEntryToFirestore(log);
+        }
+
+        return {
+          ...c,
+          isActive: false,
+          isPausedByBreak: false,
+          activeTimerStart: undefined,
+          todaySeconds: (c.todaySeconds || 0) + additionalSec,
+          totalSeconds: (c.totalSeconds || 0) + additionalSec,
+          lastStoppedAt: additionalSec > 0 ? new Date().toISOString() : c.lastStoppedAt
+        };
+      });
+
+      if (newDevLogs.length > 0) {
+        const allEntries = [...newDevLogs, ...devEntries];
+        setDevEntries(allEntries);
+        saveStoredGregDevEntries(allEntries);
+      }
+      setDevCards(updatedDevCards);
+      saveStoredGregDevCards(updatedDevCards);
+      saveDevProjectCardsToFirestore(updatedDevCards);
+    }
+
     if (stoppedJobNumbers.length > 0) {
       setPausedJobsNotice({ jobNumbers: stoppedJobNumbers, type: 'clock_out_stopped' });
     } else {
@@ -709,6 +887,7 @@ export default function App() {
     if (currentStaff.id === staffId && updated.length > 0) {
       setCurrentStaff(updated[0]);
     }
+    deleteStaffFromFirestore(staffId).catch(err => console.warn('[Firestore] Error deleting staff:', err));
   };
 
   const handleResetStaff = () => {
@@ -1541,6 +1720,37 @@ export default function App() {
         />
       )}
 
+      {/* Greg Hyatt Dedicated Project Dev Time Cards (MPS OS Dev, BigX Media Dev, Sound Extraction Dev, Other Dev, FB Media Dev) */}
+      {isUserGregHyatt(currentStaff) && userRole !== 'customer' && (() => {
+        const activeGregShift = timeCards.find(
+          s => (s.staffId === currentStaff.id || s.staffName.toLowerCase().includes('greg hyatt')) && 
+               (s.status === 'clocked_in' || s.status === 'on_break')
+        );
+        const isClockedIn = Boolean(activeGregShift);
+        const isOnBreak = activeGregShift?.status === 'on_break';
+
+        return (
+          <GregDevProjectCardsSection
+            currentStaff={currentStaff}
+            isClockedIn={isClockedIn}
+            isOnBreak={isOnBreak}
+            devCards={devCards}
+            devEntries={devEntries}
+            onUpdateDevCards={(updated) => {
+              setDevCards(updated);
+              saveStoredGregDevCards(updated);
+              saveDevProjectCardsToFirestore(updated);
+            }}
+            onUpdateDevEntries={(updated) => {
+              setDevEntries(updated);
+              saveStoredGregDevEntries(updated);
+            }}
+            onOpenReviewModal={() => setIsDevReviewModalOpen(true)}
+            activeShiftId={activeGregShift?.id}
+          />
+        );
+      })()}
+
       {/* Main OS View Switcher */}
       <main className="flex-1">
         {userRole === 'drafter' ? (
@@ -1730,6 +1940,18 @@ export default function App() {
         timeCards={timeCards}
         jobs={jobs}
         initialSelectedStaffId={timeCardModalStaffId}
+      />
+
+      {/* MODAL 10: Greg Hyatt Dev Project Time Entries Review & CSV Export Modal */}
+      <GregDevTimeReviewModal
+        isOpen={isDevReviewModalOpen}
+        onClose={() => setIsDevReviewModalOpen(false)}
+        currentStaff={currentStaff}
+        devEntries={devEntries}
+        onUpdateDevEntries={(updated) => {
+          setDevEntries(updated);
+          saveStoredGregDevEntries(updated);
+        }}
       />
 
     </div>

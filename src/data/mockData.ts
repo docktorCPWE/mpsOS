@@ -1,16 +1,15 @@
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage, TimeCardShift } from '../types';
 
 export function isStaffExemptFromClock(userNameOrStaff?: string | StaffUser): boolean {
-  if (!userNameOrStaff) return false;
-  const name = typeof userNameOrStaff === 'string' ? userNameOrStaff : userNameOrStaff.name;
-  return name.toLowerCase().includes('jason');
+  // No one is hardcoded exempt; all staff including Greg use the shift timeclock bar
+  return false;
 }
 
 export const STAFF_USERS: StaffUser[] = [
   {
     id: 'staff-greg',
     name: 'Greg Hyatt',
-    email: 'greg.hyatt@myplanstore.com',
+    email: 'arkcwd@gmail.com',
     title: 'Owner & Principal Architect',
     phone: '(555) 234-5678',
     role: 'admin',
@@ -25,126 +24,12 @@ export const STAFF_USERS: StaffUser[] = [
     canManageInvoices: true,
     canEditJobPhases: true,
     canManageRoadblocks: true
-  },
-  {
-    id: 'staff-jason',
-    name: 'Jason',
-    email: 'jason@myplanstore.com',
-    title: 'Project Manager & Operations',
-    phone: '(555) 345-6789',
-    role: 'admin',
-    department: 'Management',
-    hourlyRate: 120,
-    status: 'active',
-    joinedDate: '2021-06-01',
-    canAccessFinancials: true,
-    canDelegate: true,
-    canViewAllProjects: true,
-    canManageStaff: false,
-    canManageInvoices: true,
-    canEditJobPhases: true,
-    canManageRoadblocks: true
-  },
-  {
-    id: 'staff-drew',
-    name: 'Drew Lupkey',
-    email: 'drew.lupkey@myplanstore.com',
-    title: 'Admin & Billing Specialist',
-    phone: '(555) 456-7890',
-    role: 'admin',
-    department: 'Finance',
-    hourlyRate: 95,
-    status: 'active',
-    joinedDate: '2022-03-10',
-    canAccessFinancials: true,
-    canDelegate: false,
-    canViewAllProjects: true,
-    canManageStaff: false,
-    canManageInvoices: true,
-    canEditJobPhases: false,
-    canManageRoadblocks: false
-  },
-  {
-    id: 'staff-kyle',
-    name: 'Kyle',
-    email: 'kyle@myplanstore.com',
-    title: 'Lead Project Manager & Senior Drafter',
-    phone: '(555) 567-8901',
-    role: 'drafter_lead',
-    department: 'Management',
-    hourlyRate: 110,
-    status: 'active',
-    joinedDate: '2021-09-15',
-    canAccessFinancials: true,
-    canDelegate: true,
-    canViewAllProjects: true,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: true,
-    canManageRoadblocks: true
-  },
-  {
-    id: 'staff-james',
-    name: 'James',
-    email: 'james@myplanstore.com',
-    title: 'Architectural Drafter',
-    phone: '(555) 901-2345',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 70,
-    status: 'active',
-    joinedDate: '2023-09-01',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: false,
-    canManageRoadblocks: false
-  },
-  {
-    id: 'staff-aaron',
-    name: 'Aaron',
-    email: 'aaron@myplanstore.com',
-    title: 'Architectural Drafter',
-    phone: '(555) 012-3456',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 70,
-    status: 'active',
-    joinedDate: '2023-11-15',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: false,
-    canManageRoadblocks: false
-  },
-  {
-    id: 'staff-ethan',
-    name: 'Ethan',
-    email: 'ethan@myplanstore.com',
-    title: 'Operations & Project Manager',
-    phone: '(555) 123-4567',
-    role: 'admin',
-    department: 'Operations',
-    hourlyRate: 115,
-    status: 'active',
-    joinedDate: '2023-02-01',
-    canAccessFinancials: true,
-    canDelegate: true,
-    canViewAllProjects: true,
-    canManageStaff: false,
-    canManageInvoices: true,
-    canEditJobPhases: true,
-    canManageRoadblocks: true
   }
 ];
 
-export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Drew Lupkey', 'Ethan'];
-export const AUTHORIZED_DELEGATOR_NAMES = ['Kyle', 'Jason', 'Greg Hyatt', 'Ethan'];
-export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Kyle', 'Jason', 'Drew', 'Ethan', 'Greg Hyatt'];
+export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt'];
+export const AUTHORIZED_DELEGATOR_NAMES = ['Greg Hyatt'];
+export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Greg Hyatt'];
 
 export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
@@ -275,117 +160,15 @@ export function isMessageRelevantForUser(msg: ChatMessage, staff?: StaffUser, jo
 
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [
   {
-    id: 'notif-ethan-1',
-    recipientName: 'Ethan',
-    recipientEmail: 'ethan@myplanstore.com',
-    title: 'Truss Calculation Review Request',
-    message: 'Jason requested review of structural truss calculations on #M26-195 before finalizing client package.',
-    timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
-    read: false,
-    type: 'comment',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Jason'
-  },
-  {
-    id: 'notif-ethan-2',
-    recipientName: 'Ethan',
-    recipientEmail: 'ethan@myplanstore.com',
-    title: 'Operations Schedule: Plan Review',
-    message: 'Greg Hyatt flagged upcoming intake submissions for ops scheduling in current sprint.',
-    timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-    read: false,
-    type: 'comment',
-    senderName: 'Greg Hyatt'
-  },
-  {
-    id: 'notif-kyle-1',
-    recipientName: 'Kyle',
-    recipientEmail: 'kyle@myplanstore.com',
-    title: 'Component Review: Foundation Detail',
-    message: 'James completed foundation & stem wall structural detail for Job #M26-195.',
-    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    read: false,
-    type: 'review_ready',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'James'
-  },
-  {
-    id: 'notif-kyle-2',
-    recipientName: 'Kyle',
-    recipientEmail: 'kyle@myplanstore.com',
-    title: 'Setback Verified: #M26-195',
-    message: 'Aaron verified 35ft rear and 10ft side setbacks for #M26-195.',
-    timestamp: new Date(Date.now() - 3600000 * 1).toISOString(),
-    read: false,
-    type: 'comment',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Aaron'
-  },
-  {
-    id: 'notif-jason-1',
-    recipientName: 'Jason',
-    recipientEmail: 'jason@myplanstore.com',
-    title: 'Preliminary Layout Review Ready',
-    message: 'Kyle finished initial floor plan draft for #M26-195 (Testing Dummy).',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    read: false,
-    type: 'comment',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Kyle'
-  },
-  {
-    id: 'notif-1',
-    recipientName: 'James',
-    recipientEmail: 'james@myplanstore.com',
-    title: 'New Component Delegated: Foundation & Slab Detail',
-    message: 'Kyle delegated "Foundation & Stem Wall Structural Detail" for Job #M26-195 with 2 attached files.',
-    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    read: false,
-    type: 'delegation',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Kyle'
-  },
-  {
-    id: 'notif-2',
-    recipientName: 'Aaron',
-    recipientEmail: 'aaron@myplanstore.com',
-    title: 'New Component Delegated: Hidden Pantry Millwork CAD',
-    message: 'Jason delegated "Hidden Pantry Millwork & Kitchen Island CAD Detail" for Job #M26-195 with concept sketches.',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    read: false,
-    type: 'delegation',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Jason'
-  },
-  {
-    id: 'notif-drew-1',
-    recipientName: 'Drew Lupkey',
-    recipientEmail: 'drew@myplanstore.com',
-    title: 'Weekly Invoicing Audit Request',
-    message: 'Greg Hyatt requested weekly billing reconciliation for active projects.',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    read: false,
-    type: 'comment',
-    senderName: 'Greg Hyatt'
-  },
-  {
-    id: 'notif-greg-1',
+    id: 'notif-greg-welcome',
     recipientName: 'Greg Hyatt',
-    recipientEmail: 'greg@myplanstore.com',
-    title: 'Engineering Review: #M26-195',
-    message: 'Jason completed engineering review for Testing Dummy (#M26-195) and marked preliminary layout ready.',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    recipientEmail: 'arkcwd@gmail.com',
+    title: 'Workspace Ready for Staff Onboarding',
+    message: 'All mock staff profiles removed. When staff sign up, you can configure their permissions in Staff Management.',
+    timestamp: new Date().toISOString(),
     read: false,
     type: 'comment',
-    jobId: 'job-1',
-    jobNumber: 'M26-195',
-    senderName: 'Jason'
+    senderName: 'System'
   }
 ];
 
@@ -1420,10 +1203,12 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   }
 ];
 
-export const STORAGE_KEY = 'my_plan_store_os_jobs_v13';
-export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v13';
-export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v13';
-export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v13';
+export const STORAGE_KEY = 'my_plan_store_os_jobs_v14';
+export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v14';
+export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v14';
+export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v14';
+
+export const REMOVED_MOCK_STAFF_IDS = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'];
 
 export function getStoredStaff(): StaffUser[] {
   try {
@@ -1434,7 +1219,20 @@ export function getStoredStaff(): StaffUser[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      const filtered = parsed.filter((s: StaffUser) => {
+        if (REMOVED_MOCK_STAFF_IDS.includes(s.id)) return false;
+        const nameLower = (s.name || '').toLowerCase();
+        if (['jason', 'drew lupkey', 'kyle', 'james', 'aaron', 'ethan'].includes(nameLower) && (s.email?.includes('myplanstore.com') || !s.email)) {
+          return false;
+        }
+        return true;
+      });
+      const hasGreg = filtered.some((s: StaffUser) => s.name.toLowerCase().includes('greg hyatt') || s.id === 'staff-greg');
+      if (!hasGreg) {
+        filtered.unshift(STAFF_USERS[0]);
+      }
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(filtered));
+      return filtered;
     }
     return STAFF_USERS;
   } catch (err) {
@@ -1522,9 +1320,9 @@ export function saveStoredChatMessages(messages: ChatMessage[]) {
   }
 }
 
-export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v12';
+export const TIME_CARDS_STORAGE_KEY = 'my_plan_store_os_timecards_v14';
 
-export const INITIAL_TIME_CARDS: TimeCardShift[] = [
+const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
   // Kyle (Lead Drafter)
   {
     id: 'shift-kyle-mon',
@@ -1759,6 +1557,8 @@ export const INITIAL_TIME_CARDS: TimeCardShift[] = [
     notes: 'Active shift'
   }
 ];
+
+export const INITIAL_TIME_CARDS: TimeCardShift[] = ALL_RAW_TIME_CARDS.filter(s => s.staffId === 'staff-greg');
 
 export function getStoredTimeCards(): TimeCardShift[] {
   try {

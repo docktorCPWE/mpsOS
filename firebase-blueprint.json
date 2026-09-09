@@ -126,6 +126,43 @@
         "payment_instructions": { "type": "string", "description": "Standard invoice payment terms" }
       },
       "required": ["id", "company_name"]
+    },
+    "DevTimeEntry": {
+      "title": "DevTimeEntry",
+      "description": "Granular development project time entry logged by Greg Hyatt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of dev time entry" },
+        "staff_id": { "type": "string", "description": "Staff ID of logger" },
+        "staff_name": { "type": "string", "description": "Staff name" },
+        "project_type": { "type": "string", "description": "Project type e.g. MPS OS Dev, BigX Media Dev, Sound Extraction Dev, Other Dev, FB Media Dev" },
+        "date": { "type": "string", "description": "Date formatted YYYY-MM-DD" },
+        "start_time": { "type": "string", "description": "Session start ISO timestamp" },
+        "end_time": { "type": "string", "description": "Session end ISO timestamp" },
+        "duration_seconds": { "type": "number", "description": "Duration in seconds" },
+        "notes": { "type": "string", "description": "Notes or task summary" },
+        "hourly_rate": { "type": "number", "description": "Hourly rate applied" },
+        "billable_amount": { "type": "number", "description": "Calculated amount" },
+        "shift_id": { "type": "string", "description": "Associated primary shift ID" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "project_type", "start_time", "duration_seconds"]
+    },
+    "DevProjectCard": {
+      "title": "DevProjectCard",
+      "description": "Active dev project time card for Greg Hyatt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique card ID" },
+        "project_type": { "type": "string", "description": "Project type name" },
+        "is_active": { "type": "boolean", "description": "Whether timer is currently running" },
+        "is_paused_by_break": { "type": "boolean", "description": "Whether paused due to shift break" },
+        "active_timer_start": { "type": "string", "description": "Active timer start timestamp" },
+        "today_seconds": { "type": "number", "description": "Seconds tracked today" },
+        "total_seconds": { "type": "number", "description": "Total historical seconds tracked" },
+        "current_notes": { "type": "string", "description": "Current note or description" }
+      },
+      "required": ["id", "project_type"]
     }
   },
   "firestore": {
@@ -152,6 +189,14 @@
     "/settings/{settingId}": {
       "schema": "CompanySettings",
       "description": "Company operational parameters and defaults"
+    },
+    "/dev_time_entries/{entryId}": {
+      "schema": "DevTimeEntry",
+      "description": "Time entries logged for development project types by Greg Hyatt"
+    },
+    "/dev_project_cards/{cardId}": {
+      "schema": "DevProjectCard",
+      "description": "Card state and active timer trackers for dev projects"
     }
   }
 }

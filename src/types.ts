@@ -170,6 +170,47 @@ export interface EmployeeWeeklySummary {
   shifts: TimeCardShift[];
 }
 
+export type StandardGregDevProjectType = 
+  | 'MPS OS Dev' 
+  | 'BigX Media Dev' 
+  | 'Sound Extraction Dev' 
+  | 'FB Media Dev' 
+  | 'Other Dev';
+
+export type GregDevProjectType = StandardGregDevProjectType | string;
+
+export interface GregDevProjectCard {
+  id: string;
+  projectType: GregDevProjectType;
+  colorTheme: 'indigo' | 'cyan' | 'purple' | 'blue' | 'amber' | 'emerald' | 'rose';
+  isActive: boolean;
+  isPausedByBreak: boolean;
+  activeTimerStart?: string; // ISO timestamp
+  todaySeconds: number;
+  totalSeconds: number;
+  currentNotes?: string;
+  lastStartedAt?: string;
+  lastStoppedAt?: string;
+}
+
+export interface GregDevTimeEntry {
+  id: string;
+  staffId: string;
+  staffName: string;
+  projectType: GregDevProjectType;
+  date: string; // 'YYYY-MM-DD'
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+  durationSeconds: number;
+  notes?: string;
+  hourlyRate: number;
+  billableAmount: number;
+  shiftId?: string;
+  createdAt: string; // ISO string
+}
+
+export type DevEntryPeriodFilter = 'daily' | 'weekly' | 'monthly';
+
 export interface StaffUser {
   id: string;
   name: string;

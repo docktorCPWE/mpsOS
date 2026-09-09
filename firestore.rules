@@ -59,5 +59,19 @@ service cloud.firestore {
       allow create, update: if isValidId(settingId);
       allow delete: if isValidId(settingId);
     }
+
+    // Greg Hyatt Dev Project Time Entries
+    match /dev_time_entries/{entryId} {
+      allow read: if true;
+      allow create, update: if isValidId(entryId);
+      allow delete: if isValidId(entryId);
+    }
+
+    // Greg Hyatt Dev Project Cards State
+    match /dev_project_cards/{cardId} {
+      allow read: if true;
+      allow create, update: if isValidId(cardId);
+      allow delete: if isValidId(cardId);
+    }
   }
 }
