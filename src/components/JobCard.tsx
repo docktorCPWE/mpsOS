@@ -124,7 +124,8 @@ export const JobCard: React.FC<JobCardProps> = ({
 
   const handleStop = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onStopTimer(job.id, taskInput || job.active_timer_task || job.paused_timer_task);
+    // Trigger StopTimerModal to enforce mandatory work completed note
+    onStopTimer(job.id);
     setTaskInput('');
   };
 

@@ -2539,6 +2539,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 {displayedJob.comments.map(c => {
                   const isRoadblockFlag = c.text.includes('ROADBLOCK FLAGGED') || c.text.includes('ROADBLOCK ACTIVATED') || c.text.startsWith('🚨');
                   const isRoadblockResolved = c.text.includes('ROADBLOCK RESOLVED') || c.text.startsWith('✅ ROADBLOCK');
+                  const isTimerLog = c.text.includes('⏱️ Drafting Session Completed') || c.text.includes('⏱️ Drafting Time Logged') || c.text.startsWith('⏱️');
                   const isHighlighted = highlightedCommentId === c.id;
 
                   // Render text with highlighted @mentions
@@ -2570,6 +2571,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                           ? 'bg-red-50/90 border-red-300 text-red-950'
                           : isRoadblockResolved
                           ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+                          : isTimerLog
+                          ? 'bg-emerald-50/50 border-emerald-200 text-slate-800'
                           : 'bg-slate-50 border-slate-200 text-slate-800'
                       }`}
                     >
@@ -2582,6 +2585,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                               ? 'bg-red-200 text-red-900 font-bold'
                               : isRoadblockResolved
                               ? 'bg-emerald-200 text-emerald-900 font-bold'
+                              : isTimerLog
+                              ? 'bg-emerald-100 text-emerald-800 font-semibold'
                               : 'bg-slate-200 text-slate-700'
                           }`}>
                             {c.role}
@@ -2591,6 +2596,13 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                             <span className="bg-blue-600 text-white font-mono text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-2xs animate-pulse">
                               <Bell className="w-3 h-3" />
                               <span>TARGET NOTE FROM NOTIFICATION</span>
+                            </span>
+                          )}
+
+                          {isTimerLog && (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-2xs">
+                              <Clock className="w-3 h-3 text-emerald-600" />
+                              <span>DRAFTING TIME LOG</span>
                             </span>
                           )}
 

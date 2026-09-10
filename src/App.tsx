@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
+import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
 import { 
   isUserGregHyatt, 
@@ -47,6 +47,7 @@ import { EmailSimulatorModal } from './components/EmailSimulatorModal';
 import { NewJobModal } from './components/NewJobModal';
 import { DelegateWorkModal } from './components/DelegateWorkModal';
 import { StartTimerModal } from './components/StartTimerModal';
+import { StopTimerModal } from './components/StopTimerModal';
 import { CompleteTaskModal, CompleteTaskPayload } from './components/CompleteTaskModal';
 import { KyleDelegationInboxModal } from './components/KyleDelegationInboxModal';
 import { GeneralChatWidget } from './components/GeneralChatWidget';
@@ -56,6 +57,7 @@ import { TimeCardModal } from './components/TimeCardModal';
 import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 import { getLocalDateString } from './utils/timeCardExport';
+import { formatSecondsToReadable } from './utils/timeUtils';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -104,6 +106,7 @@ export default function App() {
   const [jobToDelegate, setJobToDelegate] = useState<Job | null>(null);
   const [taskToComplete, setTaskToComplete] = useState<{ task: DelegatedWorkItem; job: Job } | null>(null);
   const [timerPromptJob, setTimerPromptJob] = useState<{ job: Job; initialNote?: string } | null>(null);
+  const [stopTimerPromptJob, setStopTimerPromptJob] = useState<{ job: Job; initialNote?: string } | null>(null);
   const [isKyleInboxOpen, setIsKyleInboxOpen] = useState(false);
   const [isStaffManagementOpen, setIsStaffManagementOpen] = useState(false);
   const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
@@ -143,9 +146,8 @@ export default function App() {
     }
     setTimeCards(getStoredTimeCards());
 
-    // 2. Test Firebase connection & purge legacy mock staff and dummy data from cloud
+    // 2. Test Firebase connection & purge dummy data from cloud
     testConnection();
-    purgeRemovedMockStaff().catch(err => console.warn('Mock staff purge skipped/failed:', err));
     purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
     // 3. Connect real-time Firestore synchronization
@@ -169,15 +171,8 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          const filtered = cloudStaff.filter((s) => {
-            const isRemovedMockId = ['staff-james', 'staff-aaron', 'staff-ethan'].includes(s.id);
-            const nameLower = (s.name || '').toLowerCase();
-            const isRemovedMockName = ['james', 'aaron', 'ethan'].includes(nameLower) && !s.email?.includes('arkcwd@gmail.com');
-            return !isRemovedMockId && !isRemovedMockName;
-          });
-
-          // Ensure all core staff (Greg, Kyle, Jason, Drew) exist in roster
-          const merged = [...filtered];
+          // Ensure all core staff (Greg, Kyle, Jason, Drew, Aaron, James, Ethan) exist in roster
+          const merged = [...cloudStaff];
           for (const core of STAFF_USERS) {
             const exists = merged.some(s => s.id === core.id || s.name.toLowerCase() === core.name.toLowerCase() || (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')));
             if (!exists) {
@@ -301,6 +296,12 @@ export default function App() {
       const match = newJobs.find(j => j.id === timerPromptJob.job.id);
       if (match) setTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
     }
+
+    // Update stopTimerPromptJob if open
+    if (stopTimerPromptJob) {
+      const match = newJobs.find(j => j.id === stopTimerPromptJob.job.id);
+      if (match) setStopTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
+    }
   };
 
   // Helper to update and persist notifications across page loads and sessions
@@ -410,26 +411,41 @@ export default function App() {
     setTimerPromptJob(null);
   };
 
-  // Timer Stop Handler
-  const handleStopTimer = (jobId: string, taskNote?: string) => {
+  // Confirm and execute stopping of the timer with a required work completed note
+  const handleConfirmStopTimer = (jobId: string, completedWorkNote: string) => {
+    const trimmed = completedWorkNote.trim();
+    if (!trimmed) return;
+
     const updatedJobs = jobs.map(j => {
       if (j.id === jobId && (j.active_timer_start || j.paused_by_break)) {
         const startMs = j.active_timer_start ? new Date(j.active_timer_start).getTime() : Date.now();
         const endMs = Date.now();
         const durationSeconds = j.active_timer_start 
           ? Math.max(1, Math.floor((endMs - startMs) / 1000))
-          : 0;
-        const finalTaskNote = taskNote || j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
+          : (j.paused_elapsed_seconds || 0);
+
+        const drafterDisplayName = j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0];
+        const durationFormatted = formatSecondsToReadable(durationSeconds);
 
         const newLog: TimeLog | null = durationSeconds > 0 ? {
-          id: `tl-${Date.now()}`,
-          drafterName: j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0],
+          id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          drafterName: drafterDisplayName,
           startTime: j.active_timer_start || new Date().toISOString(),
           endTime: new Date(endMs).toISOString(),
           durationSeconds,
-          taskDescription: finalTaskNote,
+          taskDescription: trimmed,
           hourlyRate: j.hourly_rate || 85
         } : null;
+
+        // Post work completed note as an item in the Messages & Notes area inside the project card
+        const timerComment: JobComment = {
+          id: `c-timer-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          author: drafterDisplayName,
+          authorId: currentStaff.id,
+          role: 'drafter',
+          text: `⏱️ Drafting Session Completed (${durationFormatted}):\n"${trimmed}"`,
+          timestamp: new Date().toISOString()
+        };
 
         return {
           ...j,
@@ -441,16 +457,18 @@ export default function App() {
           paused_timer_task: undefined,
           paused_timer_drafter_id: undefined,
           paused_timer_drafter_name: undefined,
+          paused_elapsed_seconds: undefined,
           time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
+          comments: [...(j.comments || []), timerComment],
           audit_logs: [
             {
-              id: `a-${Date.now()}`,
-              action: 'Timer Stopped',
-              performedBy: currentStaff.name || j.assigned_drafter.split(',')[0],
+              id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              action: 'Timer Stopped & Work Logged',
+              performedBy: drafterDisplayName,
               timestamp: new Date().toISOString(),
               details: durationSeconds > 0 
-                ? `Logged ${Math.round(durationSeconds / 60)} mins for "${finalTaskNote}"`
-                : `Session stopped for "${finalTaskNote}"`
+                ? `Logged ${durationFormatted} for: "${trimmed}" (posted to Messages & Notes)`
+                : `Session stopped for: "${trimmed}"`
             },
             ...j.audit_logs
           ]
@@ -460,6 +478,26 @@ export default function App() {
     });
 
     updateJobsState(updatedJobs);
+    setStopTimerPromptJob(null);
+  };
+
+  // Timer Stop Handler - prompts for mandatory note if missing
+  const handleStopTimer = (jobId: string, taskNote?: string) => {
+    const trimmed = taskNote ? taskNote.trim() : '';
+
+    // If no note provided, prompt user with StopTimerModal to require work note
+    if (!trimmed) {
+      const target = jobs.find(j => j.id === jobId);
+      if (target) {
+        setStopTimerPromptJob({
+          job: target,
+          initialNote: target.active_timer_task || ''
+        });
+      }
+      return;
+    }
+
+    handleConfirmStopTimer(jobId, trimmed);
   };
 
   // Reset demo data helper
@@ -1388,7 +1426,8 @@ export default function App() {
 
     // Create Notification for the assigned drafter
     if (notifyDrafter) {
-      const assignedStaff = STAFF_USERS.find(s => s.name === newTask.assignedTo);
+      const assignedStaff = staffList.find(s => s.name.toLowerCase() === newTask.assignedTo.toLowerCase() || s.name.toLowerCase().includes(newTask.assignedTo.toLowerCase())) ||
+                            STAFF_USERS.find(s => s.name === newTask.assignedTo);
       const newNotification: AppNotification = {
         id: `notif-${Date.now()}`,
         recipientName: newTask.assignedTo,
@@ -2117,6 +2156,7 @@ export default function App() {
           onClose={() => setJobToDelegate(null)}
           job={jobToDelegate}
           currentStaff={currentStaff}
+          staffList={staffList}
           onDelegateTask={handleDelegateTask}
         />
       )}
@@ -2142,6 +2182,19 @@ export default function App() {
           currentStaff={currentStaff}
           initialNote={timerPromptJob.initialNote}
           onConfirmStartTimer={(jobId, taskNote) => handleStartTimer(jobId, taskNote)}
+        />
+      )}
+
+      {/* MODAL 6b: Required Note To Stop Timer Modal */}
+      {stopTimerPromptJob && (
+        <StopTimerModal
+          isOpen={!!stopTimerPromptJob}
+          onClose={() => setStopTimerPromptJob(null)}
+          job={stopTimerPromptJob.job}
+          currentStaff={currentStaff}
+          initialNote={stopTimerPromptJob.initialNote}
+          nowTimestamp={nowTimestamp}
+          onConfirmStopTimer={(jobId, completedNote) => handleConfirmStopTimer(jobId, completedNote)}
         />
       )}
 

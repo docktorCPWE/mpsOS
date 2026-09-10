@@ -85,6 +85,66 @@ export const STAFF_USERS: StaffUser[] = [
     canEditJobPhases: false,
     canManageRoadblocks: false,
     canAccessPayroll: true
+  },
+  {
+    id: 'staff-aaron',
+    name: 'Aaron',
+    email: 'aaron@myplanstore.com',
+    title: 'Architectural & CAD Drafter',
+    phone: '(555) 678-9012',
+    role: 'drafter',
+    department: 'Drafting',
+    hourlyRate: 85,
+    status: 'active',
+    joinedDate: '2022-04-10',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: true,
+    canManageRoadblocks: false,
+    canAccessPayroll: false
+  },
+  {
+    id: 'staff-james',
+    name: 'James',
+    email: 'james@myplanstore.com',
+    title: 'Architectural Drafter',
+    phone: '(555) 789-0123',
+    role: 'drafter',
+    department: 'Drafting',
+    hourlyRate: 80,
+    status: 'active',
+    joinedDate: '2022-08-15',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: true,
+    canManageRoadblocks: false,
+    canAccessPayroll: false
+  },
+  {
+    id: 'staff-ethan',
+    name: 'Ethan',
+    email: 'ethan@myplanstore.com',
+    title: 'Junior Drafter & CAD Specialist',
+    phone: '(555) 890-1234',
+    role: 'drafter',
+    department: 'Drafting',
+    hourlyRate: 75,
+    status: 'active',
+    joinedDate: '2023-01-20',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false,
+    canAccessPayroll: false
   }
 ];
 
@@ -920,8 +980,6 @@ export function saveStoredActiveStaffId(staffId: string): void {
   }
 }
 
-export const REMOVED_MOCK_STAFF_IDS = ['staff-james', 'staff-aaron', 'staff-ethan'];
-
 export function getStoredStaff(): StaffUser[] {
   try {
     const raw = localStorage.getItem(STAFF_STORAGE_KEY);
@@ -931,18 +989,8 @@ export function getStoredStaff(): StaffUser[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Filter out legacy dummy mock drafters, NEVER remove Kyle, Jason, Drew, or Greg
-      const cleaned = parsed.filter((s: StaffUser) => {
-        if (REMOVED_MOCK_STAFF_IDS.includes(s.id)) return false;
-        const nameLower = (s.name || '').toLowerCase();
-        if (['james', 'aaron', 'ethan'].includes(nameLower) && !s.email?.includes('arkcwd@gmail.com')) {
-          return false;
-        }
-        return true;
-      });
-
       // Ensure each core team member is present; if already present, PRESERVE their customized permissions
-      const result = [...cleaned];
+      const result = [...parsed];
       for (const core of STAFF_USERS) {
         const index = result.findIndex(
           s => s.id === core.id ||

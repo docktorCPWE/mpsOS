@@ -25,7 +25,8 @@ import {
   orderBy,
   limit,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  deleteField
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry } from '../types';
@@ -141,7 +142,25 @@ export function subscribeToJobs(
 export async function saveJobToFirestore(job: Job): Promise<void> {
   const path = `jobs/${job.id}`;
   try {
-    const cleanJob = JSON.parse(JSON.stringify(job));
+    const cleanJob: Record<string, any> = JSON.parse(JSON.stringify(job));
+    
+    // Explicitly delete timer fields from Firestore if timer is not currently running
+    if (!job.active_timer_start) {
+      cleanJob.active_timer_start = deleteField();
+      cleanJob.active_timer_task = deleteField();
+      cleanJob.active_timer_drafter_id = deleteField();
+      cleanJob.active_timer_drafter_name = deleteField();
+    }
+    
+    // Explicitly delete paused timer fields if job is not paused by break
+    if (!job.paused_by_break) {
+      cleanJob.paused_by_break = false;
+      cleanJob.paused_timer_task = deleteField();
+      cleanJob.paused_timer_drafter_id = deleteField();
+      cleanJob.paused_timer_drafter_name = deleteField();
+      cleanJob.paused_elapsed_seconds = deleteField();
+    }
+
     await setDoc(doc(db, 'jobs', job.id), cleanJob, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -240,36 +259,8 @@ export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
 }
 
 export async function purgeRemovedMockStaff(): Promise<void> {
-  const oldMockDocIds = ['staff-james', 'staff-aaron', 'staff-ethan'];
-  try {
-    const snap = await getDocs(collection(db, 'staff'));
-    const batch = writeBatch(db);
-    let count = 0;
-    snap.forEach((d) => {
-      const data = d.data() as StaffUser;
-      const isOldId = oldMockDocIds.includes(d.id);
-      const isOldName = ['james', 'aaron', 'ethan'].some(
-        n => (data.name || '').toLowerCase() === n
-      );
-      const isProtected = (data.name || '').toLowerCase().includes('greg') ||
-                          (data.name || '').toLowerCase().includes('kyle') ||
-                          (data.name || '').toLowerCase().includes('jason') ||
-                          (data.name || '').toLowerCase().includes('drew') ||
-                          (data.email || '').toLowerCase().includes('kyle') ||
-                          (data.email || '').toLowerCase().includes('jason') ||
-                          (data.email || '').toLowerCase().includes('arkcwd@gmail.com');
-      if ((isOldId || isOldName) && !isProtected) {
-        batch.delete(doc(db, 'staff', d.id));
-        count++;
-      }
-    });
-    if (count > 0) {
-      await batch.commit();
-      console.log(`[Firestore] Purged ${count} legacy mock users from Firestore.`);
-    }
-  } catch (err) {
-    console.warn('[Firestore] Notice during staff purge:', err);
-  }
+  // Aaron, James, and Ethan are active staff drafters and must not be purged
+  return;
 }
 
 // ----------------------------------------------------

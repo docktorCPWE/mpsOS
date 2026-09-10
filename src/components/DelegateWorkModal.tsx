@@ -8,6 +8,7 @@ interface DelegateWorkModalProps {
   onClose: () => void;
   job: Job;
   currentStaff: StaffUser;
+  staffList?: StaffUser[];
   onDelegateTask: (task: DelegatedWorkItem, notifyDrafter: boolean) => void;
 }
 
@@ -51,11 +52,42 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
   onClose,
   job,
   currentStaff,
+  staffList,
   onDelegateTask,
 }) => {
+  const availableStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+
+  // Categorize staff: Drafters & CAD Specialists vs Management & Operations
+  const drafters = availableStaff.filter(
+    s => s.role === 'drafter' || 
+         s.role === 'drafter_lead' || 
+         s.department === 'Drafting' || 
+         s.department === 'Architecture' ||
+         s.department === 'Engineering' ||
+         (s.title || '').toLowerCase().includes('draft') ||
+         (s.title || '').toLowerCase().includes('cad')
+  );
+
+  const otherStaff = availableStaff.filter(
+    s => !drafters.some(d => d.id === s.id)
+  );
+
+  // Determine initial drafter assignment
+  const getInitialDrafter = () => {
+    if (job?.assigned_drafter) {
+      const match = availableStaff.find(s => 
+        job.assigned_drafter.toLowerCase().includes(s.name.toLowerCase()) ||
+        s.name.toLowerCase().includes(job.assigned_drafter.toLowerCase())
+      );
+      if (match) return match.name;
+    }
+    const firstDrafter = drafters[0] || availableStaff[0];
+    return firstDrafter ? firstDrafter.name : 'Kyle Edmonson';
+  };
+
   const [componentTitle, setComponentTitle] = useState('');
   const [category, setCategory] = useState<DelegatedWorkItem['category']>('Floor Plan');
-  const [assignedTo, setAssignedTo] = useState('James');
+  const [assignedTo, setAssignedTo] = useState<string>(getInitialDrafter);
   const [priority, setPriority] = useState<DelegatedWorkItem['priority']>('Normal');
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
@@ -68,10 +100,27 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
   const [notifyDrafter, setNotifyDrafter] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
 
-  if (!isOpen) return null;
+  // Sync assigned drafter when opening modal or changing job
+  React.useEffect(() => {
+    if (isOpen) {
+      if (job?.assigned_drafter) {
+        const match = availableStaff.find(s => 
+          job.assigned_drafter.toLowerCase().includes(s.name.toLowerCase()) ||
+          s.name.toLowerCase().includes(job.assigned_drafter.toLowerCase())
+        );
+        if (match) {
+          setAssignedTo(match.name);
+          return;
+        }
+      }
+      const firstCandidate = drafters[0] || availableStaff[0];
+      if (firstCandidate) {
+        setAssignedTo(firstCandidate.name);
+      }
+    }
+  }, [isOpen, job?.id, job?.assigned_drafter, availableStaff]);
 
-  // Filter staff to potential drafter assignees
-  const drafterCandidates = STAFF_USERS.filter(s => s.name !== currentStaff.name);
+  if (!isOpen) return null;
 
   const handleAddSampleFile = (sample: TaskAttachment) => {
     if (!attachments.some(a => a.name === sample.name)) {
@@ -109,7 +158,8 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
       return;
     }
 
-    const assignedStaff = STAFF_USERS.find(s => s.name === assignedTo);
+    const assignedStaff = availableStaff.find(s => s.name.toLowerCase() === assignedTo.toLowerCase() || s.name.toLowerCase().includes(assignedTo.toLowerCase())) ||
+                          STAFF_USERS.find(s => s.name === assignedTo);
 
     const newTask: DelegatedWorkItem = {
       id: `del-${Date.now()}`,
@@ -232,19 +282,36 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
           {/* Assignee, Priority & Due Date */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block font-bold text-slate-900 mb-1">
-                Delegate To (Drafter) <span className="text-red-500">*</span>
+              <label className="block font-bold text-slate-900 mb-1 flex items-center justify-between">
+                <span>
+                  Delegate To (Drafter) <span className="text-red-500">*</span>
+                </span>
+                <span className="text-[10px] font-medium text-blue-600">
+                  {drafters.length} drafter{drafters.length === 1 ? '' : 's'}
+                </span>
               </label>
               <select
                 value={assignedTo}
                 onChange={(e) => setAssignedTo(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:bg-white focus:outline-none cursor-pointer"
+                required
               >
-                {drafterCandidates.map((staff) => (
-                  <option key={staff.id} value={staff.name}>
-                    {staff.name} ({staff.title})
-                  </option>
-                ))}
+                <optgroup label="Staff Drafters & Detailers">
+                  {drafters.map((staff) => (
+                    <option key={staff.id} value={staff.name}>
+                      {staff.name} ({staff.title || (staff.role === 'drafter_lead' ? 'Lead Drafter' : 'Drafter')})
+                    </option>
+                  ))}
+                </optgroup>
+                {otherStaff.length > 0 && (
+                  <optgroup label="Management & Operations">
+                    {otherStaff.map((staff) => (
+                      <option key={staff.id} value={staff.name}>
+                        {staff.name} ({staff.title || staff.role})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 
