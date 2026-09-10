@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3 } from 'lucide-react';
-import { Job, JobPhase, StaffUser, DelegatedWorkItem } from '../types';
+import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
@@ -33,6 +33,9 @@ interface DrafterDashboardProps {
   }) => void;
   nowTimestamp?: number;
   staffList?: StaffUser[];
+  devCards?: GregDevProjectCard[];
+  devEntries?: GregDevTimeEntry[];
+  onOpenDevReviewModal?: () => void;
 }
 
 const PHASES: JobPhase[] = [
@@ -63,6 +66,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onOpenKyleInbox,
   onUpdateCustomerContact,
   nowTimestamp = Date.now(),
+  devCards,
+  devEntries,
+  onOpenDevReviewModal,
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>('grid');
@@ -72,6 +78,17 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // Authorized users who can view all cards and switch between boards: Kyle, Jason, Drew, Ethan, Greg Hyatt
   const isAllCardsAuthorized = canViewAllProjectCards(currentStaff);
   const isIndividualDrafter = !isAllCardsAuthorized;
+
+  // Authorization for team workload matrix: Kyle, Jason, Drew, Greg, and delegated leads
+  const canViewWorkloadMatrix = Boolean(
+    currentStaff?.canDelegate || 
+    isAllCardsAuthorized || 
+    currentStaff?.canAccessFinancials || 
+    currentStaff?.name.toLowerCase().includes('drew') ||
+    currentStaff?.name.toLowerCase().includes('jason') ||
+    currentStaff?.name.toLowerCase().includes('kyle') ||
+    currentStaff?.name.toLowerCase().includes('greg')
+  );
 
   // Initialize selectedDrafter: If current logged-in user is an individual drafter (e.g. James, Aaron, Sarah, Alex, Elena),
   // lock strictly to their own name so only their assigned cards display.
@@ -313,7 +330,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             </button>
           )}
 
-          {canDelegate && (
+          {canViewWorkloadMatrix && (
             <button
               onClick={() => setShowWorkloadMatrix(!showWorkloadMatrix)}
               className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer border shadow-xs ${
@@ -321,7 +338,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   ? 'bg-indigo-700 text-white border-indigo-700 ring-2 ring-indigo-300'
                   : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
               }`}
-              title="View Drafter Workload & Project Assignment Matrix"
+              title="View Drafter & Dev Workload & Project Assignment Matrix"
             >
               <Users className="w-4 h-4" />
               <span>{showWorkloadMatrix ? 'Close Workload Matrix' : 'Team Workload Matrix'}</span>
@@ -524,8 +541,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
       )}
 
-      {/* TEAM WORKLOAD & PROJECT ASSIGNMENT MATRIX (For Kyle, Jason, Greg & Leads) */}
-      {canDelegate && showWorkloadMatrix && (
+      {/* TEAM WORKLOAD & PROJECT ASSIGNMENT MATRIX (For Kyle, Jason, Greg, Drew & Leads) */}
+      {canViewWorkloadMatrix && showWorkloadMatrix && (
         <div className="my-3">
           <JasonDrafterProjectBoard
             jobs={jobs}
@@ -537,6 +554,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             currentStaff={currentStaff}
             staffList={effectiveStaff}
             onOpenCompleteTaskModal={onOpenCompleteTaskModal}
+            devCards={devCards}
+            devEntries={devEntries}
+            onOpenDevReviewModal={onOpenDevReviewModal}
           />
         </div>
       )}

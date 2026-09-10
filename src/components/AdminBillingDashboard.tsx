@@ -36,10 +36,10 @@ import {
   YAxis, 
   CartesianGrid 
 } from 'recharts';
-import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification, PayrollEntry } from '../types';
+import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification, PayrollEntry, GregDevProjectCard, GregDevTimeEntry } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { Lock, ShieldCheck, CreditCard } from 'lucide-react';
-import { STAFF_USERS, canUserAccessPayroll } from '../data/mockData';
+import { STAFF_USERS, canUserAccessPayroll, canViewAllProjectCards } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
@@ -59,6 +59,9 @@ interface AdminBillingDashboardProps {
   payrollEntries?: PayrollEntry[];
   onSavePayrollEntry?: (entry: PayrollEntry) => Promise<void> | void;
   onDeletePayrollEntry?: (entryId: string) => Promise<void> | void;
+  devCards?: GregDevProjectCard[];
+  devEntries?: GregDevTimeEntry[];
+  onOpenDevReviewModal?: () => void;
 }
 
 const ALL_PHASES: JobPhase[] = [
@@ -166,7 +169,10 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   nowTimestamp,
   payrollEntries = [],
   onSavePayrollEntry,
-  onDeletePayrollEntry
+  onDeletePayrollEntry,
+  devCards,
+  devEntries,
+  onOpenDevReviewModal
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const isFinancialsAuthorized = currentStaff ? !!currentStaff.canAccessFinancials : true;
@@ -831,8 +837,14 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
 
       </div>
 
-      {/* JASON, KYLE & OPERATIONS DRAFTER WORKLOAD & ACTIVE PROJECT ASSIGNMENTS BOARD */}
-      {(currentStaff?.name.toLowerCase().includes('jason') || currentStaff?.name.toLowerCase().includes('kyle') || currentStaff?.name.toLowerCase().includes('greg')) && (
+      {/* JASON, KYLE, DREW & OPERATIONS DRAFTER WORKLOAD & ACTIVE PROJECT ASSIGNMENTS BOARD */}
+      {(currentStaff?.name.toLowerCase().includes('jason') || 
+        currentStaff?.name.toLowerCase().includes('kyle') || 
+        currentStaff?.name.toLowerCase().includes('drew') || 
+        currentStaff?.name.toLowerCase().includes('greg') ||
+        currentStaff?.canAccessFinancials ||
+        currentStaff?.canDelegate ||
+        canViewAllProjectCards(currentStaff)) && (
         <div className="my-2">
           <JasonDrafterProjectBoard
             jobs={jobs}
@@ -843,6 +855,9 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
             nowTimestamp={nowTimestamp}
             currentStaff={currentStaff}
             staffList={staffList}
+            devCards={devCards}
+            devEntries={devEntries}
+            onOpenDevReviewModal={onOpenDevReviewModal}
           />
         </div>
       )}

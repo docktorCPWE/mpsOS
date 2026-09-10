@@ -1962,6 +1962,9 @@ export default function App() {
             onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
             onUpdateCustomerContact={handleUpdateCustomerContact}
             nowTimestamp={nowTimestamp}
+            devCards={devCards}
+            devEntries={devEntries}
+            onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
           />
         ) : userRole === 'admin' ? (
           <AdminBillingDashboard
@@ -1984,6 +1987,9 @@ export default function App() {
             payrollEntries={payrollEntries}
             onSavePayrollEntry={handleSavePayrollEntry}
             onDeletePayrollEntry={handleDeletePayrollEntry}
+            devCards={devCards}
+            devEntries={devEntries}
+            onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
           />
         ) : (
           activeCustomerJob ? (
