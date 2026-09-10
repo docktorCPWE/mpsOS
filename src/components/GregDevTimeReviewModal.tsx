@@ -28,7 +28,7 @@ import {
   exportGregDevTimeEntriesCSV,
   saveStoredGregDevEntries 
 } from '../utils/gregDevTimeService';
-import { formatMinutesToReadable } from '../utils/timeCardExport';
+import { formatMinutesToReadable, getLocalDateString } from '../utils/timeCardExport';
 
 interface GregDevTimeReviewModalProps {
   isOpen: boolean;
@@ -52,11 +52,9 @@ export const GregDevTimeReviewModal: React.FC<GregDevTimeReviewModalProps> = ({
   // Manual Entry Form state
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualProject, setManualProject] = useState<string>('MPS OS Dev');
-  const [manualDate, setManualDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [manualDate, setManualDate] = useState<string>(() => getLocalDateString(new Date()));
   const [manualHours, setManualHours] = useState<string>('1.5');
   const [manualNotes, setManualNotes] = useState<string>('');
-
-  if (!isOpen) return null;
 
   // Filter entries based on period and project type
   const { filtered: filteredEntries, range } = filterGregDevEntries(
@@ -85,6 +83,8 @@ export const GregDevTimeReviewModal: React.FC<GregDevTimeReviewModalProps> = ({
       percentage: totalSeconds > 0 ? (seconds / totalSeconds) * 100 : 0
     })).sort((a, b) => b.seconds - a.seconds);
   }, [filteredEntries, totalSeconds]);
+
+  if (!isOpen) return null;
 
   // Navigate Period (Prev / Next)
   const handlePrev = () => {

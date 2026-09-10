@@ -1,4 +1,4 @@
-import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage, TimeCardShift } from '../types';
+import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage, TimeCardShift, PayrollEntry } from '../types';
 
 export function isStaffExemptFromClock(userNameOrStaff?: string | StaffUser): boolean {
   // No one is hardcoded exempt; all staff including Greg use the shift timeclock bar
@@ -23,21 +23,99 @@ export const STAFF_USERS: StaffUser[] = [
     canManageStaff: true,      // Superadmin / Owner
     canManageInvoices: true,
     canEditJobPhases: true,
-    canManageRoadblocks: true
+    canManageRoadblocks: true,
+    canAccessPayroll: true
+  },
+  {
+    id: 'staff-kyle',
+    name: 'Kyle Edmonson',
+    email: 'kyle@myplanstore.com',
+    title: 'Lead Project Manager & Senior Drafter',
+    phone: '(555) 345-6789',
+    role: 'drafter_lead',
+    department: 'Management',
+    hourlyRate: 110,
+    status: 'active',
+    joinedDate: '2021-06-01',
+    canAccessFinancials: true,
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: true,
+    canManageInvoices: true,
+    canEditJobPhases: true,
+    canManageRoadblocks: true,
+    canAccessPayroll: false
+  },
+  {
+    id: 'staff-jason',
+    name: 'Jason Barnett',
+    email: 'jason@myplanstore.com',
+    title: 'Project Manager & Operations',
+    phone: '(555) 456-7890',
+    role: 'admin',
+    department: 'Operations',
+    hourlyRate: 120,
+    status: 'active',
+    joinedDate: '2021-03-10',
+    canAccessFinancials: true,
+    canDelegate: true,
+    canViewAllProjects: true,
+    canManageStaff: true,
+    canManageInvoices: true,
+    canEditJobPhases: true,
+    canManageRoadblocks: true,
+    canAccessPayroll: true
+  },
+  {
+    id: 'staff-drew',
+    name: 'Drew Lupkey',
+    email: 'drew@myplanstore.com',
+    title: 'Admin & Billing Specialist',
+    phone: '(555) 567-8901',
+    role: 'admin',
+    department: 'Finance',
+    hourlyRate: 90,
+    status: 'active',
+    joinedDate: '2022-02-01',
+    canAccessFinancials: true,
+    canDelegate: false,
+    canViewAllProjects: true,
+    canManageStaff: false,
+    canManageInvoices: true,
+    canEditJobPhases: false,
+    canManageRoadblocks: false,
+    canAccessPayroll: true
   }
 ];
 
-export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt'];
-export const AUTHORIZED_DELEGATOR_NAMES = ['Greg Hyatt'];
-export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Greg Hyatt'];
+export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Kyle', 'Drew Lupkey'];
+export const AUTHORIZED_DELEGATOR_NAMES = ['Greg Hyatt', 'Kyle', 'Jason'];
+export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Greg Hyatt', 'Kyle', 'Jason', 'Drew Lupkey'];
+export const AUTHORIZED_PAYROLL_NAMES = ['Greg Hyatt', 'Jason', 'Drew Lupkey'];
+
+export function canUserAccessPayroll(userNameOrStaff?: string | StaffUser): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    if (typeof userNameOrStaff.canAccessPayroll === 'boolean') {
+      return userNameOrStaff.canAccessPayroll;
+    }
+    const name = userNameOrStaff.name || '';
+    return AUTHORIZED_PAYROLL_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+  }
+  const name = userNameOrStaff;
+  return AUTHORIZED_PAYROLL_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
+}
 
 export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
   if (typeof userNameOrStaff === 'object') {
-    if (typeof userNameOrStaff.canViewAllProjects === 'boolean') {
-      return userNameOrStaff.canViewAllProjects;
+    if (userNameOrStaff.canViewAllProjects === true) {
+      return true;
     }
-    const name = userNameOrStaff.name;
+    if (userNameOrStaff.role === 'admin' || userNameOrStaff.role === 'drafter_lead') {
+      return true;
+    }
+    const name = userNameOrStaff.name || '';
     return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
   }
   const name = userNameOrStaff;
@@ -54,7 +132,10 @@ export function canUserAccessFinancials(userNameOrStaff?: string | StaffUser): b
     if (typeof userNameOrStaff.canAccessFinancials === 'boolean') {
       return userNameOrStaff.canAccessFinancials;
     }
-    const name = userNameOrStaff.name;
+    if (userNameOrStaff.role === 'admin' || userNameOrStaff.role === 'drafter_lead') {
+      return true;
+    }
+    const name = userNameOrStaff.name || '';
     return AUTHORIZED_FINANCIAL_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
   }
   const name = userNameOrStaff;
@@ -67,7 +148,10 @@ export function canUserDelegate(userNameOrStaff?: string | StaffUser): boolean {
     if (typeof userNameOrStaff.canDelegate === 'boolean') {
       return userNameOrStaff.canDelegate;
     }
-    const name = userNameOrStaff.name;
+    if (userNameOrStaff.role === 'admin' || userNameOrStaff.role === 'drafter_lead') {
+      return true;
+    }
+    const name = userNameOrStaff.name || '';
     return AUTHORIZED_DELEGATOR_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
   }
   const name = userNameOrStaff;
@@ -80,9 +164,15 @@ export function canUserManageStaff(userNameOrStaff?: string | StaffUser): boolea
     if (typeof userNameOrStaff.canManageStaff === 'boolean') {
       return userNameOrStaff.canManageStaff;
     }
-    return userNameOrStaff.name.toLowerCase().includes('greg hyatt') || userNameOrStaff.role === 'admin';
+    const name = userNameOrStaff.name || '';
+    return name.toLowerCase().includes('greg hyatt') || 
+           name.toLowerCase().includes('kyle') ||
+           name.toLowerCase().includes('jason') ||
+           userNameOrStaff.role === 'admin';
   }
-  return userNameOrStaff.toLowerCase().includes('greg hyatt');
+  return userNameOrStaff.toLowerCase().includes('greg hyatt') ||
+         userNameOrStaff.toLowerCase().includes('kyle') ||
+         userNameOrStaff.toLowerCase().includes('jason');
 }
 
 export function canUserManageInvoices(userNameOrStaff?: string | StaffUser): boolean {
@@ -91,7 +181,7 @@ export function canUserManageInvoices(userNameOrStaff?: string | StaffUser): boo
     if (typeof userNameOrStaff.canManageInvoices === 'boolean') {
       return userNameOrStaff.canManageInvoices;
     }
-    return userNameOrStaff.canAccessFinancials;
+    return canUserAccessFinancials(userNameOrStaff);
   }
   return canUserAccessFinancials(userNameOrStaff);
 }
@@ -812,7 +902,25 @@ export const NOTIFS_STORAGE_KEY = 'my_plan_store_os_notifs_v15';
 export const CHAT_STORAGE_KEY = 'my_plan_store_os_chat_v15';
 export const STAFF_STORAGE_KEY = 'my_plan_store_os_staff_v15';
 
-export const REMOVED_MOCK_STAFF_IDS = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'];
+export const ACTIVE_STAFF_STORAGE_KEY = 'my_plan_store_os_active_staff_id_v15';
+
+export function getStoredActiveStaffId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_STAFF_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredActiveStaffId(staffId: string): void {
+  try {
+    localStorage.setItem(ACTIVE_STAFF_STORAGE_KEY, staffId);
+  } catch {
+    // ignore
+  }
+}
+
+export const REMOVED_MOCK_STAFF_IDS = ['staff-james', 'staff-aaron', 'staff-ethan'];
 
 export function getStoredStaff(): StaffUser[] {
   try {
@@ -823,20 +931,46 @@ export function getStoredStaff(): StaffUser[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      const filtered = parsed.filter((s: StaffUser) => {
+      // Filter out legacy dummy mock drafters, NEVER remove Kyle, Jason, Drew, or Greg
+      const cleaned = parsed.filter((s: StaffUser) => {
         if (REMOVED_MOCK_STAFF_IDS.includes(s.id)) return false;
         const nameLower = (s.name || '').toLowerCase();
-        if (['jason', 'drew lupkey', 'kyle', 'james', 'aaron', 'ethan'].includes(nameLower) && (s.email?.includes('myplanstore.com') || !s.email)) {
+        if (['james', 'aaron', 'ethan'].includes(nameLower) && !s.email?.includes('arkcwd@gmail.com')) {
           return false;
         }
         return true;
       });
-      const hasGreg = filtered.some((s: StaffUser) => s.name.toLowerCase().includes('greg hyatt') || s.id === 'staff-greg');
-      if (!hasGreg) {
-        filtered.unshift(STAFF_USERS[0]);
+
+      // Ensure each core team member is present; if already present, PRESERVE their customized permissions
+      const result = [...cleaned];
+      for (const core of STAFF_USERS) {
+        const index = result.findIndex(
+          s => s.id === core.id ||
+               (s.email && core.email && s.email.toLowerCase() === core.email.toLowerCase()) ||
+               s.name.toLowerCase() === core.name.toLowerCase() ||
+               (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')) ||
+               (core.name.toLowerCase().includes('jason') && s.name.toLowerCase().includes('jason')) ||
+               (core.name.toLowerCase().includes('drew') && s.name.toLowerCase().includes('drew'))
+        );
+        if (index === -1) {
+          result.push(core);
+        } else {
+          // Keep existing customized capabilities, but backfill any missing required flags
+          result[index] = {
+            ...core,
+            ...result[index],
+            // If user is Kyle, ensure core Lead PM permissions are preserved
+            canAccessFinancials: result[index].canAccessFinancials !== undefined ? result[index].canAccessFinancials : core.canAccessFinancials,
+            canDelegate: result[index].canDelegate !== undefined ? result[index].canDelegate : core.canDelegate,
+            canViewAllProjects: result[index].canViewAllProjects !== undefined ? result[index].canViewAllProjects : core.canViewAllProjects,
+            canManageStaff: result[index].canManageStaff !== undefined ? result[index].canManageStaff : core.canManageStaff,
+            canAccessPayroll: result[index].canAccessPayroll !== undefined ? result[index].canAccessPayroll : (core.canAccessPayroll ?? false)
+          };
+        }
       }
-      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(filtered));
-      return filtered;
+
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(result));
+      return result;
     }
     return STAFF_USERS;
   } catch (err) {
@@ -1508,6 +1642,140 @@ export function resetStoredJobs(): Job[] {
   localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(INITIAL_NOTIFICATIONS));
   localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(INITIAL_CHAT_MESSAGES));
   localStorage.setItem(TIME_CARDS_STORAGE_KEY, JSON.stringify(INITIAL_TIME_CARDS));
+  localStorage.setItem(PAYROLL_STORAGE_KEY, JSON.stringify(INITIAL_PAYROLL_ENTRIES));
   return INITIAL_JOBS;
 }
+
+export const PAYROLL_STORAGE_KEY = 'my_plan_store_os_payroll_v1';
+
+export const INITIAL_PAYROLL_ENTRIES: PayrollEntry[] = [
+  {
+    id: 'pay-2026-001',
+    employeeId: 'staff-kyle',
+    employeeName: 'Kyle Edmonson',
+    employeeEmail: 'kyle@myplanstore.com',
+    employeeTitle: 'Lead Project Manager & Senior Drafter',
+    periodStart: '2026-08-16',
+    periodEnd: '2026-08-31',
+    paymentDate: '2026-09-05',
+    amount: 3520.00,
+    checkNumber: '1041',
+    notes: 'Semi-monthly drafting & senior PM salary',
+    createdAt: '2026-09-05T10:00:00.000Z',
+    recordedBy: 'Drew Lupkey',
+    recordedById: 'staff-drew'
+  },
+  {
+    id: 'pay-2026-002',
+    employeeId: 'staff-jason',
+    employeeName: 'Jason Barnett',
+    employeeEmail: 'jason@myplanstore.com',
+    employeeTitle: 'Project Manager & Operations',
+    periodStart: '2026-08-16',
+    periodEnd: '2026-08-31',
+    paymentDate: '2026-09-05',
+    amount: 3840.00,
+    checkNumber: '1042',
+    notes: 'Operations & project management compensation',
+    createdAt: '2026-09-05T10:15:00.000Z',
+    recordedBy: 'Drew Lupkey',
+    recordedById: 'staff-drew'
+  },
+  {
+    id: 'pay-2026-003',
+    employeeId: 'staff-drew',
+    employeeName: 'Drew Lupkey',
+    employeeEmail: 'drew@myplanstore.com',
+    employeeTitle: 'Admin & Billing Specialist',
+    periodStart: '2026-08-16',
+    periodEnd: '2026-08-31',
+    paymentDate: '2026-09-05',
+    amount: 2880.00,
+    checkNumber: '1043',
+    notes: 'Finance, client invoicing & billing administration',
+    createdAt: '2026-09-05T10:30:00.000Z',
+    recordedBy: 'Greg Hyatt',
+    recordedById: 'staff-greg'
+  },
+  {
+    id: 'pay-2026-004',
+    employeeId: 'staff-greg',
+    employeeName: 'Greg Hyatt',
+    employeeEmail: 'arkcwd@gmail.com',
+    employeeTitle: 'Owner & Principal Architect',
+    periodStart: '2026-08-16',
+    periodEnd: '2026-08-31',
+    paymentDate: '2026-09-05',
+    amount: 4800.00,
+    checkNumber: '1040',
+    notes: 'Principal Architect draw & executive distribution',
+    createdAt: '2026-09-05T09:45:00.000Z',
+    recordedBy: 'Drew Lupkey',
+    recordedById: 'staff-drew'
+  },
+  {
+    id: 'pay-2026-005',
+    employeeId: 'staff-kyle',
+    employeeName: 'Kyle Edmonson',
+    employeeEmail: 'kyle@myplanstore.com',
+    employeeTitle: 'Lead Project Manager & Senior Drafter',
+    periodStart: '2026-08-01',
+    periodEnd: '2026-08-15',
+    paymentDate: '2026-08-20',
+    amount: 3520.00,
+    checkNumber: '1035',
+    notes: 'Semi-monthly architectural drafting salary',
+    createdAt: '2026-08-20T10:00:00.000Z',
+    recordedBy: 'Jason Barnett',
+    recordedById: 'staff-jason'
+  },
+  {
+    id: 'pay-2026-006',
+    employeeId: 'staff-jason',
+    employeeName: 'Jason Barnett',
+    employeeEmail: 'jason@myplanstore.com',
+    employeeTitle: 'Project Manager & Operations',
+    periodStart: '2026-08-01',
+    periodEnd: '2026-08-15',
+    paymentDate: '2026-08-20',
+    amount: 3840.00,
+    checkNumber: '1036',
+    notes: 'Operations & staffing management distribution',
+    createdAt: '2026-08-20T10:15:00.000Z',
+    recordedBy: 'Drew Lupkey',
+    recordedById: 'staff-drew'
+  }
+];
+
+export function getStoredPayrollEntries(): PayrollEntry[] {
+  try {
+    const raw = localStorage.getItem(PAYROLL_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(PAYROLL_STORAGE_KEY, JSON.stringify(INITIAL_PAYROLL_ENTRIES));
+      return INITIAL_PAYROLL_ENTRIES;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_PAYROLL_ENTRIES;
+  } catch (err) {
+    console.error('Failed to load stored payroll entries:', err);
+    return INITIAL_PAYROLL_ENTRIES;
+  }
+}
+
+export function saveStoredPayrollEntries(entries: PayrollEntry[]): void {
+  try {
+    localStorage.setItem(PAYROLL_STORAGE_KEY, JSON.stringify(entries));
+  } catch (err) {
+    console.error('Failed to save payroll entries:', err);
+  }
+}
+
+export function resetStoredPayrollEntries(): PayrollEntry[] {
+  localStorage.setItem(PAYROLL_STORAGE_KEY, JSON.stringify(INITIAL_PAYROLL_ENTRIES));
+  return INITIAL_PAYROLL_ENTRIES;
+}
+
 

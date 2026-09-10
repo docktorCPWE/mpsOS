@@ -233,6 +233,24 @@ export interface StaffUser {
   canManageInvoices?: boolean;   // Change invoice status (Uninvoiced, Pending, Invoiced, Paid/Archive)
   canEditJobPhases?: boolean;    // Advance or rewind job workflow phases
   canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
+  canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
+}
+
+export interface PayrollEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeEmail?: string;
+  employeeTitle?: string;
+  periodStart: string; // 'YYYY-MM-DD'
+  periodEnd: string;   // 'YYYY-MM-DD'
+  paymentDate: string; // 'YYYY-MM-DD'
+  amount: number;      // Dollar payment e.g. 2500.00
+  checkNumber: string; // Check number e.g. "1042"
+  notes?: string;      // Optional notes / description
+  createdAt: string;   // ISO timestamp
+  recordedBy?: string; // e.g. "Jason Barnett" or "Greg Hyatt"
+  recordedById?: string;
 }
 
 export interface ChatMessage {

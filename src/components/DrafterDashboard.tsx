@@ -32,6 +32,7 @@ interface DrafterDashboardProps {
     currentJobId?: string;
   }) => void;
   nowTimestamp?: number;
+  staffList?: StaffUser[];
 }
 
 const PHASES: JobPhase[] = [
@@ -47,6 +48,7 @@ const PHASES: JobPhase[] = [
 export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   jobs,
   currentStaff,
+  staffList,
   onUpdateStatus,
   onToggleRoadblock,
   onSelectJob,
@@ -62,6 +64,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onUpdateCustomerContact,
   nowTimestamp = Date.now(),
 }) => {
+  const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedJobForContactEdit, setSelectedJobForContactEdit] = useState<Job | null>(null);
@@ -90,10 +93,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       setSelectedDrafter(currentStaff.name);
     } else if (selectedDrafter !== 'all') {
       // Check if selectedDrafter is still in drafter list
-      const exists = STAFF_USERS.some(s => s.name.toLowerCase() === selectedDrafter.toLowerCase());
+      const exists = effectiveStaff.some(s => s.name.toLowerCase() === selectedDrafter.toLowerCase());
       if (!exists) setSelectedDrafter('all');
     }
-  }, [currentStaff.id, currentStaff.name, isAllCardsAuthorized]);
+  }, [currentStaff.id, currentStaff.name, isAllCardsAuthorized, effectiveStaff]);
 
   const canAccessFinancials = currentStaff.canAccessFinancials;
   const canDelegate = currentStaff.canDelegate;
@@ -109,30 +112,57 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const allDelegatedTasks: DelegatedWorkItem[] = jobs.flatMap(j => j.delegated_tasks || []);
   const activeDelegatedTasks: DelegatedWorkItem[] = activeJobs.flatMap(j => j.delegated_tasks || []);
 
+  // Canonicalize raw drafter names so that if a name corresponds to an existing staff user, it maps to their full name
+  const canonicalizeDrafterName = (rawName: string): string => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return '';
+    const lower = trimmed.toLowerCase();
+    const matched = effectiveStaff.find(s => {
+      const sLower = s.name.toLowerCase();
+      const sFirst = sLower.split(' ')[0];
+      return sLower === lower || sFirst === lower || sLower.includes(lower) || lower.includes(sLower);
+    });
+    return matched ? matched.name : trimmed;
+  };
+
   // Comprehensive list of all drafters & team members
   const draftersList = Array.from(
     new Set([
-      ...STAFF_USERS.map(s => s.name),
-      ...jobs.map(j => j.assigned_drafter.split(',')[0].trim()),
-      ...allDelegatedTasks.map(t => t.assignedTo.trim())
+      ...effectiveStaff.map(s => s.name),
+      ...jobs.map(j => canonicalizeDrafterName(j.assigned_drafter.split(',')[0])),
+      ...allDelegatedTasks.map(t => canonicalizeDrafterName(t.assignedTo))
     ])
   ).filter(Boolean);
 
   // Helper function to check if a job belongs to a specific drafter
   const isJobAssignedToDrafter = (job: Job, drafterName: string) => {
     const drafterLower = drafterName.toLowerCase().trim();
-    const isLead = job.assigned_drafter.toLowerCase().includes(drafterLower);
-    const hasDelegated = (job.delegated_tasks || []).some(t => t.assignedTo.toLowerCase().includes(drafterLower));
-    const hasTimeLogged = (job.time_logs || []).some(tl => (tl.drafterName || '').toLowerCase().includes(drafterLower));
+    const drafterFirst = drafterLower.split(' ')[0];
+    const matchesDrafter = (target?: string) => {
+      if (!target) return false;
+      const t = target.toLowerCase().trim();
+      return t === drafterLower || t === drafterFirst || t.includes(drafterLower) || drafterLower.includes(t);
+    };
+
+    const isLead = matchesDrafter(job.assigned_drafter);
+    const hasDelegated = (job.delegated_tasks || []).some(t => matchesDrafter(t.assignedTo));
+    const hasTimeLogged = (job.time_logs || []).some(tl => matchesDrafter(tl.drafterName));
     return isLead || hasDelegated || hasTimeLogged;
   };
 
   // Helper to calculate stats per drafter (only counting active, non-archived/unpaid jobs)
   const getDrafterStats = (drafterName: string) => {
     const drafterLower = drafterName.toLowerCase();
+    const drafterFirst = drafterLower.split(' ')[0];
+    const matchesDrafter = (target?: string) => {
+      if (!target) return false;
+      const t = target.toLowerCase().trim();
+      return t === drafterLower || t === drafterFirst || t.includes(drafterLower) || drafterLower.includes(t);
+    };
+
     const relevantJobs = activeJobs.filter(j => isJobAssignedToDrafter(j, drafterName));
     const delegatedTasks = activeDelegatedTasks.filter(t => 
-      t.assignedTo.toLowerCase().includes(drafterLower)
+      matchesDrafter(t.assignedTo)
     );
     const activeTasks = delegatedTasks.filter(t => t.status !== 'Completed' || (t.status === 'Completed' && !t.isReviewed));
     const hasActiveTimer = relevantJobs.some(j => Boolean(j.active_timer_start));
@@ -505,6 +535,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             }}
             nowTimestamp={nowTimestamp}
             currentStaff={currentStaff}
+            staffList={effectiveStaff}
             onOpenCompleteTaskModal={onOpenCompleteTaskModal}
           />
         </div>

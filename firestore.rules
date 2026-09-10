@@ -73,5 +73,12 @@ service cloud.firestore {
       allow create, update: if isValidId(cardId);
       allow delete: if isValidId(cardId);
     }
+
+    // Payroll & Compensation Entries
+    match /payroll_entries/{entryId} {
+      allow read: if true;
+      allow create, update: if isValidId(entryId);
+      allow delete: if isValidId(entryId);
+    }
   }
 }

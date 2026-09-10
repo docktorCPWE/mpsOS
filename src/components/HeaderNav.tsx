@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob } from '../data/mockData';
+import { formatTimeOnly } from '../utils/timeCardExport';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderNavProps {
@@ -72,7 +73,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   );
   const unreadCount = userNotifications.filter(n => !n.read).length;
 
-  const isAuthorizedForAdmin = currentStaff.canAccessFinancials || currentStaff.role === 'drafter_lead' || currentStaff.name === 'Kyle';
+  const isAuthorizedForAdmin = currentStaff.canAccessFinancials || currentStaff.role === 'drafter_lead' || currentStaff.name === 'Kyle' || currentStaff.canAccessPayroll;
 
   const handleAdminTabClick = () => {
     if (isAuthorizedForAdmin) {
@@ -86,7 +87,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     setCurrentStaff(staff);
     setShowStaffDropdown(false);
     // If switching to an unauthorized user while in admin view, switch back to drafter view
-    const targetIsAuthorized = staff.canAccessFinancials || staff.role === 'drafter_lead' || staff.name === 'Kyle';
+    const targetIsAuthorized = staff.canAccessFinancials || staff.role === 'drafter_lead' || staff.name === 'Kyle' || staff.canAccessPayroll;
     if (!targetIsAuthorized && userRole === 'admin') {
       setUserRole('drafter');
     }
@@ -447,7 +448,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
                             <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
                               <span>From: <strong className="text-slate-300">{notif.senderName || 'System'}</strong></span>
-                              <span>{new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span>{formatTimeOnly(notif.timestamp, true)}</span>
                             </div>
                           </div>
                         ))

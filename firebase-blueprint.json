@@ -163,6 +163,27 @@
         "current_notes": { "type": "string", "description": "Current note or description" }
       },
       "required": ["id", "project_type"]
+    },
+    "PayrollEntry": {
+      "title": "PayrollEntry",
+      "description": "Employee payroll payment and compensation check record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique payroll entry ID" },
+        "employee_id": { "type": "string", "description": "Staff ID of employee" },
+        "employee_name": { "type": "string", "description": "Full name of employee" },
+        "employee_email": { "type": "string", "description": "Email of employee" },
+        "employee_title": { "type": "string", "description": "Job title or role of employee" },
+        "period_start": { "type": "string", "description": "Pay period start date YYYY-MM-DD" },
+        "period_end": { "type": "string", "description": "Pay period end date YYYY-MM-DD" },
+        "payment_date": { "type": "string", "description": "Disbursement date YYYY-MM-DD" },
+        "amount": { "type": "number", "description": "Payment dollar amount" },
+        "check_number": { "type": "string", "description": "Check number e.g. 1042" },
+        "notes": { "type": "string", "description": "Optional notes or comments" },
+        "created_at": { "type": "string", "description": "Creation timestamp ISO string" },
+        "recorded_by": { "type": "string", "description": "Name of manager or admin who recorded the entry" }
+      },
+      "required": ["id", "employee_name", "period_start", "period_end", "payment_date", "amount", "check_number"]
     }
   },
   "firestore": {
@@ -197,6 +218,10 @@
     "/dev_project_cards/{cardId}": {
       "schema": "DevProjectCard",
       "description": "Card state and active timer trackers for dev projects"
+    },
+    "/payroll_entries/{entryId}": {
+      "schema": "PayrollEntry",
+      "description": "Employee payroll check records and compensation ledger"
     }
   }
 }

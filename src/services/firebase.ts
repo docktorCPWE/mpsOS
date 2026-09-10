@@ -13,6 +13,7 @@ import {
 import {
   getFirestore,
   doc,
+  getDoc,
   getDocFromServer,
   collection,
   onSnapshot,
@@ -27,7 +28,7 @@ import {
   arrayUnion
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard } from '../types';
+import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry } from '../types';
 
 // Root owner accounts with master system privileges
 export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.com'];
@@ -239,7 +240,7 @@ export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
 }
 
 export async function purgeRemovedMockStaff(): Promise<void> {
-  const oldMockDocIds = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'];
+  const oldMockDocIds = ['staff-james', 'staff-aaron', 'staff-ethan'];
   try {
     const snap = await getDocs(collection(db, 'staff'));
     const batch = writeBatch(db);
@@ -247,13 +248,17 @@ export async function purgeRemovedMockStaff(): Promise<void> {
     snap.forEach((d) => {
       const data = d.data() as StaffUser;
       const isOldId = oldMockDocIds.includes(d.id);
-      const isOldName = ['jason', 'drew lupkey', 'kyle', 'james', 'aaron', 'ethan'].some(
+      const isOldName = ['james', 'aaron', 'ethan'].some(
         n => (data.name || '').toLowerCase() === n
       );
-      const isNotOwner = !(data.name || '').toLowerCase().includes('greg hyatt') && 
-                         (data.email || '').toLowerCase() !== 'arkcwd@gmail.com' &&
-                         (data.email || '').toLowerCase() !== 'greg.hyatt@myplanstore.com';
-      if ((isOldId || isOldName) && isNotOwner) {
+      const isProtected = (data.name || '').toLowerCase().includes('greg') ||
+                          (data.name || '').toLowerCase().includes('kyle') ||
+                          (data.name || '').toLowerCase().includes('jason') ||
+                          (data.name || '').toLowerCase().includes('drew') ||
+                          (data.email || '').toLowerCase().includes('kyle') ||
+                          (data.email || '').toLowerCase().includes('jason') ||
+                          (data.email || '').toLowerCase().includes('arkcwd@gmail.com');
+      if ((isOldId || isOldName) && !isProtected) {
         batch.delete(doc(db, 'staff', d.id));
         count++;
       }
@@ -486,19 +491,58 @@ export async function syncAuthToStaffUser(
   existingStaffList: StaffUser[]
 ): Promise<StaffUser> {
   const userEmail = (user.email || '').toLowerCase().trim();
+  const userName = (user.displayName || '').toLowerCase().trim();
   const isOwnerEmail = ROOT_OWNER_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
+  const isKyle = userEmail.includes('kyle') || userName.includes('kyle');
+  const isJason = userEmail.includes('jason') || userName.includes('jason');
+  const isDrew = userEmail.includes('drew') || userName.includes('drew');
 
-  // Check if staff member already exists with this email or name
+  // 1. Check if staff member already exists in memory with this email or name
   let matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
 
   if (!matched && isOwnerEmail) {
-    // Match to Greg Hyatt (Owner & Founder)
     matched = existingStaffList.find(s => s.name.toLowerCase().includes('greg hyatt')) ||
               existingStaffList.find(s => s.role === 'admin' && s.canManageStaff === true);
   }
+  if (!matched && isKyle) {
+    matched = existingStaffList.find(s => s.name.toLowerCase().includes('kyle') || s.id === 'staff-kyle');
+  }
+  if (!matched && isJason) {
+    matched = existingStaffList.find(s => s.name.toLowerCase().includes('jason') || s.id === 'staff-jason');
+  }
+  if (!matched && isDrew) {
+    matched = existingStaffList.find(s => s.name.toLowerCase().includes('drew') || s.id === 'staff-drew');
+  }
+
+  // 2. If not found in memory, try to look up in Firestore directly
+  if (!matched && db) {
+    try {
+      const directDocRef = doc(db, 'staff', `staff-${user.uid.slice(0, 8)}`);
+      const directSnap = await getDoc(directDocRef);
+      if (directSnap.exists()) {
+        matched = directSnap.data() as StaffUser;
+      } else {
+        const staffSnap = await getDocs(collection(db, 'staff'));
+        staffSnap.forEach((d) => {
+          const s = d.data() as StaffUser;
+          if (s.email && s.email.toLowerCase().trim() === userEmail) {
+            matched = s;
+          } else if (isKyle && s.name.toLowerCase().includes('kyle')) {
+            matched = s;
+          } else if (isJason && s.name.toLowerCase().includes('jason')) {
+            matched = s;
+          } else if (isDrew && s.name.toLowerCase().includes('drew')) {
+            matched = s;
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('[Firestore] Error looking up staff for auth user:', err);
+    }
+  }
 
   if (matched) {
-    // If user is owner email, ensure Owner/Superadmin privileges
+    // If user is owner, ensure superadmin privileges
     if (isOwnerEmail && (!matched.canManageStaff || matched.role !== 'admin')) {
       const updated: StaffUser = {
         ...matched,
@@ -516,27 +560,49 @@ export async function syncAuthToStaffUser(
       await saveStaffToFirestore(updated);
       return updated;
     }
+    // If user is Kyle, ensure Lead PM capabilities are preserved and never downgraded
+    if (isKyle) {
+      const updatedKyle: StaffUser = {
+        ...matched,
+        email: matched.email || userEmail,
+        name: matched.name || user.displayName || 'Kyle Edmonson',
+        title: matched.title || 'Lead Project Manager & Senior Drafter',
+        role: matched.role || 'drafter_lead',
+        canAccessFinancials: matched.canAccessFinancials !== undefined ? matched.canAccessFinancials : true,
+        canDelegate: matched.canDelegate !== undefined ? matched.canDelegate : true,
+        canViewAllProjects: matched.canViewAllProjects !== undefined ? matched.canViewAllProjects : true,
+        canManageStaff: matched.canManageStaff !== undefined ? matched.canManageStaff : true,
+        canManageInvoices: matched.canManageInvoices !== undefined ? matched.canManageInvoices : true,
+        canEditJobPhases: matched.canEditJobPhases !== undefined ? matched.canEditJobPhases : true,
+        canManageRoadblocks: matched.canManageRoadblocks !== undefined ? matched.canManageRoadblocks : true
+      };
+      if (userEmail && (!matched.email || matched.email !== userEmail)) {
+        await saveStaffToFirestore(updatedKyle);
+      }
+      return updatedKyle;
+    }
+    // For other staff, preserve their existing capabilities completely
     return matched;
   }
 
-  // Create new staff profile for verified user
+  // Create new staff profile for verified user only if not found at all
   const newStaff: StaffUser = {
-    id: `staff-${user.uid.slice(0, 8)}`,
-    name: user.displayName || user.email?.split('@')[0] || 'Drafter User',
+    id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : `staff-${user.uid.slice(0, 8)}`,
+    name: user.displayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : user.email?.split('@')[0] || 'Staff Member'),
     email: userEmail,
-    title: isOwnerEmail ? 'System Owner & Principal' : 'Architectural Drafter',
-    role: isOwnerEmail ? 'admin' : 'drafter',
-    department: isOwnerEmail ? 'Management' : 'Drafting',
-    hourlyRate: isOwnerEmail ? 150 : 75,
+    title: isOwnerEmail ? 'System Owner & Principal' : isKyle ? 'Lead Project Manager & Senior Drafter' : isJason ? 'Project Manager & Operations' : isDrew ? 'Admin & Billing Specialist' : 'Architectural Drafter',
+    role: isOwnerEmail || isJason || isDrew ? 'admin' : isKyle ? 'drafter_lead' : 'drafter',
+    department: isOwnerEmail || isKyle ? 'Management' : isJason ? 'Operations' : isDrew ? 'Finance' : 'Drafting',
+    hourlyRate: isOwnerEmail ? 150 : isJason ? 120 : isKyle ? 110 : isDrew ? 90 : 75,
     status: 'active',
     joinedDate: new Date().toISOString().split('T')[0],
-    canAccessFinancials: isOwnerEmail,
-    canDelegate: isOwnerEmail,
-    canViewAllProjects: isOwnerEmail,
-    canManageStaff: isOwnerEmail,
-    canManageInvoices: isOwnerEmail,
-    canEditJobPhases: isOwnerEmail,
-    canManageRoadblocks: isOwnerEmail
+    canAccessFinancials: isOwnerEmail || isKyle || isJason || isDrew,
+    canDelegate: isOwnerEmail || isKyle || isJason,
+    canViewAllProjects: isOwnerEmail || isKyle || isJason || isDrew,
+    canManageStaff: isOwnerEmail || isKyle || isJason,
+    canManageInvoices: isOwnerEmail || isKyle || isJason || isDrew,
+    canEditJobPhases: isOwnerEmail || isKyle || isJason,
+    canManageRoadblocks: isOwnerEmail || isKyle || isJason
   };
 
   await saveStaffToFirestore(newStaff);
@@ -670,6 +736,121 @@ export async function saveDevProjectCardsToFirestore(cards: GregDevProjectCard[]
     }
   } catch (err) {
     console.warn('[Firestore] error saving dev project cards:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Payroll Entries Sync & Persistence
+// ---------------------------------------------------------------------------
+
+export function subscribeToPayrollEntries(
+  callback: (entries: PayrollEntry[]) => void,
+  onEmptyOrErrorFallback?: () => void
+): () => void {
+  if (!db) {
+    onEmptyOrErrorFallback?.();
+    return () => {};
+  }
+  try {
+    const colRef = collection(db, 'payroll_entries');
+    return onSnapshot(colRef, (snapshot) => {
+      if (snapshot.empty) {
+        onEmptyOrErrorFallback?.();
+        return;
+      }
+      const entries: PayrollEntry[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        entries.push({
+          id: d.id,
+          employeeId: data.employee_id || data.employeeId || '',
+          employeeName: data.employee_name || data.employeeName || '',
+          employeeEmail: data.employee_email || data.employeeEmail || '',
+          employeeTitle: data.employee_title || data.employeeTitle || '',
+          periodStart: data.period_start || data.periodStart || '',
+          periodEnd: data.period_end || data.periodEnd || '',
+          paymentDate: data.payment_date || data.paymentDate || '',
+          amount: typeof data.amount === 'number' ? data.amount : parseFloat(data.amount || '0'),
+          checkNumber: String(data.check_number || data.checkNumber || ''),
+          notes: data.notes || '',
+          createdAt: data.created_at || data.createdAt || new Date().toISOString(),
+          recordedBy: data.recorded_by || data.recordedBy || '',
+          recordedById: data.recorded_by_id || data.recordedById || ''
+        });
+      });
+      // Sort newest payment date or created date first
+      entries.sort((a, b) => new Date(b.paymentDate || b.createdAt).getTime() - new Date(a.paymentDate || a.createdAt).getTime());
+      callback(entries);
+    }, (err) => {
+      console.warn('[Firestore] payroll_entries subscription warning:', err);
+      onEmptyOrErrorFallback?.();
+    });
+  } catch (err) {
+    console.warn('[Firestore] failed to subscribe to payroll_entries:', err);
+    onEmptyOrErrorFallback?.();
+    return () => {};
+  }
+}
+
+export async function savePayrollEntryToFirestore(entry: PayrollEntry): Promise<void> {
+  if (!db) return;
+  try {
+    const docRef = doc(db, 'payroll_entries', entry.id);
+    await setDoc(docRef, {
+      id: entry.id,
+      employee_id: entry.employeeId,
+      employee_name: entry.employeeName,
+      employee_email: entry.employeeEmail || '',
+      employee_title: entry.employeeTitle || '',
+      period_start: entry.periodStart,
+      period_end: entry.periodEnd,
+      payment_date: entry.paymentDate,
+      amount: entry.amount,
+      check_number: entry.checkNumber,
+      notes: entry.notes || '',
+      created_at: entry.createdAt,
+      recorded_by: entry.recordedBy || '',
+      recorded_by_id: entry.recordedById || ''
+    });
+  } catch (err) {
+    console.warn('[Firestore] error saving payroll entry to Firestore:', err);
+  }
+}
+
+export async function deletePayrollEntryFromFirestore(entryId: string): Promise<void> {
+  if (!db) return;
+  try {
+    const docRef = doc(db, 'payroll_entries', entryId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('[Firestore] error deleting payroll entry from Firestore:', err);
+  }
+}
+
+export async function seedInitialPayrollEntries(entries: PayrollEntry[]): Promise<void> {
+  if (!db) return;
+  try {
+    for (const entry of entries) {
+      const docRef = doc(db, 'payroll_entries', entry.id);
+      await setDoc(docRef, {
+        id: entry.id,
+        employee_id: entry.employeeId,
+        employee_name: entry.employeeName,
+        employee_email: entry.employeeEmail || '',
+        employee_title: entry.employeeTitle || '',
+        period_start: entry.periodStart,
+        period_end: entry.periodEnd,
+        payment_date: entry.paymentDate,
+        amount: entry.amount,
+        check_number: entry.checkNumber,
+        notes: entry.notes || '',
+        created_at: entry.createdAt,
+        recorded_by: entry.recordedBy || '',
+        recorded_by_id: entry.recordedById || ''
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.warn('[Firestore] error seeding payroll entries:', err);
   }
 }
 

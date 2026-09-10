@@ -9,6 +9,7 @@ import { Job, StaffUser, InvoiceStatus, EmailTemplate, AppNotification, TimeLog,
 import { calculateBusinessDueDate, applyInvoiceStatusTransition, isJasonApproved } from '../utils/invoiceWorkflow';
 import { generateInvoicePDF, triggerDownloadBlob } from '../utils/pdfGenerator';
 import { formatSecondsToReadable } from '../utils/timeUtils';
+import { getLocalDateString } from '../utils/timeCardExport';
 
 interface OfficialInvoiceModalProps {
   job: Job;
@@ -34,7 +35,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   nowTimestamp = Date.now()
 }) => {
   const defaultInvoiceNumber = job.invoice_number || `INV-${new Date().getFullYear()}-${job.job_number.replace(/[^a-zA-Z0-9]/g, '')}`;
-  const defaultInvoiceDate = job.invoice_date || new Date().toISOString().split('T')[0];
+  const defaultInvoiceDate = job.invoice_date || getLocalDateString(new Date());
   const defaultDueDate = job.invoice_due_date || calculateBusinessDueDate(defaultInvoiceDate, 7);
   const defaultPayLink = job.online_payment_link || `https://pay.myplanstore.com/invoice/${defaultInvoiceNumber.toLowerCase()}`;
 
@@ -125,15 +126,16 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   // Sync state if job prop updates from outside
   useEffect(() => {
     if (job) {
+      const todayLocal = getLocalDateString(new Date());
       setInvoiceNumber(job.invoice_number || `INV-${new Date().getFullYear()}-${job.job_number.replace(/[^a-zA-Z0-9]/g, '')}`);
-      setInvoiceDate(job.invoice_date || new Date().toISOString().split('T')[0]);
-      setDueDate(job.invoice_due_date || calculateBusinessDueDate(job.invoice_date || new Date().toISOString().split('T')[0], 7));
+      setInvoiceDate(job.invoice_date || todayLocal);
+      setDueDate(job.invoice_due_date || calculateBusinessDueDate(job.invoice_date || todayLocal, 7));
       setPaymentLink(job.online_payment_link || `https://pay.myplanstore.com/invoice/${(job.invoice_number || '').toLowerCase()}`);
       setInvoiceStatus(job.invoice_status || 'Invoiced');
       setHourlyRate(job.hourly_rate || 85);
       setDepositCollected(Boolean(job.deposit_collected));
       setDepositAmount(job.deposit_amount || 0);
-      setDepositDate(job.deposit_date || new Date().toISOString().split('T')[0]);
+      setDepositDate(job.deposit_date || todayLocal);
       setDepositNotes(job.deposit_notes || '');
       setCustomerName(job.customer_name || '');
       setCustomerEmail(job.customer_email || '');
@@ -192,9 +194,10 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
 
   // Reset to Job's original values
   const handleResetToOriginal = () => {
+    const todayLocal = getLocalDateString(new Date());
     setInvoiceNumber(job.invoice_number || `INV-${new Date().getFullYear()}-${job.job_number.replace(/[^a-zA-Z0-9]/g, '')}`);
-    setInvoiceDate(job.invoice_date || new Date().toISOString().split('T')[0]);
-    setDueDate(job.invoice_due_date || calculateBusinessDueDate(job.invoice_date || new Date().toISOString().split('T')[0], 7));
+    setInvoiceDate(job.invoice_date || todayLocal);
+    setDueDate(job.invoice_due_date || calculateBusinessDueDate(job.invoice_date || todayLocal, 7));
     setPaymentLink(job.online_payment_link || `https://pay.myplanstore.com/invoice/${(job.invoice_number || '').toLowerCase()}`);
     setInvoiceNotes(job.invoice_notes || 'Thank you for choosing My Plan Store for your custom architectural drafting. Please review billable details below.');
     setInvoiceStatus(job.invoice_status || 'Invoiced');
@@ -229,7 +232,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
     setFormDrafterName((currentStaff?.name || assignedDrafter.split(',')[0] || 'Kyle').trim());
     setFormCategory('Standard Offline CAD Drafting');
     setFormDescription('Architectural plan drafting & redline updates');
-    setFormDate(new Date().toISOString().split('T')[0]);
+    setFormDate(getLocalDateString(new Date()));
     setFormHours('1.5');
     setFormRate(String(hourlyRate || 85));
     setIsAddingTimeLog(true);
@@ -242,7 +245,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
     setFormDrafterName(log.drafterName || assignedDrafter.split(',')[0] || 'Kyle');
     setFormCategory(log.billingCategory || 'Standard Offline CAD Drafting');
     setFormDescription(log.taskDescription || '');
-    setFormDate(log.startTime ? log.startTime.split('T')[0] : new Date().toISOString().split('T')[0]);
+    setFormDate(log.startTime ? log.startTime.split('T')[0] : getLocalDateString(new Date()));
     
     const hrs = typeof log.billableHours === 'number' 
       ? log.billableHours 

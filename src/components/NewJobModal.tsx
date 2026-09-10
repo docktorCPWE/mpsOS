@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Compass, User, Mail, Phone, Home, DollarSign, Calendar, CheckCircle2, Receipt, ShieldCheck } from 'lucide-react';
 import { Job, JobPhase, StaffUser } from '../types';
 import { STAFF_USERS, canUserCreateJob } from '../data/mockData';
+import { getLocalDateString } from '../utils/timeCardExport';
 
 interface NewJobModalProps {
   isOpen: boolean;
@@ -18,6 +19,39 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
   staffList = STAFF_USERS,
   currentStaff
 }) => {
+  const availableStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+  
+  // Format drafter display label: "Name, Title"
+  const getStaffOptionValue = (staff: StaffUser) => {
+    return staff.title ? `${staff.name}, ${staff.title}` : staff.name;
+  };
+
+  const defaultDrafter = availableStaff.find(s => s.role === 'drafter' || s.role === 'drafter_lead') || availableStaff[0];
+  const initialDrafterValue = defaultDrafter ? getStaffOptionValue(defaultDrafter) : 'Kyle, Lead Project Manager & Senior Drafter';
+
+  const [jobNumber, setJobNumber] = useState(() => `M26-${Math.floor(210 + Math.random() * 80)}`);
+  const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [assignedDrafter, setAssignedDrafter] = useState(initialDrafterValue);
+  const [sqFt, setSqFt] = useState(2500);
+  const [style, setStyle] = useState('Modern Farmhouse');
+  const [lotDetails, setLotDetails] = useState('');
+  const [estimatedCost, setEstimatedCost] = useState(3200);
+
+  // Upfront Deposit / Retainer fields
+  const [depositCollected, setDepositCollected] = useState(false);
+  const [depositAmount, setDepositAmount] = useState<number>(1600); // 50% default
+  const [depositDate, setDepositDate] = useState(() => getLocalDateString(new Date()));
+  const [depositNotes, setDepositNotes] = useState('');
+
+  // Synchronize default drafter if staffList changes
+  useEffect(() => {
+    if (!assignedDrafter && availableStaff.length > 0) {
+      setAssignedDrafter(getStaffOptionValue(availableStaff[0]));
+    }
+  }, [availableStaff]);
+
   if (!isOpen) return null;
 
   if (currentStaff && !canUserCreateJob(currentStaff)) {
@@ -44,39 +78,6 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
       </div>
     );
   }
-
-  const availableStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
-  
-  // Format drafter display label: "Name, Title"
-  const getStaffOptionValue = (staff: StaffUser) => {
-    return staff.title ? `${staff.name}, ${staff.title}` : staff.name;
-  };
-
-  const defaultDrafter = availableStaff.find(s => s.role === 'drafter' || s.role === 'drafter_lead') || availableStaff[0];
-  const initialDrafterValue = defaultDrafter ? getStaffOptionValue(defaultDrafter) : 'Kyle, Lead Project Manager & Senior Drafter';
-
-  const [jobNumber, setJobNumber] = useState(() => `M26-${Math.floor(210 + Math.random() * 80)}`);
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [assignedDrafter, setAssignedDrafter] = useState(initialDrafterValue);
-  const [sqFt, setSqFt] = useState(2500);
-  const [style, setStyle] = useState('Modern Farmhouse');
-  const [lotDetails, setLotDetails] = useState('');
-  const [estimatedCost, setEstimatedCost] = useState(3200);
-
-  // Upfront Deposit / Retainer fields
-  const [depositCollected, setDepositCollected] = useState(false);
-  const [depositAmount, setDepositAmount] = useState<number>(1600); // 50% default
-  const [depositDate, setDepositDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [depositNotes, setDepositNotes] = useState('');
-
-  // Synchronize default drafter if staffList changes
-  useEffect(() => {
-    if (!assignedDrafter && availableStaff.length > 0) {
-      setAssignedDrafter(getStaffOptionValue(availableStaff[0]));
-    }
-  }, [availableStaff]);
 
   const handleQuickDepositPct = (pct: number) => {
     const calculated = Math.round(estimatedCost * pct);

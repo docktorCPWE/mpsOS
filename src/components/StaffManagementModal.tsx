@@ -70,6 +70,7 @@ interface RolePreset {
     canManageInvoices: boolean;
     canEditJobPhases: boolean;
     canManageRoadblocks: boolean;
+    canAccessPayroll: boolean;
   };
 }
 
@@ -78,7 +79,7 @@ const ROLE_PRESETS: RolePreset[] = [
     id: 'owner_superadmin',
     name: 'Super Admin / Owner',
     badge: '👑 Owner / Super Admin',
-    description: 'Unrestricted master access to all OS tools, financial billing, staff management, and workflows.',
+    description: 'Unrestricted master access to all OS tools, financial billing, staff management, payroll, and workflows.',
     role: 'admin',
     department: 'Architecture',
     permissions: {
@@ -88,14 +89,15 @@ const ROLE_PRESETS: RolePreset[] = [
       canManageStaff: true,
       canManageInvoices: true,
       canEditJobPhases: true,
-      canManageRoadblocks: true
+      canManageRoadblocks: true,
+      canAccessPayroll: true
     }
   },
   {
     id: 'pm_operations',
     name: 'Project Manager & Operations',
     badge: '👔 PM & Operations',
-    description: 'Manages all project queues, delegates tasks, monitors finances and handles client invoices.',
+    description: 'Manages all project queues, delegates tasks, monitors finances, payroll entries, and client invoices.',
     role: 'admin',
     department: 'Management',
     permissions: {
@@ -105,7 +107,8 @@ const ROLE_PRESETS: RolePreset[] = [
       canManageStaff: false,
       canManageInvoices: true,
       canEditJobPhases: true,
-      canManageRoadblocks: true
+      canManageRoadblocks: true,
+      canAccessPayroll: true
     }
   },
   {
@@ -122,14 +125,15 @@ const ROLE_PRESETS: RolePreset[] = [
       canManageStaff: false,
       canManageInvoices: false,
       canEditJobPhases: true,
-      canManageRoadblocks: true
+      canManageRoadblocks: true,
+      canAccessPayroll: false
     }
   },
   {
     id: 'finance_admin',
     name: 'Billing & Finance Admin',
     badge: '💳 Billing Admin',
-    description: 'Oversees time logs, hourly billing calculations, invoice generation, and revenue exports.',
+    description: 'Oversees time logs, hourly billing calculations, invoice generation, payroll compensation checks, and revenue exports.',
     role: 'admin',
     department: 'Finance',
     permissions: {
@@ -139,7 +143,8 @@ const ROLE_PRESETS: RolePreset[] = [
       canManageStaff: false,
       canManageInvoices: true,
       canEditJobPhases: false,
-      canManageRoadblocks: false
+      canManageRoadblocks: false,
+      canAccessPayroll: true
     }
   },
   {
@@ -156,7 +161,8 @@ const ROLE_PRESETS: RolePreset[] = [
       canManageStaff: false,
       canManageInvoices: false,
       canEditJobPhases: false,
-      canManageRoadblocks: false
+      canManageRoadblocks: false,
+      canAccessPayroll: false
     }
   }
 ];
@@ -199,6 +205,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     canManageInvoices: boolean;
     canEditJobPhases: boolean;
     canManageRoadblocks: boolean;
+    canAccessPayroll: boolean;
   }>({
     id: '',
     name: '',
@@ -215,7 +222,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     canManageStaff: false,
     canManageInvoices: false,
     canEditJobPhases: false,
-    canManageRoadblocks: false
+    canManageRoadblocks: false,
+    canAccessPayroll: false
   });
 
   if (!isOpen) return null;
@@ -244,7 +252,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       canManageStaff: false,
       canManageInvoices: false,
       canEditJobPhases: false,
-      canManageRoadblocks: false
+      canManageRoadblocks: false,
+      canAccessPayroll: false
     });
     setIsCreatingNew(true);
   };
@@ -269,7 +278,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       canManageStaff: Boolean(staff.canManageStaff),
       canManageInvoices: Boolean(staff.canManageInvoices),
       canEditJobPhases: Boolean(staff.canEditJobPhases),
-      canManageRoadblocks: Boolean(staff.canManageRoadblocks)
+      canManageRoadblocks: Boolean(staff.canManageRoadblocks),
+      canAccessPayroll: Boolean(staff.canAccessPayroll)
     });
   };
 
@@ -309,7 +319,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       canManageStaff: formData.name.toLowerCase().includes('greg hyatt') ? true : formData.canManageStaff,
       canManageInvoices: formData.canManageInvoices,
       canEditJobPhases: formData.canEditJobPhases,
-      canManageRoadblocks: formData.canManageRoadblocks
+      canManageRoadblocks: formData.canManageRoadblocks,
+      canAccessPayroll: formData.canAccessPayroll
     };
 
     if (isCreatingNew) {
@@ -327,7 +338,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   // Quick Permission Toggle from Matrix View
   const handleQuickTogglePermission = (
     staff: StaffUser, 
-    permKey: keyof Pick<StaffUser, 'canAccessFinancials' | 'canDelegate' | 'canViewAllProjects' | 'canManageStaff' | 'canManageInvoices' | 'canEditJobPhases' | 'canManageRoadblocks'>
+    permKey: keyof Pick<StaffUser, 'canAccessFinancials' | 'canDelegate' | 'canViewAllProjects' | 'canManageStaff' | 'canManageInvoices' | 'canEditJobPhases' | 'canManageRoadblocks' | 'canAccessPayroll'>
   ) => {
     // Prevent locking out Greg Hyatt
     if (staff.name.toLowerCase().includes('greg hyatt') && permKey === 'canManageStaff') {
@@ -713,6 +724,12 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                               <Compass className="w-2.5 h-2.5" /> Job Phases
                             </span>
                           )}
+
+                          {staff.canAccessPayroll && (
+                            <span className="text-[9px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-1.5 py-0.5 rounded flex items-center gap-1">
+                              <DollarSign className="w-2.5 h-2.5" /> Payroll Admin
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -756,7 +773,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <span>
                   💡 <strong>Instant Matrix Toggles:</strong> Click any permission box below to instantly enable or revoke access for that staff member across the OS.
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono">7 Configurable Access Levels</span>
+                <span className="text-[10px] text-slate-500 font-mono">8 Configurable Access Levels</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -784,6 +801,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       </th>
                       <th className="p-3.5 text-center min-w-[110px]" title="Flag and clear roadblock alerts">
                         🚧 Roadblocks
+                      </th>
+                      <th className="p-3.5 text-center min-w-[110px]" title="Access and record employee payroll entries and compensation checks">
+                        💵 Payroll
                       </th>
                       <th className="p-3.5 text-right min-w-[90px]">Actions</th>
                     </tr>
@@ -915,6 +935,21 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                               title={staff.canManageRoadblocks ? 'Roadblock Toggle: Enabled' : 'Roadblocks: Disabled'}
                             >
                               {staff.canManageRoadblocks ? <Check className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
+                            </button>
+                          </td>
+
+                          {/* 8. Payroll Access */}
+                          <td className="p-3.5 text-center">
+                            <button
+                              onClick={() => handleQuickTogglePermission(staff, 'canAccessPayroll')}
+                              className={`w-7 h-7 rounded-lg inline-flex items-center justify-center transition border cursor-pointer ${
+                                staff.canAccessPayroll
+                                  ? 'bg-emerald-950 text-emerald-300 border-emerald-700 hover:bg-emerald-900'
+                                  : 'bg-slate-900 text-slate-600 border-slate-800 hover:border-slate-600'
+                              }`}
+                              title={staff.canAccessPayroll ? 'Payroll Access: Enabled (Click to toggle)' : 'Payroll Access: Disabled'}
+                            >
+                              {staff.canAccessPayroll ? <Check className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
                             </button>
                           </td>
 
@@ -1239,6 +1274,22 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     <span className="font-bold text-white block">🚧 Roadblock Flagging & Resolution</span>
                     <span className="text-[11px] text-slate-400">
                       Can flag project blockers and clear roadblock holds on jobs.
+                    </span>
+                  </div>
+                </label>
+
+                {/* 8. Payroll & Compensation */}
+                <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.canAccessPayroll}
+                    onChange={(e) => setFormData({ ...formData, canAccessPayroll: e.target.checked })}
+                    className="mt-0.5 rounded border-slate-700 text-emerald-600 focus:ring-0"
+                  />
+                  <div>
+                    <span className="font-bold text-white block">💵 Manage & View Payroll</span>
+                    <span className="text-[11px] text-slate-400">
+                      Authorize access to the payroll ledger, select existing users to issue compensation checks, record payment entries, and view disbursement logs.
                     </span>
                   </div>
                 </label>

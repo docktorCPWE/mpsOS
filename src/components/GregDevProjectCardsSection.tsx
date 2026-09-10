@@ -29,7 +29,7 @@ import {
   saveStoredGregDevEntries 
 } from '../utils/gregDevTimeService';
 import { formatSecondsToHHMMSS } from '../utils/timeUtils';
-import { formatMinutesToReadable } from '../utils/timeCardExport';
+import { formatMinutesToReadable, getLocalDateString } from '../utils/timeCardExport';
 
 interface GregDevProjectCardsSectionProps {
   currentStaff: StaffUser;
@@ -214,7 +214,7 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     const hours = durationSeconds / 3600;
     const rate = currentStaff.hourlyRate || 150;
     const billableAmount = Number((hours * rate).toFixed(2));
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString(new Date());
 
     // Create entry
     const newEntry: GregDevTimeEntry = {

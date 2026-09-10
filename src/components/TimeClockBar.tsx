@@ -71,10 +71,10 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   const isJason = isStaffExemptFromClock(currentStaff);
   const todayStr = getLocalDateString(new Date(nowMs));
 
-  // Find active or today's shift for current staff (strictly matching today's date)
+  // Find active shift for current staff (regardless of date in case shift crossed midnight)
   const staffShifts = timeCards.filter(s => s.staffId === currentStaff.id);
   const activeShift = staffShifts.find(s => 
-    (s.status === 'clocked_in' || s.status === 'on_break') && s.date === todayStr
+    s.status === 'clocked_in' || s.status === 'on_break'
   );
   const todayCompletedShifts = staffShifts.filter(s => s.date === todayStr && s.status === 'clocked_out');
 
@@ -229,10 +229,13 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                     {currentStatus === 'on_break' && 'On Break'}
                     {currentStatus === 'clocked_out' && 'Clocked Out'}
                   </div>
-                  <div className="text-[11px] opacity-80">
-                    {activeShift 
-                      ? `Since ${formatTimeOnly(currentStatus === 'on_break' && currentOpenBreak ? currentOpenBreak.startTime : activeShift.clockInTime)}`
-                      : 'Shift not started'}
+                  <div className="text-[11px] opacity-80 flex items-center gap-1.5">
+                    <span>
+                      {activeShift 
+                        ? `Since ${formatTimeOnly(currentStatus === 'on_break' && currentOpenBreak ? currentOpenBreak.startTime : activeShift.clockInTime, true)}`
+                        : 'Shift not started'}
+                    </span>
+                    <span className="text-[9px] bg-slate-700/80 text-blue-300 font-mono px-1 py-0.5 rounded">Arkansas (CT)</span>
                   </div>
                 </div>
               </div>

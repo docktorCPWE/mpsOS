@@ -40,7 +40,7 @@ const PHASES: JobPhase[] = [
   'Completed',
 ];
 
-export const JobDetailModal: React.FC<JobDetailModalProps> = ({
+const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   job,
   onClose,
   onUpdateJob,
@@ -61,8 +61,6 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
   initialHighlightCommentId,
   nowTimestamp,
 }) => {
-  if (!job) return null;
-
   const [activeTab, setActiveTab] = useState<'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'>(initialTab);
   const [roadblockNoteInput, setRoadblockNoteInput] = useState(job.roadblock_note || '');
   const [newCommentInput, setNewCommentInput] = useState('');
@@ -4667,4 +4665,9 @@ export const JobDetailModal: React.FC<JobDetailModalProps> = ({
       )}
     </div>
   );
+};
+
+export const JobDetailModal: React.FC<JobDetailModalProps> = (props) => {
+  if (!props.job) return null;
+  return <JobDetailModalContent {...props} job={props.job} />;
 };

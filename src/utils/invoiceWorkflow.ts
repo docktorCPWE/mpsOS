@@ -1,4 +1,5 @@
 import { Job, InvoiceStatus, AppNotification, StaffUser } from '../types';
+import { getLocalDateString } from './timeCardExport';
 
 /**
  * Checks whether an item has received Jason's explicit approval for invoicing
@@ -45,7 +46,7 @@ export function calculateBusinessDueDate(startDateStr?: string, businessDays: nu
   const date = startDateStr ? new Date(startDateStr) : new Date();
   if (isNaN(date.getTime())) {
     const today = new Date();
-    return calculateBusinessDueDate(today.toISOString().split('T')[0], businessDays);
+    return calculateBusinessDueDate(getLocalDateString(today), businessDays);
   }
 
   let addedDays = 0;
@@ -59,7 +60,7 @@ export function calculateBusinessDueDate(startDateStr?: string, businessDays: nu
     }
   }
 
-  return cur.toISOString().split('T')[0];
+  return getLocalDateString(cur);
 }
 
 /**

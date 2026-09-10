@@ -27,6 +27,7 @@ interface JasonDrafterProjectBoardProps {
   onFilterByDrafter?: (drafterName: string) => void;
   nowTimestamp?: number;
   currentStaff?: StaffUser;
+  staffList?: StaffUser[];
   onOpenCompleteTaskModal?: (task: DelegatedWorkItem, job: Job) => void;
 }
 
@@ -45,7 +46,8 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
   onSelectJob,
   onFilterByDrafter,
   nowTimestamp = Date.now(),
-  currentStaff
+  currentStaff,
+  staffList
 }) => {
   const [drafterSearch, setDrafterSearch] = useState('');
   const [selectedPhaseFilter, setSelectedPhaseFilter] = useState<string>('ALL');
@@ -55,46 +57,87 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     ? (currentStaff.name.toLowerCase().includes('kyle') ? 'Kyle' : currentStaff.name.toLowerCase().includes('jason') ? 'Jason' : currentStaff.name)
     : 'Operations & Management';
 
+  const effectiveStaffList = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+
   // Filter staff list to drafter & project lead personnel
-  const drafterStaffList = STAFF_USERS.filter(
-    s => s.role === 'drafter' || s.role === 'drafter_lead' || s.name === 'Kyle'
+  const drafterStaffList = effectiveStaffList.filter(
+    s => s.role === 'drafter' || s.role === 'drafter_lead' || s.name.toLowerCase().includes('kyle') || s.name.toLowerCase().includes('jason')
   );
 
-  // Also include any other drafters named in jobs
-  const additionalDrafterNames = jobs
-    .map(j => j.assigned_drafter.split(',')[0].trim())
-    .filter(name => !drafterStaffList.some(s => s.name.toLowerCase() === name.toLowerCase()));
+  // Helper to check if a drafter name string corresponds to someone already in drafterStaffList
+  const isRepresentedInStaff = (rawName: string) => {
+    const clean = rawName.trim().toLowerCase();
+    if (!clean) return true;
+    return drafterStaffList.some(s => {
+      const sLower = s.name.toLowerCase();
+      const sFirst = sLower.split(' ')[0];
+      return sLower === clean || sFirst === clean || sLower.includes(clean) || clean.includes(sLower);
+    });
+  };
 
-  const allDrafters: { name: string; title: string; email: string; isLead: boolean }[] = [
-    ...drafterStaffList.map(s => ({
-      name: s.name,
-      title: s.title,
-      email: s.email,
-      isLead: s.role === 'drafter_lead' || s.canDelegate
-    })),
-    ...additionalDrafterNames.map(name => ({
-      name,
-      title: 'Architectural Drafter',
-      email: `${name.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
-      isLead: false
-    }))
-  ];
+  // Find additional unique drafters named in jobs that are not already in staff list
+  const uniqueAdditionalNames: string[] = Array.from(
+    new Set<string>(
+      jobs
+        .map(j => j.assigned_drafter.split(',')[0].trim())
+        .filter(name => Boolean(name) && !isRepresentedInStaff(name))
+    )
+  );
+
+  // Build canonical, strictly unique drafters list using a Map
+  const drafterMap = new Map<string, { id?: string; name: string; title: string; email: string; isLead: boolean }>();
+
+  drafterStaffList.forEach(s => {
+    const key = s.name.toLowerCase().trim();
+    if (!drafterMap.has(key)) {
+      drafterMap.set(key, {
+        id: s.id,
+        name: s.name,
+        title: s.title,
+        email: s.email,
+        isLead: s.role === 'drafter_lead' || s.canDelegate
+      });
+    }
+  });
+
+  uniqueAdditionalNames.forEach(name => {
+    const key = name.toLowerCase().trim();
+    if (!drafterMap.has(key)) {
+      drafterMap.set(key, {
+        id: `drafter-${key.replace(/[^a-z0-9]/g, '-')}`,
+        name,
+        title: 'Architectural Drafter',
+        email: `${key.replace(/\s+/g, '.')}@myplanstore.com`,
+        isLead: false
+      });
+    }
+  });
+
+  const allDrafters = Array.from(drafterMap.values());
 
   // Map each drafter to their active assigned jobs & delegated work items (excluding paid/archived)
   const activeJobs = jobs.filter(j => !isJobArchived(j));
   const drafterWorkloads = allDrafters.map(drafter => {
     const drafterLower = drafter.name.toLowerCase();
+    const drafterFirst = drafterLower.split(' ')[0];
+
+    // Helper to check if a drafter name string matches this drafter
+    const matchesThisDrafter = (target?: string) => {
+      if (!target) return false;
+      const t = target.toLowerCase().trim();
+      return t === drafterLower || t === drafterFirst || t.includes(drafterLower) || drafterLower.includes(t);
+    };
 
     // Lead assigned active projects
     const leadProjects = activeJobs.filter(j => 
-      j.assigned_drafter.toLowerCase().includes(drafterLower)
+      matchesThisDrafter(j.assigned_drafter)
     );
 
     // Projects where this drafter has delegated components
     const delegatedProjectsWithTasks: { job: Job; tasks: any[] }[] = [];
     activeJobs.forEach(j => {
       const matchingTasks = (j.delegated_tasks || []).filter(t => 
-        t.assignedTo.toLowerCase().includes(drafterLower)
+        matchesThisDrafter(t.assignedTo)
       );
       if (matchingTasks.length > 0) {
         delegatedProjectsWithTasks.push({ job: j, tasks: matchingTasks });
@@ -111,13 +154,13 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     // Live timer check
     const activeRunningJob = allInvolvedJobs.find(j => 
       Boolean(j.active_timer_start) && 
-      (j.active_timer_drafter_name?.toLowerCase() === drafterLower || j.assigned_drafter.toLowerCase().includes(drafterLower))
+      (matchesThisDrafter(j.active_timer_drafter_name) || matchesThisDrafter(j.assigned_drafter))
     );
 
     // Paused by break timer check
     const pausedBreakJob = allInvolvedJobs.find(j =>
       Boolean(j.paused_by_break) &&
-      (j.paused_timer_drafter_name?.toLowerCase() === drafterLower || j.assigned_drafter.toLowerCase().includes(drafterLower))
+      (matchesThisDrafter(j.paused_timer_drafter_name) || matchesThisDrafter(j.assigned_drafter))
     );
 
     // Roadblock count
@@ -127,10 +170,10 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     let totalSeconds = 0;
     allInvolvedJobs.forEach(j => {
       const logs = (j.time_logs || []).filter(tl => 
-        (tl.drafterName || '').toLowerCase().includes(drafterLower)
+        matchesThisDrafter(tl.drafterName)
       );
       totalSeconds += logs.reduce((acc, l) => acc + l.durationSeconds, 0);
-      if (j.active_timer_start && j.assigned_drafter.toLowerCase().includes(drafterLower)) {
+      if (j.active_timer_start && matchesThisDrafter(j.assigned_drafter)) {
         totalSeconds += Math.max(0, Math.floor((nowTimestamp - new Date(j.active_timer_start).getTime()) / 1000));
       }
     });
@@ -266,7 +309,7 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
 
           return (
             <div 
-              key={drafter.name}
+              key={drafter.id || `drafter-${drafter.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
               className="bg-slate-800/70 hover:bg-slate-800/90 border border-slate-700/80 hover:border-indigo-500/50 rounded-2xl p-4.5 flex flex-col justify-between transition duration-200 shadow-md group"
             >
               <div>

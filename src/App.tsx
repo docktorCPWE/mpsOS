@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, canUserCreateJob } from './data/mockData';
+import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -32,7 +32,11 @@ import {
   subscribeToDevTimeEntries,
   saveDevTimeEntryToFirestore,
   subscribeToDevProjectCards,
-  saveDevProjectCardsToFirestore
+  saveDevProjectCardsToFirestore,
+  subscribeToPayrollEntries,
+  savePayrollEntryToFirestore,
+  deletePayrollEntryFromFirestore,
+  seedInitialPayrollEntries
 } from './services/firebase';
 import { User as FirebaseUser } from 'firebase/auth';
 import { DrafterDashboard } from './components/DrafterDashboard';
@@ -51,6 +55,7 @@ import { TimeClockBar } from './components/TimeClockBar';
 import { TimeCardModal } from './components/TimeCardModal';
 import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
+import { getLocalDateString } from './utils/timeCardExport';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -81,6 +86,9 @@ export default function App() {
   const [devCards, setDevCards] = useState<GregDevProjectCard[]>(() => getStoredGregDevCards());
   const [devEntries, setDevEntries] = useState<GregDevTimeEntry[]>(() => getStoredGregDevEntries());
   const [isDevReviewModalOpen, setIsDevReviewModalOpen] = useState(false);
+
+  // Payroll Entries State
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>(() => getStoredPayrollEntries());
 
   // Firebase Authentication State
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
@@ -126,7 +134,10 @@ export default function App() {
     setChatMessages(getStoredChatMessages());
     const storedStaff = getStoredStaff();
     setStaffList(storedStaff);
-    const matchingStaff = storedStaff.find(s => s.id === 'staff-greg') || storedStaff[0];
+    const activeStaffId = getStoredActiveStaffId();
+    const matchingStaff = (activeStaffId && storedStaff.find(s => s.id === activeStaffId || s.name.toLowerCase() === activeStaffId.toLowerCase() || (s.name.toLowerCase().includes('kyle') && activeStaffId.toLowerCase().includes('kyle')))) ||
+      storedStaff.find(s => s.id === 'staff-greg') ||
+      storedStaff[0];
     if (matchingStaff) {
       setCurrentStaff(matchingStaff);
     }
@@ -159,17 +170,32 @@ export default function App() {
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
           const filtered = cloudStaff.filter((s) => {
-            const isRemovedMockId = ['staff-jason', 'staff-drew', 'staff-kyle', 'staff-james', 'staff-aaron', 'staff-ethan'].includes(s.id);
+            const isRemovedMockId = ['staff-james', 'staff-aaron', 'staff-ethan'].includes(s.id);
             const nameLower = (s.name || '').toLowerCase();
-            const isRemovedMockName = ['jason', 'drew lupkey', 'kyle', 'james', 'aaron', 'ethan'].includes(nameLower) && (s.email?.includes('myplanstore.com') || !s.email);
+            const isRemovedMockName = ['james', 'aaron', 'ethan'].includes(nameLower) && !s.email?.includes('arkcwd@gmail.com');
             return !isRemovedMockId && !isRemovedMockName;
           });
-          const hasGreg = filtered.some(s => s.name.toLowerCase().includes('greg hyatt') || s.id === 'staff-greg');
-          if (!hasGreg) {
-            filtered.unshift(STAFF_USERS[0]);
+
+          // Ensure all core staff (Greg, Kyle, Jason, Drew) exist in roster
+          const merged = [...filtered];
+          for (const core of STAFF_USERS) {
+            const exists = merged.some(s => s.id === core.id || s.name.toLowerCase() === core.name.toLowerCase() || (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')));
+            if (!exists) {
+              merged.push(core);
+            }
           }
-          setStaffList(filtered);
-          saveStoredStaff(filtered);
+
+          setStaffList(merged);
+          saveStoredStaff(merged);
+
+          // Update currentStaff if matching cloud record has latest edits to capabilities
+          setCurrentStaff(prevCurrent => {
+            const updatedMatch = merged.find(s => s.id === prevCurrent.id) ||
+                                 merged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
+                                 merged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
+                                 (prevCurrent.name.toLowerCase().includes('kyle') ? merged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
+            return updatedMatch ? { ...prevCurrent, ...updatedMatch } : prevCurrent;
+          });
         }
       },
       () => {
@@ -198,12 +224,28 @@ export default function App() {
       }
     });
 
+    const unsubscribePayroll = subscribeToPayrollEntries(
+      (cloudPayroll) => {
+        if (cloudPayroll && cloudPayroll.length > 0) {
+          setPayrollEntries(cloudPayroll);
+          saveStoredPayrollEntries(cloudPayroll);
+        }
+      },
+      () => {
+        const local = getStoredPayrollEntries();
+        if (local && local.length > 0) {
+          seedInitialPayrollEntries(local);
+        }
+      }
+    );
+
     return () => {
       unsubscribeJobs();
       unsubscribeStaff();
       unsubscribeChat();
       unsubscribeDevEntries();
       unsubscribeDevCards();
+      unsubscribePayroll();
     };
   }, []);
 
@@ -385,7 +427,38 @@ export default function App() {
       setStaffList(resetStaff);
       const resetCards = resetStoredTimeCards();
       setTimeCards(resetCards);
+      const resetPayroll = resetStoredPayrollEntries();
+      setPayrollEntries(resetPayroll);
       if (reset.length > 0) setSelectedCustomerId(reset[0].id);
+    }
+  };
+
+  // Payroll handlers
+  const handleSavePayrollEntry = async (entry: PayrollEntry) => {
+    const existingIdx = payrollEntries.findIndex(e => e.id === entry.id);
+    let updated: PayrollEntry[];
+    if (existingIdx >= 0) {
+      updated = payrollEntries.map(e => e.id === entry.id ? entry : e);
+    } else {
+      updated = [entry, ...payrollEntries];
+    }
+    setPayrollEntries(updated);
+    saveStoredPayrollEntries(updated);
+    try {
+      await savePayrollEntryToFirestore(entry);
+    } catch (err) {
+      console.warn('[Firestore] Error saving payroll entry:', err);
+    }
+  };
+
+  const handleDeletePayrollEntry = async (entryId: string) => {
+    const updated = payrollEntries.filter(e => e.id !== entryId);
+    setPayrollEntries(updated);
+    saveStoredPayrollEntries(updated);
+    try {
+      await deletePayrollEntryFromFirestore(entryId);
+    } catch (err) {
+      console.warn('[Firestore] Error deleting payroll entry:', err);
     }
   };
 
@@ -394,7 +467,7 @@ export default function App() {
     if (isStaffExemptFromClock(currentStaff)) {
       return;
     }
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString(new Date());
     const active = timeCards.find(s => s.staffId === currentStaff.id && (s.status === 'clocked_in' || s.status === 'on_break'));
     if (active) return;
 
@@ -510,7 +583,7 @@ export default function App() {
       });
     } else {
       // Auto-clock in and immediately start break if not already clocked in
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateString(new Date());
       const newShift: TimeCardShift = {
         id: `tc-${Date.now()}`,
         staffId: currentStaff.id,
@@ -549,7 +622,7 @@ export default function App() {
               staffId: currentStaff.id,
               staffName: currentStaff.name,
               projectType: c.projectType,
-              date: new Date().toISOString().split('T')[0],
+              date: getLocalDateString(new Date()),
               startTime: c.activeTimerStart,
               endTime: new Date(endMs).toISOString(),
               durationSeconds,
@@ -826,7 +899,7 @@ export default function App() {
             staffId: currentStaff.id,
             staffName: currentStaff.name,
             projectType: c.projectType,
-            date: new Date().toISOString().split('T')[0],
+            date: getLocalDateString(new Date()),
             startTime: c.activeTimerStart,
             endTime: new Date(curEndMs).toISOString(),
             durationSeconds: additionalSec,
@@ -876,13 +949,29 @@ export default function App() {
   };
 
   const handleUpdateStaff = (updatedStaff: StaffUser) => {
-    const updated = staffList.map(s => s.id === updatedStaff.id ? updatedStaff : s);
+    const updated = staffList.map(s => {
+      const isMatch = s.id === updatedStaff.id ||
+        (s.email && updatedStaff.email && s.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
+        s.name.toLowerCase() === updatedStaff.name.toLowerCase() ||
+        (updatedStaff.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle'));
+      return isMatch ? updatedStaff : s;
+    });
     setStaffList(updated);
     saveStoredStaff(updated);
-    if (currentStaff.id === updatedStaff.id) {
+    const isCurrentMatch = currentStaff.id === updatedStaff.id ||
+      (currentStaff.email && updatedStaff.email && currentStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
+      currentStaff.name.toLowerCase() === updatedStaff.name.toLowerCase() ||
+      (updatedStaff.name.toLowerCase().includes('kyle') && currentStaff.name.toLowerCase().includes('kyle'));
+    if (isCurrentMatch) {
       setCurrentStaff(updatedStaff);
+      saveStoredActiveStaffId(updatedStaff.id);
     }
     saveStaffToFirestore(updatedStaff).catch(err => console.warn('[Firestore] Error updating staff:', err));
+  };
+
+  const handleSelectStaff = (staff: StaffUser) => {
+    setCurrentStaff(staff);
+    saveStoredActiveStaffId(staff.id);
   };
 
   const handleDeleteStaff = (staffId: string) => {
@@ -891,6 +980,7 @@ export default function App() {
     saveStoredStaff(updated);
     if (currentStaff.id === staffId && updated.length > 0) {
       setCurrentStaff(updated[0]);
+      saveStoredActiveStaffId(updated[0].id);
     }
     deleteStaffFromFirestore(staffId).catch(err => console.warn('[Firestore] Error deleting staff:', err));
   };
@@ -900,6 +990,7 @@ export default function App() {
     setStaffList(reset);
     const matching = reset.find(s => s.id === currentStaff.id) || reset[0];
     setCurrentStaff(matching);
+    saveStoredActiveStaffId(matching.id);
   };
 
   // Chat message handlers
@@ -1769,7 +1860,7 @@ export default function App() {
         userRole={userRole}
         setUserRole={setUserRole}
         currentStaff={currentStaff}
-        setCurrentStaff={setCurrentStaff}
+        setCurrentStaff={handleSelectStaff}
         staffList={staffList}
         selectedCustomerId={selectedCustomerId}
         setSelectedCustomerId={setSelectedCustomerId}
@@ -1856,6 +1947,7 @@ export default function App() {
           <DrafterDashboard
             jobs={jobs}
             currentStaff={currentStaff}
+            staffList={staffList}
             onUpdateStatus={handleUpdateJobStatus}
             onToggleRoadblock={handleToggleRoadblock}
             onSelectJob={handleOpenJobDetail}
@@ -1889,6 +1981,9 @@ export default function App() {
             }}
             onDispatchNotifications={handleDispatchNotifications}
             nowTimestamp={nowTimestamp}
+            payrollEntries={payrollEntries}
+            onSavePayrollEntry={handleSavePayrollEntry}
+            onDeletePayrollEntry={handleDeletePayrollEntry}
           />
         ) : (
           activeCustomerJob ? (

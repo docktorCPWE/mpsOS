@@ -1,13 +1,29 @@
 import { TimeCardShift, StaffUser, Job, EmployeeWeeklySummary, TimeCardBreak } from '../types';
 
 /**
- * Returns a date formatted as YYYY-MM-DD in local time (prevents UTC timezone date jumps)
+ * Application Time Zone: Arkansas is located in US Central Time (America/Chicago).
+ * All clock in, clock out, break times, and time cards are standardized to Central Time (CT).
+ */
+export const ARKANSAS_TIMEZONE = 'America/Chicago';
+
+/**
+ * Returns a date formatted as YYYY-MM-DD in Arkansas Central Time (prevents UTC timezone date jumps)
  */
 export function getLocalDateString(d: Date = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: ARKANSAS_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(d);
+  } catch {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 /**
@@ -47,16 +63,16 @@ export function isDateInWeek(dateStr: string, weekStart: Date, weekEnd: Date): b
 }
 
 /**
- * Format date range e.g. "Sep 7 – Sep 13, 2026"
+ * Format date range e.g. "Sep 7 – Sep 13, 2026" in Arkansas Central Time
  */
 export function getWeekDateRangeLabel(targetDate: Date = new Date()): string {
   const start = getStartOfWeek(targetDate);
   const end = getEndOfWeek(targetDate);
-  const sMonth = start.toLocaleDateString('en-US', { month: 'short' });
-  const sDay = start.getDate();
-  const eMonth = end.toLocaleDateString('en-US', { month: 'short' });
-  const eDay = end.getDate();
-  const year = end.getFullYear();
+  const sMonth = start.toLocaleDateString('en-US', { timeZone: ARKANSAS_TIMEZONE, month: 'short' });
+  const sDay = start.toLocaleDateString('en-US', { timeZone: ARKANSAS_TIMEZONE, day: 'numeric' });
+  const eMonth = end.toLocaleDateString('en-US', { timeZone: ARKANSAS_TIMEZONE, month: 'short' });
+  const eDay = end.toLocaleDateString('en-US', { timeZone: ARKANSAS_TIMEZONE, day: 'numeric' });
+  const year = end.toLocaleDateString('en-US', { timeZone: ARKANSAS_TIMEZONE, year: 'numeric' });
   if (sMonth === eMonth) {
     return `${sMonth} ${sDay} – ${eDay}, ${year}`;
   }
@@ -64,32 +80,35 @@ export function getWeekDateRangeLabel(targetDate: Date = new Date()): string {
 }
 
 /**
- * Format ISO date string into standard time "8:30 AM"
+ * Format ISO date string into standard Arkansas time "8:30 AM" or "8:30 AM CT"
  */
-export function formatTimeOnly(isoString?: string): string {
+export function formatTimeOnly(isoString?: string, includeZone: boolean = false): string {
   if (!isoString) return '--:--';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return '--:--';
-    return d.toLocaleTimeString('en-US', {
+    const timeFormatted = d.toLocaleTimeString('en-US', {
+      timeZone: ARKANSAS_TIMEZONE,
       hour: 'numeric',
       minute: '2-digit',
       hour12: true
     });
+    return includeZone ? `${timeFormatted} CT` : timeFormatted;
   } catch {
     return '--:--';
   }
 }
 
 /**
- * Format ISO date string into standard short date "Aug 26, 2026"
+ * Format ISO date string into standard short date in Arkansas Central Time "Aug 26, 2026"
  */
 export function formatDateOnly(dateStr: string): string {
   try {
     const [year, month, day] = dateStr.split('-').map(Number);
     if (!year || !month || !day) return dateStr;
-    const d = new Date(year, month - 1, day);
+    const d = new Date(Date.UTC(year, month - 1, day, 18, 0, 0));
     return d.toLocaleDateString('en-US', {
+      timeZone: ARKANSAS_TIMEZONE,
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -492,7 +511,7 @@ export function exportSingleEmployeeTimeCardCSV(
     ...rows.map(r => r.join(','))
   ].join('\n');
 
-  downloadCSV(csvContent, `MPS_TimeCard_${staff.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+  downloadCSV(csvContent, `MPS_TimeCard_${staff.name.replace(/\s+/g, '_')}_${getLocalDateString(new Date())}.csv`);
 }
 
 /**
@@ -603,7 +622,7 @@ export function exportTeamTimeCardsSummaryCSV(
     ...rows.map(r => r.join(','))
   ].join('\n');
 
-  downloadCSV(csvContent, `MPS_Team_TimeCards_Summary_${new Date().toISOString().split('T')[0]}.csv`);
+  downloadCSV(csvContent, `MPS_Team_TimeCards_Summary_${getLocalDateString(new Date())}.csv`);
 }
 
 /**

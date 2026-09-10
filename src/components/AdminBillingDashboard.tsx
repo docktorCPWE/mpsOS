@@ -36,13 +36,14 @@ import {
   YAxis, 
   CartesianGrid 
 } from 'recharts';
-import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification } from '../types';
+import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification, PayrollEntry } from '../types';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
-import { Lock, ShieldCheck } from 'lucide-react';
-import { STAFF_USERS } from '../data/mockData';
+import { Lock, ShieldCheck, CreditCard } from 'lucide-react';
+import { STAFF_USERS, canUserAccessPayroll } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
+import { PayrollTable } from './PayrollTable';
 
 interface AdminBillingDashboardProps {
   jobs: Job[];
@@ -55,6 +56,9 @@ interface AdminBillingDashboardProps {
   onUpdateJob: (updatedJob: Job) => void;
   onDispatchNotifications?: (notifs: AppNotification[]) => void;
   nowTimestamp?: number;
+  payrollEntries?: PayrollEntry[];
+  onSavePayrollEntry?: (entry: PayrollEntry) => Promise<void> | void;
+  onDeletePayrollEntry?: (entryId: string) => Promise<void> | void;
 }
 
 const ALL_PHASES: JobPhase[] = [
@@ -159,10 +163,22 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   onSelectJob,
   onUpdateJob,
   onDispatchNotifications,
-  nowTimestamp
+  nowTimestamp,
+  payrollEntries = [],
+  onSavePayrollEntry,
+  onDeletePayrollEntry
 }) => {
-  // If current staff is not authorized for financials, show access restricted screen
-  if (currentStaff && !currentStaff.canAccessFinancials) {
+  const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+  const isFinancialsAuthorized = currentStaff ? !!currentStaff.canAccessFinancials : true;
+  const isPayrollAuthorized = currentStaff ? canUserAccessPayroll(currentStaff) : false;
+
+  // Active sub-tab state (Default to payroll if user only has payroll permissions)
+  const [activeTab, setActiveTab] = useState<'billing' | 'payroll'>(
+    !isFinancialsAuthorized && isPayrollAuthorized ? 'payroll' : 'billing'
+  );
+
+  // If current staff is neither authorized for financials nor payroll, show access restricted screen
+  if (currentStaff && !isFinancialsAuthorized && !isPayrollAuthorized) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
         <div className="w-16 h-16 rounded-2xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center mx-auto shadow-sm">
@@ -171,10 +187,10 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
 
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-mono">
-            Financial & Invoicing Access Restricted
+            Command Center Access Restricted
           </h2>
           <p className="text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
-            Per company policy, drafters are restricted from viewing financial numbers, client hourly invoicing values, and Admin & Billing dashboards.
+            Per company policy, drafters are restricted from viewing financial numbers, client hourly invoicing values, and team payroll records.
           </p>
         </div>
 
@@ -201,7 +217,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-            You are currently signed in as <strong>{currentStaff.name}</strong>. Switch identity in the top right menu to access this command center.
+            You are currently signed in as <strong>{currentStaff.name}</strong>. Switch identity in the top right menu or contact an administrator to request access.
           </p>
         </div>
       </div>
@@ -218,12 +234,25 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   const [sortBy, setSortBy] = useState<'days_desc' | 'activity_newest' | 'cost_desc' | 'job_number'>('days_desc');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
+  // Canonicalize raw drafter names so that if a name corresponds to an existing staff user, it maps to their full name
+  const canonicalizeDrafterName = (rawName: string): string => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return '';
+    const lower = trimmed.toLowerCase();
+    const matched = effectiveStaff.find(s => {
+      const sLower = s.name.toLowerCase();
+      const sFirst = sLower.split(' ')[0];
+      return sLower === lower || sFirst === lower || sLower.includes(lower) || lower.includes(sLower);
+    });
+    return matched ? matched.name : trimmed;
+  };
+
   // List of all drafters & team members
   const draftersList = Array.from(
     new Set([
-      ...STAFF_USERS.map(s => s.name),
-      ...jobs.map(j => j.assigned_drafter.split(',')[0].trim()),
-      ...jobs.flatMap(j => (j.delegated_tasks || []).map(t => t.assignedTo.trim()))
+      ...effectiveStaff.map(s => s.name),
+      ...jobs.map(j => canonicalizeDrafterName(j.assigned_drafter.split(',')[0])),
+      ...jobs.flatMap(j => (j.delegated_tasks || []).map(t => canonicalizeDrafterName(t.assignedTo)))
     ])
   ).filter(Boolean);
 
@@ -328,9 +357,16 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
     // Drafter Filter
     if (selectedDrafterFilter !== 'ALL') {
       const drafterLower = selectedDrafterFilter.toLowerCase();
-      const isLead = job.assigned_drafter.toLowerCase().includes(drafterLower);
-      const hasDelegated = (job.delegated_tasks || []).some(t => t.assignedTo.toLowerCase().includes(drafterLower));
-      const hasTimeLogged = (job.time_logs || []).some(tl => (tl.drafterName || '').toLowerCase().includes(drafterLower));
+      const drafterFirst = drafterLower.split(' ')[0];
+      const matchesDrafter = (target?: string) => {
+        if (!target) return false;
+        const t = target.toLowerCase().trim();
+        return t === drafterLower || t === drafterFirst || t.includes(drafterLower) || drafterLower.includes(t);
+      };
+
+      const isLead = matchesDrafter(job.assigned_drafter);
+      const hasDelegated = (job.delegated_tasks || []).some(t => matchesDrafter(t.assignedTo));
+      const hasTimeLogged = (job.time_logs || []).some(tl => matchesDrafter(tl.drafterName));
       if (!isLead && !hasDelegated && !hasTimeLogged) {
         return false;
       }
@@ -445,6 +481,95 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
         </div>
       </div>
 
+      {/* COMMAND CENTER SUB-TABS: INVOICING & PROJECTS VS PAYROLL */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setActiveTab('billing')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === 'billing'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Projects & Invoicing Dashboard</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
+              activeTab === 'billing' ? 'bg-blue-700 text-blue-100' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {jobs.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('payroll')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer relative ${
+              activeTab === 'payroll'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+                : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Payroll & Team Compensation Ledger</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
+              activeTab === 'payroll' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {payrollEntries.length} entries
+            </span>
+            {!isPayrollAuthorized && (
+              <span className="flex items-center gap-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded font-mono">
+                <Lock className="w-2.5 h-2.5 text-amber-700" /> Gated
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 font-mono hidden md:flex items-center gap-2">
+          {activeTab === 'payroll' ? (
+            <span className="text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+              💵 Payroll Ledger Active
+            </span>
+          ) : (
+            <span className="text-blue-700 font-semibold bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg">
+              📊 Project Invoicing Active
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* RENDER ACTIVE TAB CONTENT */}
+      {activeTab === 'payroll' ? (
+        <PayrollTable
+          entries={payrollEntries}
+          staffList={effectiveStaff}
+          currentStaff={currentStaff || effectiveStaff[0]}
+          onSaveEntry={onSavePayrollEntry || (() => {})}
+          onDeleteEntry={onDeletePayrollEntry || (() => {})}
+          onOpenStaffManagement={onOpenStaffManagement}
+        />
+      ) : !isFinancialsAuthorized ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center max-w-xl mx-auto space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto border border-amber-300">
+            <Lock className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900 font-mono">
+              Project Invoicing & Financials Restricted
+            </h3>
+            <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
+              Client hourly rates and billable project financials are restricted to Jason, Greg, and Billing Administrators. You have active authorization to manage Team Payroll.
+            </p>
+          </div>
+          <button
+            onClick={() => setActiveTab('payroll')}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Switch to Payroll & Compensation Ledger</span>
+          </button>
+        </div>
+      ) : (
+        <>
       {/* KPI Overview Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
@@ -717,6 +842,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
             }}
             nowTimestamp={nowTimestamp}
             currentStaff={currentStaff}
+            staffList={staffList}
           />
         </div>
       )}
@@ -1341,6 +1467,8 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
           currentStaff={currentStaff}
           nowTimestamp={nowTimestamp}
         />
+      )}
+        </>
       )}
 
     </div>
