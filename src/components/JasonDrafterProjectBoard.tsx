@@ -125,14 +125,19 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
   );
 
   // Guarantee Greg Hyatt is present if not already in effectiveStaffList
+  const gregFromStaff = effectiveStaffList.find(s => isUserGregHyatt(s) || s.name.toLowerCase().includes('greg'));
+  const gregFromCurrent = (currentStaff && (isUserGregHyatt(currentStaff) || currentStaff.name.toLowerCase().includes('greg'))) ? currentStaff : null;
+  const gregProfile = gregFromCurrent || gregFromStaff || STAFF_USERS.find(s => isUserGregHyatt(s)) || STAFF_USERS[0];
+  const gregActualTitle = gregProfile?.title || 'Owner & Principal Architect';
+
   if (!drafterStaffList.some(s => isUserGregHyatt(s) || s.name.toLowerCase().includes('greg'))) {
     drafterStaffList.unshift({
-      id: 'staff-greg',
-      name: 'Greg Hyatt',
-      email: 'arkcwd@gmail.com',
+      id: gregProfile?.id || 'staff-greg',
+      name: gregProfile?.name || 'Greg Hyatt',
+      email: gregProfile?.email || 'arkcwd@gmail.com',
       role: 'admin',
-      title: 'Owner / Principal Architect & Lead Dev',
-      hourlyRate: 150,
+      title: gregActualTitle,
+      hourlyRate: gregProfile?.hourlyRate || 150,
       status: 'active',
       canAccessFinancials: true,
       canDelegate: true,
@@ -176,10 +181,15 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     const key = s.name.toLowerCase().trim();
     if (!drafterMap.has(key)) {
       const isGreg = isUserGregHyatt(s) || s.name.toLowerCase().includes('greg');
+      // For Greg or any team member, strictly respect the title configured in their user profile
+      const staffTitle = isGreg 
+        ? (gregActualTitle || s.title || 'Owner & Principal Architect')
+        : (s.title || 'Architectural Drafter');
+
       drafterMap.set(key, {
         id: s.id,
         name: s.name,
-        title: isGreg ? 'Principal Architect & Lead Developer' : s.title,
+        title: staffTitle,
         email: s.email,
         isLead: isGreg || s.role === 'drafter_lead' || s.canDelegate,
         isDevLead: isGreg
