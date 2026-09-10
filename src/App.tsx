@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -303,21 +303,67 @@ export default function App() {
     }
   };
 
-  // Mark notification as read
+  // Helper to update and persist notifications across page loads and sessions
+  const updateNotificationsState = (updater: (prev: AppNotification[]) => AppNotification[]) => {
+    setNotifications(prev => {
+      const next = updater(prev);
+      saveStoredNotifications(next);
+      return next;
+    });
+  };
+
+  // Mark notification as read and persist
   const handleMarkNotificationRead = (notificationId: string) => {
-    setNotifications(prev =>
+    updateNotificationsState(prev =>
       prev.map(n => (n.id === notificationId ? { ...n, read: true } : n))
     );
+  };
+
+  // Toggle notification read/unread and persist
+  const handleToggleNotificationRead = (notificationId: string) => {
+    updateNotificationsState(prev =>
+      prev.map(n => (n.id === notificationId ? { ...n, read: !n.read } : n))
+    );
+  };
+
+  // Delete / Dismiss a single notification
+  const handleDeleteNotification = (notificationId: string) => {
+    addDismissedNotificationId(notificationId);
+    updateNotificationsState(prev => prev.filter(n => n.id !== notificationId));
+  };
+
+  // Mark all notifications as read (optionally scoped to staff recipient)
+  const handleMarkAllNotificationsRead = (recipientName?: string) => {
+    updateNotificationsState(prev =>
+      prev.map(n => {
+        if (!recipientName) return { ...n, read: true };
+        const match = n.recipientName.toLowerCase().includes(recipientName.toLowerCase()) ||
+                      recipientName.toLowerCase().includes(n.recipientName.toLowerCase());
+        return match ? { ...n, read: true } : n;
+      })
+    );
+  };
+
+  // Clear all notifications for staff recipient
+  const handleClearAllNotifications = (recipientName?: string) => {
+    updateNotificationsState(prev => {
+      if (!recipientName) {
+        prev.forEach(n => addDismissedNotificationId(n.id));
+        return [];
+      }
+      const toRemove = prev.filter(n =>
+        n.recipientName.toLowerCase().includes(recipientName.toLowerCase()) ||
+        recipientName.toLowerCase().includes(n.recipientName.toLowerCase())
+      );
+      toRemove.forEach(n => addDismissedNotificationId(n.id));
+      return prev.filter(n => !toRemove.includes(n));
+    });
   };
 
   // Dispatch new app notifications and persist to storage
   const handleDispatchNotifications = (newNotifs: AppNotification[]) => {
     if (!newNotifs || newNotifs.length === 0) return;
-    setNotifications(prev => {
-      const combined = [...newNotifs, ...prev];
-      saveStoredNotifications(combined);
-      return combined;
-    });
+    updateNotificationsState(prev => [...newNotifs, ...prev]);
   };
 
   // Timer Start Handler (prompts for required note if not provided)
@@ -1041,7 +1087,7 @@ export default function App() {
             type: 'comment',
             senderName: currentStaff.name
           };
-          setNotifications(prev => [notif, ...prev]);
+          updateNotificationsState(prev => [notif, ...prev]);
         }
       });
     }
@@ -1059,7 +1105,7 @@ export default function App() {
         type: 'comment',
         senderName: currentStaff.name
       };
-      setNotifications(prev => [notif, ...prev]);
+      updateNotificationsState(prev => [notif, ...prev]);
     }
   };
 
@@ -1357,7 +1403,7 @@ export default function App() {
         type: 'delegation'
       };
 
-      setNotifications(prev => [newNotification, ...prev]);
+      updateNotificationsState(prev => [newNotification, ...prev]);
     }
 
     setJobToDelegate(null);
@@ -1422,7 +1468,7 @@ export default function App() {
         type: 'status_change'
       };
 
-      setNotifications(prev => [completionNotif, ...prev]);
+      updateNotificationsState(prev => [completionNotif, ...prev]);
     }
   };
 
@@ -1553,7 +1599,7 @@ export default function App() {
     }
 
     if (newNotifs.length > 0) {
-      setNotifications(prev => [...newNotifs, ...prev]);
+      updateNotificationsState(prev => [...newNotifs, ...prev]);
     }
 
     setTaskToComplete(null);
@@ -1619,7 +1665,7 @@ export default function App() {
     // Remove the delegation notification from the specific drafter, and send sign-off approval notification
     if (assignedDrafter) {
       const drafterStaff = STAFF_USERS.find(s => s.name.toLowerCase().includes(assignedDrafter.toLowerCase()));
-      setNotifications(prev => {
+      updateNotificationsState(prev => {
         const filtered = prev.filter(n => {
           const isDrafterDelegationNotif = n.jobId === targetJob.id && 
             n.recipientName.toLowerCase() === assignedDrafter.toLowerCase() &&
@@ -1711,7 +1757,7 @@ export default function App() {
     // Notify drafter with clear Revision Request notification
     if (assignedDrafter) {
       const drafterStaff = STAFF_USERS.find(s => s.name.toLowerCase().includes(assignedDrafter.toLowerCase()));
-      setNotifications(prev => [
+      updateNotificationsState(prev => [
         {
           id: `notif-rev-${Date.now()}`,
           recipientName: assignedDrafter,
@@ -1867,6 +1913,10 @@ export default function App() {
         jobs={jobs}
         notifications={notifications}
         onMarkNotificationRead={handleMarkNotificationRead}
+        onToggleNotificationRead={handleToggleNotificationRead}
+        onDeleteNotification={handleDeleteNotification}
+        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onClearAllNotifications={handleClearAllNotifications}
         onSelectJob={handleOpenJobDetail}
         onOpenNewJobModal={() => {
           if (!canUserCreateJob(currentStaff)) {

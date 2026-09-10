@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
+import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob } from '../data/mockData';
 import { formatTimeOnly } from '../utils/timeCardExport';
@@ -16,6 +16,10 @@ interface HeaderNavProps {
   jobs: Job[];
   notifications: AppNotification[];
   onMarkNotificationRead: (id: string) => void;
+  onToggleNotificationRead?: (id: string) => void;
+  onDeleteNotification?: (id: string) => void;
+  onMarkAllNotificationsRead?: (recipientName?: string) => void;
+  onClearAllNotifications?: (recipientName?: string) => void;
   onSelectJob: (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => void;
   onOpenNewJobModal: () => void;
   onOpenStaffManagement?: () => void;
@@ -40,6 +44,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   jobs,
   notifications,
   onMarkNotificationRead,
+  onToggleNotificationRead,
+  onDeleteNotification,
+  onMarkAllNotificationsRead,
+  onClearAllNotifications,
   onSelectJob,
   onOpenNewJobModal,
   onOpenStaffManagement,
@@ -103,8 +111,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
         ? 'deliverables'
         : 'overview';
       onSelectJob(targetJob, { initialTab: targetTab, highlightCommentId: notif.commentId });
+      setShowNotifDropdown(false);
     }
-    setShowNotifDropdown(false);
   };
 
   return (
@@ -379,59 +387,104 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
                 {/* Notifications Dropdown Panel */}
                 {showNotifDropdown && (
-                  <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="p-3 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-white block">
+                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                    <div className="p-3 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-bold text-white truncate block">
                           Notifications for {currentStaff.name.split(' ')[0]}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">{unreadCount} unread alerts</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {unreadCount > 0 ? `${unreadCount} unread alert${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
+                        </span>
                       </div>
-                      <button
-                        onClick={() => setShowNotifDropdown(false)}
-                        className="text-slate-400 hover:text-white p-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {unreadCount > 0 && onMarkAllNotificationsRead && (
+                          <button
+                            type="button"
+                            onClick={() => onMarkAllNotificationsRead(currentStaff.name)}
+                            className="text-[10px] font-semibold text-blue-400 hover:text-blue-200 bg-blue-950/70 hover:bg-blue-900/80 px-2 py-1 rounded transition border border-blue-800/50 flex items-center gap-1 cursor-pointer"
+                            title="Mark all alerts as read"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            <span className="hidden sm:inline">Mark all read</span>
+                          </button>
+                        )}
+                        {userNotifications.length > 0 && onClearAllNotifications && (
+                          <button
+                            type="button"
+                            onClick={() => onClearAllNotifications(currentStaff.name)}
+                            className="text-[10px] font-semibold text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 px-2 py-1 rounded transition border border-slate-800 hover:border-rose-900/50 flex items-center gap-1 cursor-pointer"
+                            title="Clear all alerts for this user"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span className="hidden sm:inline">Clear</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowNotifDropdown(false)}
+                          className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer ml-0.5"
+                          title="Close"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-800">
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/80">
                       {userNotifications.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-slate-400 italic">
-                          No active notifications for {currentStaff.name}.
+                        <div className="p-5 text-center text-xs text-slate-400 italic flex flex-col items-center gap-2">
+                          <Check className="w-5 h-5 text-emerald-400/60" />
+                          <span>No active notifications for {currentStaff.name}. You're all caught up!</span>
                         </div>
                       ) : (
                         userNotifications.map((notif) => (
                           <div
                             key={notif.id}
                             onClick={() => handleNotificationClick(notif)}
-                            className={`p-3 text-xs transition cursor-pointer hover:bg-slate-800 space-y-1.5 ${
-                              notif.read ? 'opacity-75 bg-slate-900' : 'bg-slate-850 border-l-3 border-blue-500'
+                            className={`p-3 text-xs transition cursor-pointer hover:bg-slate-850 space-y-1.5 group relative ${
+                              notif.read ? 'opacity-80 bg-slate-900/90' : 'bg-slate-850/90 border-l-3 border-blue-500'
                             }`}
                           >
                             <div className="flex items-start justify-between gap-1.5">
-                              <div className="flex items-center gap-1.5 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                 {notif.type === 'tag_mention' ? (
-                                  <span className="bg-blue-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                  <span className="bg-blue-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shrink-0">
                                     <AtSign className="w-2.5 h-2.5" /> MENTION
                                   </span>
                                 ) : notif.type === 'tag_reply' ? (
-                                  <span className="bg-indigo-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                  <span className="bg-indigo-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shrink-0">
                                     ↩️ FOLLOW-UP
                                   </span>
                                 ) : notif.type === 'delegated_task' ? (
-                                  <span className="bg-amber-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                                  <span className="bg-amber-600/90 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0">
                                     ⚡ TASK
                                   </span>
                                 ) : null}
 
-                                <span className="font-bold text-white text-[11px] leading-tight">
+                                <span className="font-bold text-white text-[11px] leading-tight break-words">
                                   {notif.title}
                                 </span>
                               </div>
-                              {!notif.read && (
-                                <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-0.5 animate-pulse" />
-                              )}
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {!notif.read && (
+                                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" title="Unread" />
+                                )}
+                                {onDeleteNotification && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteNotification(notif.id);
+                                    }}
+                                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded transition cursor-pointer"
+                                    title="Delete notification"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             <p className="text-[11px] text-slate-300 leading-snug">
@@ -446,9 +499,31 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                               </div>
                             )}
 
-                            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/40">
                               <span>From: <strong className="text-slate-300">{notif.senderName || 'System'}</strong></span>
-                              <span>{formatTimeOnly(notif.timestamp, true)}</span>
+                              <div className="flex items-center gap-2">
+                                <span>{formatTimeOnly(notif.timestamp, true)}</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onToggleNotificationRead) {
+                                      onToggleNotificationRead(notif.id);
+                                    } else {
+                                      onMarkNotificationRead(notif.id);
+                                    }
+                                  }}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                                    notif.read
+                                      ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-700/60'
+                                      : 'text-sky-400 hover:text-sky-200 bg-sky-950/70 hover:bg-sky-900/80 border border-sky-800/60'
+                                  }`}
+                                  title={notif.read ? 'Mark as unread' : 'Mark as read'}
+                                >
+                                  <Check className="w-2.5 h-2.5" />
+                                  <span>{notif.read ? 'Unread' : 'Mark read'}</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))

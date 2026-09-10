@@ -1052,29 +1052,53 @@ export function saveStoredJobs(jobs: Job[]) {
   }
 }
 
+export const DISMISSED_NOTIFS_STORAGE_KEY = 'my_plan_store_os_dismissed_notifs_v1';
+
+export function getDismissedNotificationIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DISMISSED_NOTIFS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function addDismissedNotificationId(id: string) {
+  try {
+    const ids = getDismissedNotificationIds();
+    if (!ids.includes(id)) {
+      ids.push(id);
+      localStorage.setItem(DISMISSED_NOTIFS_STORAGE_KEY, JSON.stringify(ids));
+    }
+  } catch (e) {}
+}
+
 export function getStoredNotifications(): AppNotification[] {
   try {
+    const dismissedIds = getDismissedNotificationIds();
     let raw = localStorage.getItem(NOTIFS_STORAGE_KEY);
     if (!raw) {
       raw = localStorage.getItem('my_plan_store_os_notifs_v14');
     }
     if (!raw) {
-      localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(INITIAL_NOTIFICATIONS));
-      return INITIAL_NOTIFICATIONS;
+      const initial = INITIAL_NOTIFICATIONS.filter(n => !dismissedIds.includes(n.id));
+      localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(initial));
+      return initial;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       const cleaned = parsed.filter(n => {
+        if (dismissedIds.includes(n.id)) return false;
         const text = (n.message || '').toLowerCase();
         return !text.includes('m26-195') && !text.includes('testing dummy');
       });
       localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;
     }
-    return INITIAL_NOTIFICATIONS;
+    return INITIAL_NOTIFICATIONS.filter(n => !dismissedIds.includes(n.id));
   } catch (err) {
     console.error('Failed to load notifications:', err);
-    return INITIAL_NOTIFICATIONS;
+    return INITIAL_NOTIFICATIONS.filter(n => !getDismissedNotificationIds().includes(n.id));
   }
 }
 
