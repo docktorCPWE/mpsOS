@@ -31,50 +31,6 @@ import {
 import { formatSecondsToHHMMSS } from '../utils/timeUtils';
 import { formatMinutesToReadable, getLocalDateString } from '../utils/timeCardExport';
 
-interface GregDevProjectCardsSectionProps {
-  currentStaff: StaffUser;
-  isClockedIn: boolean;
-  isOnBreak: boolean;
-  devCards: GregDevProjectCard[];
-  devEntries: GregDevTimeEntry[];
-  onUpdateDevCards: (cards: GregDevProjectCard[]) => void;
-  onUpdateDevEntries: (entries: GregDevTimeEntry[]) => void;
-  onOpenReviewModal: () => void;
-  activeShiftId?: string;
-}
-
-export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProps> = ({
-  currentStaff,
-  isClockedIn,
-  isOnBreak,
-  devCards,
-  devEntries,
-  onUpdateDevCards,
-  onUpdateDevEntries,
-  onOpenReviewModal,
-  activeShiftId
-}) => {
-  const [nowMs, setNowMs] = useState<number>(Date.now());
-  const [showAddMenu, setShowAddMenu] = useState(false);
-  const [customTypeName, setCustomTypeName] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Live second ticker for running project timers
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 4000);
-  };
-
 // Helper for project icon
 const getProjectIcon = (type: string) => {
   switch (type) {
@@ -150,14 +106,13 @@ interface DevProjectCardItemProps {
   isClockedIn: boolean;
   isOnBreak: boolean;
   onUpdateNotes: (cardId: string, notes: string) => void;
-  onStartTimer: (cardId: string) => void;
+  onStartTimer: (cardId: string, notesOverride?: string) => void;
   onStopTimer: (cardId: string, notesOverride?: string) => void;
   onDismissCard: (cardId: string) => void;
   styles: ReturnType<typeof getThemeStyles>;
 }
 
-// Individual card component with dedicated local state for the notes field to prevent
-// 1-second timer intervals or cloud sync from resetting or interrupting typing
+// Top-level card component: never recreated or remounted by parent 1-second tickers
 const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   card,
   currentStaff,
@@ -172,15 +127,15 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
 }) => {
   // Local state for smooth, uninhibited typing
   const [localNotes, setLocalNotes] = useState(card.currentNotes || '');
-  const [isFocused, setIsFocused] = useState(false);
+  const isFocusedRef = React.useRef(false);
   const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Sync from props only when the input is NOT actively focused by the user
   useEffect(() => {
-    if (!isFocused) {
+    if (!isFocusedRef.current) {
       setLocalNotes(card.currentNotes || '');
     }
-  }, [card.currentNotes, card.id, isFocused]);
+  }, [card.currentNotes]);
 
   useEffect(() => {
     return () => {
@@ -194,7 +149,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
     const val = e.target.value;
     setLocalNotes(val);
 
-    // Debounce pushing updates to the parent so keystrokes remain 100% responsive
+    // Debounce pushing updates to the parent so typing is silky smooth
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -204,7 +159,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   };
 
   const handleNotesBlur = () => {
-    setIsFocused(false);
+    isFocusedRef.current = false;
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -212,7 +167,14 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   };
 
   const handleNotesFocus = () => {
-    setIsFocused(true);
+    isFocusedRef.current = true;
+  };
+
+  const handleStart = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    onStartTimer(card.id, localNotes);
   };
 
   const handleStop = () => {
@@ -345,7 +307,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
           </div>
         ) : (
           <button
-            onClick={() => onStartTimer(card.id)}
+            onClick={handleStart}
             disabled={!isClockedIn}
             className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer ${
               isClockedIn 
@@ -363,6 +325,50 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
     </div>
   );
 };
+
+interface GregDevProjectCardsSectionProps {
+  currentStaff: StaffUser;
+  isClockedIn: boolean;
+  isOnBreak: boolean;
+  devCards: GregDevProjectCard[];
+  devEntries: GregDevTimeEntry[];
+  onUpdateDevCards: (cards: GregDevProjectCard[]) => void;
+  onUpdateDevEntries: (entries: GregDevTimeEntry[]) => void;
+  onOpenReviewModal: () => void;
+  activeShiftId?: string;
+}
+
+export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProps> = ({
+  currentStaff,
+  isClockedIn,
+  isOnBreak,
+  devCards,
+  devEntries,
+  onUpdateDevCards,
+  onUpdateDevEntries,
+  onOpenReviewModal,
+  activeShiftId
+}) => {
+  const [nowMs, setNowMs] = useState<number>(Date.now());
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [customTypeName, setCustomTypeName] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Live second ticker for running project timers
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
 
   // Add new card for project type
   const handleActivateProjectType = (type: string, colorTheme: any = 'indigo') => {
@@ -395,7 +401,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   };
 
   // Start timer on a specific card
-  const handleStartTimer = (cardId: string) => {
+  const handleStartTimer = (cardId: string, notesOverride?: string) => {
     if (!isClockedIn) {
       alert('Please clock in on your primary shift time card first before starting a dev project timer.');
       return;
@@ -412,7 +418,8 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
           isActive: true,
           isPausedByBreak: false,
           activeTimerStart: new Date().toISOString(),
-          lastStartedAt: new Date().toISOString()
+          lastStartedAt: new Date().toISOString(),
+          currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
         };
       }
       return c;

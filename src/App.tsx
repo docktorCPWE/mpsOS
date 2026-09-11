@@ -221,8 +221,8 @@ export default function App() {
             if (local) {
               return {
                 ...c,
-                // Preserve local notes if user is editing or running
-                currentNotes: (local.isActive && local.currentNotes) ? local.currentNotes : (c.currentNotes || local.currentNotes),
+                // Preserve local notes and local running timer state
+                currentNotes: local.currentNotes !== undefined ? local.currentNotes : (c.currentNotes || ''),
                 isActive: local.isActive ?? c.isActive,
                 activeTimerStart: local.activeTimerStart ?? c.activeTimerStart
               };
