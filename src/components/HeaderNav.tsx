@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut, ChevronDown } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob } from '../data/mockData';
 import { formatTimeOnly } from '../utils/timeCardExport';
@@ -67,6 +67,24 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const [notifFilterTab, setNotifFilterTab] = useState<'unread' | 'all'>('unread');
   const [restrictedModalOpen, setRestrictedModalOpen] = useState(false);
 
+  const staffDropdownRef = useRef<HTMLDivElement>(null);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (staffDropdownRef.current && !staffDropdownRef.current.contains(target)) {
+        setShowStaffDropdown(false);
+      }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(target)) {
+        setShowNotifDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const activeRoadblocksCount = jobs.filter(j => j.roadblock).length;
   const pendingInvoicingCount = jobs.filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing').length;
 
@@ -125,9 +143,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   return (
     <>
-      <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-30 shadow-md">
-        <div className="w-full px-3 sm:px-5 lg:px-6">
-          <div className="flex items-center justify-between py-2 sm:py-2.5 gap-2 sm:gap-4">
+      <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-40 shadow-md">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3">
             
             {/* Logo & OS Branding - Compact & Sleek */}
             <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
@@ -210,7 +228,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             )}
 
             {/* Right Controls: Streamlined Horizontal Layout */}
-            <div className="flex items-center gap-1.5 sm:gap-2 justify-end shrink-0 flex-nowrap overflow-x-auto scrollbar-none py-0.5">
+            <div className="flex items-center gap-2 sm:gap-2.5 justify-end shrink-0 flex-wrap py-0.5">
 
               {/* Role Switcher Navigation Pills */}
               <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
@@ -363,7 +381,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               )}
 
               {/* Notification Bell Dropdown */}
-              <div className="relative shrink-0">
+              <div ref={notifDropdownRef} className="relative shrink-0">
                 <button
                   onClick={() => {
                     setShowNotifDropdown(!showNotifDropdown);
@@ -597,30 +615,41 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <div className="h-4 w-px bg-slate-800 shrink-0 hidden sm:block mx-0.5" />
 
               {/* Active Staff User Switcher */}
-              <div className="relative shrink-0">
+              <div ref={staffDropdownRef} className="relative shrink-0">
                 <button
+                  id="staff-identity-switcher-btn"
+                  type="button"
                   onClick={() => {
-                    setShowStaffDropdown(!showStaffDropdown);
+                    setShowStaffDropdown(prev => !prev);
                     setShowNotifDropdown(false);
                   }}
-                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 px-2 sm:px-2.5 py-1 rounded-lg text-xs transition cursor-pointer shadow-xs relative"
-                  title="Switch Staff Identity (Test Financial & Delegation Access)"
+                  className={`flex items-center gap-2 border px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition cursor-pointer shadow-xs text-left select-none ${
+                    showStaffDropdown
+                      ? 'bg-slate-800 border-blue-500/80 ring-2 ring-blue-500/20'
+                      : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700 hover:border-slate-600'
+                  }`}
+                  title="Switch Staff Identity (Test Financial, Delegations & View Team Errors)"
                 >
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] relative shrink-0 ${
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 relative ${
                     currentStaff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
                   }`}>
                     {currentStaff.name.split(' ').map(n => n[0]).join('')}
                     {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
                     )}
                   </div>
                   
                   <div className="text-left hidden sm:block">
-                    <div className="font-bold text-white leading-tight flex items-center gap-1 text-xs">
+                    <div className="font-bold text-white leading-tight flex items-center gap-1.5 text-xs">
                       <span>{currentStaff.name}</span>
                       {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
                         <span className="text-[8px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded-full font-mono">
                           {waitingForKyleCount}
+                        </span>
+                      )}
+                      {currentStaff.name.toLowerCase().includes('greg hyatt') && (
+                        <span className="text-[8px] bg-amber-500/25 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          OWNER
                         </span>
                       )}
                       {currentStaff.canAccessFinancials && (
@@ -634,23 +663,28 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         </span>
                       )}
                     </div>
+                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[140px]">
+                      {currentStaff.title}
+                    </div>
                   </div>
+
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showStaffDropdown ? 'rotate-180 text-blue-400' : ''}`} />
                 </button>
 
                 {/* Staff Dropdown Menu */}
                 {showStaffDropdown && (
-                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/60">
+                  <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
                         Switch Active Staff Identity
                       </span>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Test role-based permissions & delegation workflows:
+                        Select a team member to test permissions, view their projects, and diagnose errors:
                       </p>
                     </div>
 
                     <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
-                      {(staffList.length > 0 ? staffList : [currentStaff]).map((staff) => {
+                      {((staffList && staffList.length > 0) ? staffList : STAFF_USERS).map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
                         return (
                           <button
@@ -660,37 +694,44 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                               isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
                             }`}
                           >
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-xs flex items-center gap-1.5 text-white">
-                                <span>{staff.name}</span>
-                                {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                                {staff.name.toLowerCase().includes('greg hyatt') && (
-                                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono">
-                                    OWNER
-                                  </span>
-                                )}
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
+                                staff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
+                              }`}>
+                                {staff.name.split(' ').map(n => n[0]).join('')}
                               </div>
-                              <div className="text-[10px] text-slate-400">{staff.title}</div>
-                              <div className="flex flex-wrap items-center gap-1 pt-1">
-                                {staff.canAccessFinancials ? (
-                                  <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                    💰 Financial
-                                  </span>
-                                ) : (
-                                  <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
-                                    🔒 No Financials
-                                  </span>
-                                )}
-                                {staff.canDelegate && (
-                                  <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
-                                    ⚡ Delegator
-                                  </span>
-                                )}
-                                {staff.canManageStaff && (
-                                  <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
-                                    🛡️ Admin
-                                  </span>
-                                )}
+                              <div className="space-y-0.5 min-w-0 flex-1">
+                                <div className="font-bold text-xs flex items-center gap-1.5 text-white">
+                                  <span className="truncate">{staff.name}</span>
+                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                  {staff.name.toLowerCase().includes('greg hyatt') && (
+                                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono shrink-0">
+                                      OWNER
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">{staff.title}</div>
+                                <div className="flex flex-wrap items-center gap-1 pt-1">
+                                  {staff.canAccessFinancials ? (
+                                    <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
+                                      💰 Financial
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
+                                      🔒 No Financials
+                                    </span>
+                                  )}
+                                  {staff.canDelegate && (
+                                    <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
+                                      ⚡ Delegator
+                                    </span>
+                                  )}
+                                  {staff.canManageStaff && (
+                                    <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
+                                      🛡️ Admin
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </button>
