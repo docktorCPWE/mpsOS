@@ -198,6 +198,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     department: StaffDepartment;
     hourlyRate: number;
     status: 'active' | 'inactive';
+    preferredLayout: 'grid' | 'board' | 'table';
     canAccessFinancials: boolean;
     canDelegate: boolean;
     canViewAllProjects: boolean;
@@ -216,6 +217,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     department: 'Drafting',
     hourlyRate: 75,
     status: 'active',
+    preferredLayout: 'grid',
     canAccessFinancials: false,
     canDelegate: false,
     canViewAllProjects: false,
@@ -246,6 +248,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       department: 'Drafting',
       hourlyRate: 75,
       status: 'active',
+      preferredLayout: 'grid',
       canAccessFinancials: false,
       canDelegate: false,
       canViewAllProjects: false,
@@ -272,6 +275,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       department: staff.department || 'Drafting',
       hourlyRate: staff.hourlyRate || 75,
       status: staff.status || 'active',
+      preferredLayout: staff.preferredLayout || 'grid',
       canAccessFinancials: staff.canAccessFinancials,
       canDelegate: staff.canDelegate,
       canViewAllProjects: Boolean(staff.canViewAllProjects),
@@ -320,7 +324,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       canManageInvoices: formData.canManageInvoices,
       canEditJobPhases: formData.canEditJobPhases,
       canManageRoadblocks: formData.canManageRoadblocks,
-      canAccessPayroll: formData.canAccessPayroll
+      canAccessPayroll: formData.canAccessPayroll,
+      preferredLayout: formData.preferredLayout || 'grid'
     };
 
     if (isCreatingNew) {
@@ -1156,6 +1161,19 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   >
                     <option value="active">Active (Full Studio Access)</option>
                     <option value="inactive">Inactive (Suspended)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Default Dashboard View</label>
+                  <select
+                    value={formData.preferredLayout || 'grid'}
+                    onChange={(e) => setFormData({ ...formData, preferredLayout: e.target.value as any })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="grid">Grid Cards View (Recommended)</option>
+                    <option value="board">Kanban Phase Columns</option>
+                    <option value="table">Tabular Project Records</option>
                   </select>
                 </div>
               </div>

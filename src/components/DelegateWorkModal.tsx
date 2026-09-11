@@ -174,7 +174,7 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
       delegatedBy: currentStaff.name,
       delegatedAt: new Date().toISOString(),
       dueDate,
-      neededWorkDescription: neededWorkDescription.trim(),
+      neededWorkDescription: neededWorkDescription.trim() || undefined,
       notes: notes.trim() || undefined,
       status: 'Pending',
       attachments: attachments.length > 0 ? attachments : undefined
@@ -350,14 +350,13 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
           {/* Description of Needed Work */}
           <div>
             <label className="block font-bold text-slate-900 mb-1">
-              Needed Work Description & Instructions <span className="text-red-500">*</span>
+              Needed Work Description & Instructions <span className="text-slate-400 font-normal text-xs">(Optional)</span>
             </label>
             <textarea
               value={neededWorkDescription}
               onChange={(e) => setNeededWorkDescription(e.target.value)}
-              placeholder="Clearly describe the technical drafting requirements, dimensions, municipal codes, or CAD drawing components needed..."
+              placeholder="Clearly describe the technical drafting requirements, dimensions, municipal codes, or CAD drawing components needed (optional)..."
               className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white focus:outline-none h-24 resize-none leading-relaxed"
-              required
             />
           </div>
 

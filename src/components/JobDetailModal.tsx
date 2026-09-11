@@ -1957,9 +1957,11 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                 </span>
                               </div>
 
-                              <p className="text-xs text-slate-700 mt-1.5 bg-white p-2 rounded border border-slate-200/80">
-                                {task.neededWorkDescription}
-                              </p>
+                              {task.neededWorkDescription && (
+                                <p className="text-xs text-slate-700 mt-1.5 bg-white p-2 rounded border border-slate-200/80">
+                                  {task.neededWorkDescription}
+                                </p>
+                              )}
 
                               {task.notes && (
                                 <p className="text-[11px] text-slate-500 italic mt-1">

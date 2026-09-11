@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -143,7 +143,8 @@ export default function App() {
       storedStaff.find(s => s.id === 'staff-greg') ||
       storedStaff[0];
     if (matchingStaff) {
-      setCurrentStaff(matchingStaff);
+      const layoutPref = matchingStaff.preferredLayout || getStoredPreferredLayout(matchingStaff.id || matchingStaff.email);
+      setCurrentStaff({ ...matchingStaff, preferredLayout: layoutPref });
     }
     setTimeCards(getStoredTimeCards());
 
@@ -267,7 +268,9 @@ export default function App() {
       if (user && user.emailVerified) {
         try {
           const matched = await syncAuthToStaffUser(user, staffList);
-          setCurrentStaff(matched);
+          const layoutPref = matched.preferredLayout || getStoredPreferredLayout(matched.id || matched.email);
+          setCurrentStaff({ ...matched, preferredLayout: layoutPref });
+          saveStoredActiveStaffId(matched.id);
         } catch (err) {
           console.warn('[Auth] Staff profile sync notice:', err);
         }
@@ -1085,8 +1088,42 @@ export default function App() {
   };
 
   const handleSelectStaff = (staff: StaffUser) => {
-    setCurrentStaff(staff);
+    const layoutPref = staff.preferredLayout || getStoredPreferredLayout(staff.id || staff.email);
+    const staffWithPref = { ...staff, preferredLayout: layoutPref };
+    setCurrentStaff(staffWithPref);
     saveStoredActiveStaffId(staff.id);
+  };
+
+  const handleUpdatePreferredLayout = (staffId: string, layout: 'board' | 'grid' | 'table') => {
+    saveStoredPreferredLayout(staffId, layout, currentStaff.email);
+
+    setCurrentStaff(prev => {
+      const isMatch = prev.id === staffId ||
+        (prev.email && prev.email.toLowerCase() === staffId.toLowerCase()) ||
+        prev.name.toLowerCase() === staffId.toLowerCase();
+      if (isMatch) {
+        const updated = { ...prev, preferredLayout: layout };
+        saveStaffToFirestore(updated).catch(err => console.warn('[Firestore] Error saving layout pref:', err));
+        return updated;
+      }
+      return prev;
+    });
+
+    setStaffList(prevList => {
+      const updatedList = prevList.map(s => {
+        const isMatch = s.id === staffId ||
+          (s.email && s.email.toLowerCase() === staffId.toLowerCase()) ||
+          s.name.toLowerCase() === staffId.toLowerCase();
+        if (isMatch) {
+          const updated = { ...s, preferredLayout: layout };
+          saveStaffToFirestore(updated).catch(err => console.warn('[Firestore] Error saving layout pref:', err));
+          return updated;
+        }
+        return s;
+      });
+      saveStoredStaff(updatedList);
+      return updatedList;
+    });
   };
 
   const handleDeleteStaff = (staffId: string) => {
@@ -2087,6 +2124,7 @@ export default function App() {
             onApproveTaskReview={handleApproveTaskReview}
             onRequestTaskRevision={handleRequestTaskRevision}
             onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
+            onSaveDefaultLayout={handleUpdatePreferredLayout}
             onUpdateCustomerContact={handleUpdateCustomerContact}
             nowTimestamp={nowTimestamp}
             devCards={devCards}

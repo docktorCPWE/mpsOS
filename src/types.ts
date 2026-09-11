@@ -105,7 +105,7 @@ export interface DelegatedWorkItem {
   delegatedBy: string; // e.g. "Kyle", "Jason", "Greg Hyatt"
   delegatedAt: string; // ISO string
   dueDate?: string;
-  neededWorkDescription: string;
+  neededWorkDescription?: string;
   notes?: string;
   status: 'Pending' | 'In Progress' | 'Under Review' | 'Completed' | 'Revision Requested';
   completedAt?: string;
@@ -234,6 +234,7 @@ export interface StaffUser {
   canEditJobPhases?: boolean;    // Advance or rewind job workflow phases
   canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
   canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
+  preferredLayout?: 'grid' | 'board' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Table)
 }
 
 export interface PayrollEntry {

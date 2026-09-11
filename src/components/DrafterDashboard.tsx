@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3 } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
@@ -23,6 +23,7 @@ interface DrafterDashboardProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   onOpenKyleInbox?: () => void;
+  onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'table') => void;
   onUpdateCustomerContact?: (customerName: string, updatedContact: {
     customer_name?: string;
     customer_email?: string;
@@ -64,6 +65,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onApproveTaskReview,
   onRequestTaskRevision,
   onOpenKyleInbox,
+  onSaveDefaultLayout,
   onUpdateCustomerContact,
   nowTimestamp = Date.now(),
   devCards,
@@ -71,7 +73,38 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onOpenDevReviewModal,
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
-  const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>('grid');
+
+  // Preferred default layout management
+  const getStaffDefaultLayout = (): 'board' | 'grid' | 'table' => {
+    if (currentStaff?.preferredLayout) {
+      return currentStaff.preferredLayout;
+    }
+    return getStoredPreferredLayout(currentStaff?.id || currentStaff?.email);
+  };
+
+  const [defaultLayout, setDefaultLayout] = useState<'board' | 'grid' | 'table'>(() => getStaffDefaultLayout());
+  const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>(() => getStaffDefaultLayout());
+  const [justSavedDefault, setJustSavedDefault] = useState(false);
+
+  // When active staff member changes or their preferredLayout is updated, reflect their preference
+  useEffect(() => {
+    const pref = getStaffDefaultLayout();
+    setDefaultLayout(pref);
+    setViewMode(pref);
+  }, [currentStaff?.id, currentStaff?.email, currentStaff?.preferredLayout]);
+
+  const handleSetAsDefault = () => {
+    setDefaultLayout(viewMode);
+    saveStoredPreferredLayout(currentStaff.id, viewMode, currentStaff.email);
+    if (onSaveDefaultLayout) {
+      onSaveDefaultLayout(currentStaff.id, viewMode);
+    }
+    setJustSavedDefault(true);
+    setTimeout(() => {
+      setJustSavedDefault(false);
+    }, 2800);
+  };
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedJobForContactEdit, setSelectedJobForContactEdit] = useState<Job | null>(null);
   
@@ -353,37 +386,80 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <span>New Job Intake</span>
           </button>
 
-          {/* View Switchers (Board / Grid / Table) */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                viewMode === 'grid' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Grid className="w-3.5 h-3.5" />
-              <span>Grid Cards</span>
-            </button>
+          {/* View Switchers (Board / Grid / Table) + Make Default Button */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button
+                id="view-mode-grid-btn"
+                onClick={() => setViewMode('grid')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  viewMode === 'grid' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Grid className="w-3.5 h-3.5" />
+                <span>Grid Cards</span>
+              </button>
 
-            <button
-              onClick={() => setViewMode('board')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                viewMode === 'board' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Kanban className="w-3.5 h-3.5" />
-              <span>Kanban</span>
-            </button>
+              <button
+                id="view-mode-board-btn"
+                onClick={() => setViewMode('board')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  viewMode === 'board' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Kanban className="w-3.5 h-3.5" />
+                <span>Kanban</span>
+              </button>
 
-            <button
-              onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <List className="w-3.5 h-3.5" />
-              <span>Table</span>
-            </button>
+              <button
+                id="view-mode-table-btn"
+                onClick={() => setViewMode('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Table</span>
+              </button>
+            </div>
+
+            {/* BUTTON TO MAKE DEFAULT / DEFAULT STATUS BADGE */}
+            {justSavedDefault ? (
+              <div 
+                id="default-layout-saved-feedback"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
+                title={`Saved! ${viewMode === 'grid' ? 'Grid Cards' : viewMode === 'board' ? 'Kanban' : 'Table'} will now load automatically whenever you log in.`}
+              >
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                <span>Saved as Default!</span>
+              </div>
+            ) : viewMode === defaultLayout ? (
+              <div
+                id="default-layout-active-badge"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/90 select-none shadow-2xs"
+                title={`This is currently your default startup layout for ${currentStaff.name}. It loads automatically whenever you log in.`}
+              >
+                <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="hidden sm:inline text-emerald-700">Default View:</span>
+                <span className="font-bold">
+                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : 'Table'}
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                id="make-default-view-btn"
+                onClick={handleSetAsDefault}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-blue-300/90 bg-blue-50/90 hover:bg-blue-100 text-blue-700 active:scale-95 shadow-2xs group"
+                title={`Make ${viewMode === 'grid' ? 'Grid Cards' : viewMode === 'board' ? 'Kanban' : 'Table'} your permanent default view for ${currentStaff.name} when logged in`}
+              >
+                <Pin className="w-3.5 h-3.5 text-blue-600 group-hover:rotate-45 transition-transform shrink-0" />
+                <span>Make Default</span>
+                <span className="text-[10px] bg-blue-200/80 text-blue-800 font-bold px-1.5 py-0.5 rounded font-mono">
+                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : 'Table'}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -908,9 +984,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         </div>
 
                         {/* Description */}
-                        <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 leading-relaxed">
-                          {task.neededWorkDescription}
-                        </p>
+                        {task.neededWorkDescription && (
+                          <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 leading-relaxed">
+                            {task.neededWorkDescription}
+                          </p>
+                        )}
 
                         {/* Notes */}
                         {task.notes && (

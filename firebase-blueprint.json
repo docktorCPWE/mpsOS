@@ -65,7 +65,8 @@
         "hourly_rate": { "type": "number", "description": "Standard billing rate per hour" },
         "is_active": { "type": "boolean", "description": "Whether staff member is currently active" },
         "can_mark_completed": { "type": "boolean", "description": "Permission to approve projects as Completed" },
-        "can_access_financials": { "type": "boolean", "description": "Permission to view and generate billing rates and invoices" }
+        "can_access_financials": { "type": "boolean", "description": "Permission to view and generate billing rates and invoices" },
+        "preferred_layout": { "type": "string", "description": "User's default preferred layout: 'grid', 'board', or 'table'" }
       },
       "required": ["id", "name", "role"]
     },
