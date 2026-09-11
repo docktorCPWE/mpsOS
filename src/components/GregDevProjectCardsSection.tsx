@@ -75,73 +75,294 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     }, 4000);
   };
 
-  // Helper for project icon
-  const getProjectIcon = (type: string) => {
-    switch (type) {
-      case 'MPS OS Dev':
-        return <Code2 className="w-4 h-4 text-indigo-400" />;
-      case 'BigX Media Dev':
-        return <Video className="w-4 h-4 text-cyan-400" />;
-      case 'Sound Extraction Dev':
-        return <Volume2 className="w-4 h-4 text-purple-400" />;
-      case 'FB Media Dev':
-        return <Share2 className="w-4 h-4 text-blue-400" />;
-      case 'Other Dev':
-      default:
-        return <Cpu className="w-4 h-4 text-amber-400" />;
+// Helper for project icon
+const getProjectIcon = (type: string) => {
+  switch (type) {
+    case 'MPS OS Dev':
+      return <Code2 className="w-4 h-4 text-indigo-400" />;
+    case 'BigX Media Dev':
+      return <Video className="w-4 h-4 text-cyan-400" />;
+    case 'Sound Extraction Dev':
+      return <Volume2 className="w-4 h-4 text-purple-400" />;
+    case 'FB Media Dev':
+      return <Share2 className="w-4 h-4 text-blue-400" />;
+    case 'Other Dev':
+    default:
+      return <Cpu className="w-4 h-4 text-amber-400" />;
+  }
+};
+
+const getThemeStyles = (color: string) => {
+  switch (color) {
+    case 'cyan':
+      return {
+        bg: 'bg-cyan-950/40',
+        border: 'border-cyan-500/40 hover:border-cyan-400',
+        activeBorder: 'border-cyan-400 ring-2 ring-cyan-500/30',
+        badge: 'bg-cyan-900/60 text-cyan-300 border-cyan-700/50',
+        accent: 'text-cyan-400',
+        button: 'bg-cyan-600 hover:bg-cyan-500 text-white'
+      };
+    case 'purple':
+      return {
+        bg: 'bg-purple-950/40',
+        border: 'border-purple-500/40 hover:border-purple-400',
+        activeBorder: 'border-purple-400 ring-2 ring-purple-500/30',
+        badge: 'bg-purple-900/60 text-purple-300 border-purple-700/50',
+        accent: 'text-purple-400',
+        button: 'bg-purple-600 hover:bg-purple-500 text-white'
+      };
+    case 'blue':
+      return {
+        bg: 'bg-blue-950/40',
+        border: 'border-blue-500/40 hover:border-blue-400',
+        activeBorder: 'border-blue-400 ring-2 ring-blue-500/30',
+        badge: 'bg-blue-900/60 text-blue-300 border-blue-700/50',
+        accent: 'text-blue-400',
+        button: 'bg-blue-600 hover:bg-blue-500 text-white'
+      };
+    case 'amber':
+      return {
+        bg: 'bg-amber-950/40',
+        border: 'border-amber-500/40 hover:border-amber-400',
+        activeBorder: 'border-amber-400 ring-2 ring-amber-500/30',
+        badge: 'bg-amber-900/60 text-amber-300 border-amber-700/50',
+        accent: 'text-amber-400',
+        button: 'bg-amber-600 hover:bg-amber-500 text-white'
+      };
+    case 'indigo':
+    default:
+      return {
+        bg: 'bg-indigo-950/40',
+        border: 'border-indigo-500/40 hover:border-indigo-400',
+        activeBorder: 'border-indigo-400 ring-2 ring-indigo-500/30',
+        badge: 'bg-indigo-900/60 text-indigo-300 border-indigo-700/50',
+        accent: 'text-indigo-400',
+        button: 'bg-indigo-600 hover:bg-indigo-500 text-white'
+      };
+  }
+};
+
+interface DevProjectCardItemProps {
+  card: GregDevProjectCard;
+  currentStaff: StaffUser;
+  nowMs: number;
+  isClockedIn: boolean;
+  isOnBreak: boolean;
+  onUpdateNotes: (cardId: string, notes: string) => void;
+  onStartTimer: (cardId: string) => void;
+  onStopTimer: (cardId: string, notesOverride?: string) => void;
+  onDismissCard: (cardId: string) => void;
+  styles: ReturnType<typeof getThemeStyles>;
+}
+
+// Individual card component with dedicated local state for the notes field to prevent
+// 1-second timer intervals or cloud sync from resetting or interrupting typing
+const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
+  card,
+  currentStaff,
+  nowMs,
+  isClockedIn,
+  isOnBreak,
+  onUpdateNotes,
+  onStartTimer,
+  onStopTimer,
+  onDismissCard,
+  styles
+}) => {
+  // Local state for smooth, uninhibited typing
+  const [localNotes, setLocalNotes] = useState(card.currentNotes || '');
+  const [isFocused, setIsFocused] = useState(false);
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Sync from props only when the input is NOT actively focused by the user
+  useEffect(() => {
+    if (!isFocused) {
+      setLocalNotes(card.currentNotes || '');
     }
+  }, [card.currentNotes, card.id, isFocused]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleNotesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setLocalNotes(val);
+
+    // Debounce pushing updates to the parent so keystrokes remain 100% responsive
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      onUpdateNotes(card.id, val);
+    }, 400);
   };
 
-  const getThemeStyles = (color: string) => {
-    switch (color) {
-      case 'cyan':
-        return {
-          bg: 'bg-cyan-950/40',
-          border: 'border-cyan-500/40 hover:border-cyan-400',
-          activeBorder: 'border-cyan-400 ring-2 ring-cyan-500/30',
-          badge: 'bg-cyan-900/60 text-cyan-300 border-cyan-700/50',
-          accent: 'text-cyan-400',
-          button: 'bg-cyan-600 hover:bg-cyan-500 text-white'
-        };
-      case 'purple':
-        return {
-          bg: 'bg-purple-950/40',
-          border: 'border-purple-500/40 hover:border-purple-400',
-          activeBorder: 'border-purple-400 ring-2 ring-purple-500/30',
-          badge: 'bg-purple-900/60 text-purple-300 border-purple-700/50',
-          accent: 'text-purple-400',
-          button: 'bg-purple-600 hover:bg-purple-500 text-white'
-        };
-      case 'blue':
-        return {
-          bg: 'bg-blue-950/40',
-          border: 'border-blue-500/40 hover:border-blue-400',
-          activeBorder: 'border-blue-400 ring-2 ring-blue-500/30',
-          badge: 'bg-blue-900/60 text-blue-300 border-blue-700/50',
-          accent: 'text-blue-400',
-          button: 'bg-blue-600 hover:bg-blue-500 text-white'
-        };
-      case 'amber':
-        return {
-          bg: 'bg-amber-950/40',
-          border: 'border-amber-500/40 hover:border-amber-400',
-          activeBorder: 'border-amber-400 ring-2 ring-amber-500/30',
-          badge: 'bg-amber-900/60 text-amber-300 border-amber-700/50',
-          accent: 'text-amber-400',
-          button: 'bg-amber-600 hover:bg-amber-500 text-white'
-        };
-      case 'indigo':
-      default:
-        return {
-          bg: 'bg-indigo-950/40',
-          border: 'border-indigo-500/40 hover:border-indigo-400',
-          activeBorder: 'border-indigo-400 ring-2 ring-indigo-500/30',
-          badge: 'bg-indigo-900/60 text-indigo-300 border-indigo-700/50',
-          accent: 'text-indigo-400',
-          button: 'bg-indigo-600 hover:bg-indigo-500 text-white'
-        };
+  const handleNotesBlur = () => {
+    setIsFocused(false);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
+    onUpdateNotes(card.id, localNotes);
   };
+
+  const handleNotesFocus = () => {
+    setIsFocused(true);
+  };
+
+  const handleStop = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    onStopTimer(card.id, localNotes);
+  };
+
+  // Calculate live timer for active running session
+  let liveElapsedSec = 0;
+  if (card.isActive && card.activeTimerStart) {
+    liveElapsedSec = Math.max(0, Math.floor((nowMs - new Date(card.activeTimerStart).getTime()) / 1000));
+  }
+
+  // Total today including live running time
+  const todayTotalSec = (card.todaySeconds || 0) + liveElapsedSec;
+  const totalHoursDec = (todayTotalSec / 3600).toFixed(2);
+  const estimatedValue = (parseFloat(totalHoursDec) * (currentStaff.hourlyRate || 150)).toFixed(2);
+
+  return (
+    <div
+      className={`rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between ${
+        card.isActive
+          ? `${styles.bg} ${styles.activeBorder} shadow-lg shadow-black/40`
+          : card.isPausedByBreak
+          ? 'bg-amber-950/30 border-amber-500/40'
+          : 'bg-slate-800/60 border-slate-700/70 hover:border-slate-600'
+      }`}
+    >
+      <div>
+        {/* Card Header: Icon, Name & Remove Button */}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700">
+              {getProjectIcon(card.projectType)}
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white tracking-tight">
+                {card.projectType}
+              </h4>
+              <span className="text-[10px] text-slate-400">
+                Billing Rate: ${currentStaff.hourlyRate || 150}/hr
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* Status Pill */}
+            {card.isActive ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-300 flex items-center gap-1 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                RUNNING
+              </span>
+            ) : card.isPausedByBreak ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 border border-amber-500/60 text-amber-300 flex items-center gap-1">
+                <Coffee className="w-3 h-3 text-amber-400" />
+                PAUSED (BREAK)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 border border-slate-700 text-slate-400">
+                READY
+              </span>
+            )}
+
+            <button
+              onClick={() => onDismissCard(card.id)}
+              className="p-1 text-slate-500 hover:text-slate-300 rounded-md hover:bg-slate-700/50 transition-colors cursor-pointer"
+              title="Remove project card from active board"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Live Timer Display */}
+        <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 mb-3 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] uppercase font-semibold text-slate-400 block">
+              {card.isActive ? 'Active Timer' : card.isPausedByBreak ? 'Paused Timer' : 'Session Timer'}
+            </span>
+            <span className={`text-2xl font-mono font-bold tracking-tight ${
+              card.isActive ? 'text-emerald-400' : card.isPausedByBreak ? 'text-amber-400' : 'text-slate-300'
+            }`}>
+              {formatSecondsToHHMMSS(liveElapsedSec)}
+            </span>
+          </div>
+
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-semibold text-slate-400 block">
+              Today's Total
+            </span>
+            <span className="text-sm font-mono font-bold text-white">
+              {formatMinutesToReadable(todayTotalSec / 60)}
+            </span>
+            <span className="text-[10px] font-mono text-emerald-400 block font-semibold">
+              ${estimatedValue}
+            </span>
+          </div>
+        </div>
+
+        {/* Task / Work Description Notes Input */}
+        <div className="mb-3">
+          <input
+            type="text"
+            value={localNotes}
+            onChange={handleNotesChange}
+            onFocus={handleNotesFocus}
+            onBlur={handleNotesBlur}
+            placeholder={`Notes for ${card.projectType}...`}
+            className="w-full px-2.5 py-1.5 bg-slate-950/50 border border-slate-800 focus:border-indigo-500 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Independent Timer Action Controls */}
+      <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2">
+        {card.isActive ? (
+          <button
+            onClick={handleStop}
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+            title="Stop timer and log dev session"
+          >
+            <Square className="w-3.5 h-3.5 fill-white" />
+            <span>Stop & Log Dev Hours</span>
+          </button>
+        ) : card.isPausedByBreak ? (
+          <div className="w-full text-center py-1.5 px-2 bg-amber-950/40 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium">
+            Paused during shift break. Resumes automatically upon return!
+          </div>
+        ) : (
+          <button
+            onClick={() => onStartTimer(card.id)}
+            disabled={!isClockedIn}
+            className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer ${
+              isClockedIn 
+                ? `${styles.button} hover:scale-[1.01]` 
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+            }`}
+            title={isClockedIn ? `Start independent timer on ${card.projectType}` : 'Clock in on primary time card first'}
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{isClockedIn ? `Start ${card.projectType} Timer` : 'Clock In to Start'}</span>
+          </button>
+        )}
+      </div>
+
+    </div>
+  );
+};
 
   // Add new card for project type
   const handleActivateProjectType = (type: string, colorTheme: any = 'indigo') => {
@@ -204,7 +425,7 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
   };
 
   // Stop timer and log session
-  const handleStopTimer = (cardId: string) => {
+  const handleStopTimer = (cardId: string, notesOverride?: string) => {
     const card = devCards.find(c => c.id === cardId);
     if (!card || !card.isActive || !card.activeTimerStart) return;
 
@@ -216,6 +437,8 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     const billableAmount = Number((hours * rate).toFixed(2));
     const todayStr = getLocalDateString(new Date());
 
+    const noteToLog = (notesOverride !== undefined ? notesOverride : card.currentNotes)?.trim() || `Dev session on ${card.projectType}`;
+
     // Create entry
     const newEntry: GregDevTimeEntry = {
       id: `dev-entry-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -226,7 +449,7 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
       startTime: card.activeTimerStart,
       endTime: new Date(endMs).toISOString(),
       durationSeconds,
-      notes: card.currentNotes || `Dev session on ${card.projectType}`,
+      notes: noteToLog,
       hourlyRate: rate,
       billableAmount,
       shiftId: activeShiftId,
@@ -247,7 +470,8 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
           activeTimerStart: undefined,
           todaySeconds: (c.todaySeconds || 0) + durationSeconds,
           totalSeconds: (c.totalSeconds || 0) + durationSeconds,
-          lastStoppedAt: new Date(endMs).toISOString()
+          lastStoppedAt: new Date(endMs).toISOString(),
+          currentNotes: noteToLog
         };
       }
       return c;
@@ -466,149 +690,21 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {devCards.map((card) => {
-                const styles = getThemeStyles(card.colorTheme);
-                
-                // Calculate live timer for active running session
-                let liveElapsedSec = 0;
-                if (card.isActive && card.activeTimerStart) {
-                  liveElapsedSec = Math.max(0, Math.floor((nowMs - new Date(card.activeTimerStart).getTime()) / 1000));
-                }
-
-                // Total today including live running time
-                const todayTotalSec = (card.todaySeconds || 0) + liveElapsedSec;
-                const totalHoursDec = (todayTotalSec / 3600).toFixed(2);
-                const estimatedValue = (parseFloat(totalHoursDec) * (currentStaff.hourlyRate || 150)).toFixed(2);
-
-                return (
-                  <div
-                    key={card.id}
-                    className={`rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between ${
-                      card.isActive
-                        ? `${styles.bg} ${styles.activeBorder} shadow-lg shadow-black/40`
-                        : card.isPausedByBreak
-                        ? 'bg-amber-950/30 border-amber-500/40'
-                        : 'bg-slate-800/60 border-slate-700/70 hover:border-slate-600'
-                    }`}
-                  >
-                    <div>
-                      {/* Card Header: Icon, Name & Remove Button */}
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700">
-                            {getProjectIcon(card.projectType)}
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-white tracking-tight">
-                              {card.projectType}
-                            </h4>
-                            <span className="text-[10px] text-slate-400">
-                              Billing Rate: ${currentStaff.hourlyRate || 150}/hr
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          {/* Status Pill */}
-                          {card.isActive ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-300 flex items-center gap-1 animate-pulse">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                              RUNNING
-                            </span>
-                          ) : card.isPausedByBreak ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 border border-amber-500/60 text-amber-300 flex items-center gap-1">
-                              <Coffee className="w-3 h-3 text-amber-400" />
-                              PAUSED (BREAK)
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 border border-slate-700 text-slate-400">
-                              READY
-                            </span>
-                          )}
-
-                          <button
-                            onClick={() => handleDismissCard(card.id)}
-                            className="p-1 text-slate-500 hover:text-slate-300 rounded-md hover:bg-slate-700/50 transition-colors cursor-pointer"
-                            title="Remove project card from active board"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Live Timer Display Display */}
-                      <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 mb-3 flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] uppercase font-semibold text-slate-400 block">
-                            {card.isActive ? 'Active Timer' : card.isPausedByBreak ? 'Paused Timer' : 'Session Timer'}
-                          </span>
-                          <span className={`text-2xl font-mono font-bold tracking-tight ${
-                            card.isActive ? 'text-emerald-400' : card.isPausedByBreak ? 'text-amber-400' : 'text-slate-300'
-                          }`}>
-                            {formatSecondsToHHMMSS(liveElapsedSec)}
-                          </span>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="text-[10px] uppercase font-semibold text-slate-400 block">
-                            Today's Total
-                          </span>
-                          <span className="text-sm font-mono font-bold text-white">
-                            {formatMinutesToReadable(todayTotalSec / 60)}
-                          </span>
-                          <span className="text-[10px] font-mono text-emerald-400 block font-semibold">
-                            ${estimatedValue}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Task / Work Description Notes Input */}
-                      <div className="mb-3">
-                        <input
-                          type="text"
-                          value={card.currentNotes || ''}
-                          onChange={(e) => handleUpdateNotes(card.id, e.target.value)}
-                          placeholder={`Notes for ${card.projectType}...`}
-                          className="w-full px-2.5 py-1.5 bg-slate-950/50 border border-slate-800 focus:border-indigo-500 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Independent Timer Action Controls */}
-                    <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2">
-                      {card.isActive ? (
-                        <button
-                          onClick={() => handleStopTimer(card.id)}
-                          className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
-                          title="Stop timer and log dev session"
-                        >
-                          <Square className="w-3.5 h-3.5 fill-white" />
-                          <span>Stop & Log Dev Hours</span>
-                        </button>
-                      ) : card.isPausedByBreak ? (
-                        <div className="w-full text-center py-1.5 px-2 bg-amber-950/40 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium">
-                          Paused during shift break. Resumes automatically upon return!
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleStartTimer(card.id)}
-                          disabled={!isClockedIn}
-                          className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer ${
-                            isClockedIn 
-                              ? `${styles.button} hover:scale-[1.01]` 
-                              : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                          }`}
-                          title={isClockedIn ? `Start independent timer on ${card.projectType}` : 'Clock in on primary time card first'}
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>{isClockedIn ? `Start ${card.projectType} Timer` : 'Clock In to Start'}</span>
-                        </button>
-                      )}
-                    </div>
-
-                  </div>
-                );
-              })}
+              {devCards.map((card) => (
+                <DevProjectCardItem
+                  key={card.id}
+                  card={card}
+                  currentStaff={currentStaff}
+                  nowMs={nowMs}
+                  isClockedIn={isClockedIn}
+                  isOnBreak={isOnBreak}
+                  onUpdateNotes={handleUpdateNotes}
+                  onStartTimer={handleStartTimer}
+                  onStopTimer={handleStopTimer}
+                  onDismissCard={handleDismissCard}
+                  styles={getThemeStyles(card.colorTheme)}
+                />
+              ))}
             </div>
           )}
         </div>

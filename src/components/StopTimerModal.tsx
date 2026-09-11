@@ -39,6 +39,8 @@ export const StopTimerModal: React.FC<StopTimerModalProps> = ({
   const [error, setError] = useState('');
   const [currentTick, setCurrentTick] = useState(Date.now());
 
+  const initializedJobIdRef = React.useRef<string | null>(null);
+
   // Update live clock ticker while modal is open
   useEffect(() => {
     if (!isOpen) return;
@@ -50,11 +52,16 @@ export const StopTimerModal: React.FC<StopTimerModalProps> = ({
 
   useEffect(() => {
     if (isOpen && job) {
-      // If initialNote is provided and isn't a default generic start, suggest it; otherwise empty to require input
-      setCompletedNote(initialNote || '');
-      setError('');
+      if (initializedJobIdRef.current !== job.id) {
+        initializedJobIdRef.current = job.id;
+        // If initialNote is provided and isn't a default generic start, suggest it; otherwise empty to require input
+        setCompletedNote(initialNote || '');
+        setError('');
+      }
+    } else if (!isOpen) {
+      initializedJobIdRef.current = null;
     }
-  }, [isOpen, job, initialNote]);
+  }, [isOpen, job?.id, initialNote]);
 
   if (!isOpen || !job) return null;
 

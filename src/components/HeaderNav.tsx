@@ -20,6 +20,7 @@ interface HeaderNavProps {
   onDeleteNotification?: (id: string) => void;
   onMarkAllNotificationsRead?: (recipientName?: string) => void;
   onClearAllNotifications?: (recipientName?: string) => void;
+  onClearReadNotifications?: (recipientName?: string) => void;
   onSelectJob: (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => void;
   onOpenNewJobModal: () => void;
   onOpenStaffManagement?: () => void;
@@ -48,6 +49,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onDeleteNotification,
   onMarkAllNotificationsRead,
   onClearAllNotifications,
+  onClearReadNotifications,
   onSelectJob,
   onOpenNewJobModal,
   onOpenStaffManagement,
@@ -62,6 +64,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 }) => {
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const [notifFilterTab, setNotifFilterTab] = useState<'unread' | 'all'>('unread');
   const [restrictedModalOpen, setRestrictedModalOpen] = useState(false);
 
   const activeRoadblocksCount = jobs.filter(j => j.roadblock).length;
@@ -79,7 +82,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     n => n.recipientName.toLowerCase().includes(currentStaff.name.toLowerCase()) ||
          currentStaff.name.toLowerCase().includes(n.recipientName.toLowerCase())
   );
-  const unreadCount = userNotifications.filter(n => !n.read).length;
+  const unreadNotifications = userNotifications.filter(n => !n.read);
+  const readNotifications = userNotifications.filter(n => n.read);
+  const unreadCount = unreadNotifications.length;
+
+  // Displayed notifications based on active tab filter
+  const displayedNotifications = notifFilterTab === 'unread' ? unreadNotifications : userNotifications;
 
   const isAuthorizedForAdmin = currentStaff.canAccessFinancials || currentStaff.role === 'drafter_lead' || currentStaff.name === 'Kyle' || currentStaff.canAccessPayroll;
 
@@ -388,62 +396,119 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 {/* Notifications Dropdown Panel */}
                 {showNotifDropdown && (
                   <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="p-3 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs font-bold text-white truncate block">
-                          Notifications for {currentStaff.name.split(' ')[0]}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {unreadCount > 0 ? `${unreadCount} unread alert${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
-                        </span>
+                    {/* Header */}
+                    <div className="p-3 border-b border-slate-800 bg-slate-950 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-bold text-white truncate block">
+                            Notifications for {currentStaff.name.split(' ')[0]}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {unreadCount > 0 ? `${unreadCount} unread alert${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {unreadCount > 0 && onMarkAllNotificationsRead && (
+                            <button
+                              type="button"
+                              onClick={() => onMarkAllNotificationsRead(currentStaff.name)}
+                              className="text-[10px] font-semibold text-blue-400 hover:text-blue-200 bg-blue-950/70 hover:bg-blue-900/80 px-2 py-1 rounded transition border border-blue-800/50 flex items-center gap-1 cursor-pointer"
+                              title="Mark all alerts as read"
+                            >
+                              <CheckCheck className="w-3 h-3" />
+                              <span className="hidden sm:inline">Mark all read</span>
+                            </button>
+                          )}
+                          {readNotifications.length > 0 && onClearReadNotifications && (
+                            <button
+                              type="button"
+                              onClick={() => onClearReadNotifications(currentStaff.name)}
+                              className="text-[10px] font-semibold text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 px-2 py-1 rounded transition border border-slate-800 hover:border-rose-900/50 flex items-center gap-1 cursor-pointer"
+                              title="Clear all read notifications"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span className="hidden sm:inline">Clear read</span>
+                            </button>
+                          )}
+                          {userNotifications.length > 0 && onClearAllNotifications && (
+                            <button
+                              type="button"
+                              onClick={() => onClearAllNotifications(currentStaff.name)}
+                              className="text-[10px] font-semibold text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 px-1.5 py-1 rounded transition border border-slate-800 hover:border-rose-900/50 flex items-center gap-1 cursor-pointer"
+                              title="Clear all alerts for this user"
+                            >
+                              <Trash2 className="w-3 h-3 text-rose-400" />
+                              <span className="hidden sm:inline">Clear all</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowNotifDropdown(false)}
+                            className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer ml-0.5"
+                            title="Close"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {unreadCount > 0 && onMarkAllNotificationsRead && (
-                          <button
-                            type="button"
-                            onClick={() => onMarkAllNotificationsRead(currentStaff.name)}
-                            className="text-[10px] font-semibold text-blue-400 hover:text-blue-200 bg-blue-950/70 hover:bg-blue-900/80 px-2 py-1 rounded transition border border-blue-800/50 flex items-center gap-1 cursor-pointer"
-                            title="Mark all alerts as read"
-                          >
-                            <CheckCheck className="w-3 h-3" />
-                            <span className="hidden sm:inline">Mark all read</span>
-                          </button>
-                        )}
-                        {userNotifications.length > 0 && onClearAllNotifications && (
-                          <button
-                            type="button"
-                            onClick={() => onClearAllNotifications(currentStaff.name)}
-                            className="text-[10px] font-semibold text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 px-2 py-1 rounded transition border border-slate-800 hover:border-rose-900/50 flex items-center gap-1 cursor-pointer"
-                            title="Clear all alerts for this user"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span className="hidden sm:inline">Clear</span>
-                          </button>
-                        )}
+
+                      {/* Filter Tabs: Unread vs All */}
+                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800/70">
                         <button
                           type="button"
-                          onClick={() => setShowNotifDropdown(false)}
-                          className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer ml-0.5"
-                          title="Close"
+                          onClick={() => setNotifFilterTab('unread')}
+                          className={`flex-1 py-1 px-2 rounded-lg text-xs font-semibold text-center transition cursor-pointer ${
+                            notifFilterTab === 'unread'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
                         >
-                          <X className="w-3.5 h-3.5" />
+                          Unread ({unreadCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNotifFilterTab('all')}
+                          className={`flex-1 py-1 px-2 rounded-lg text-xs font-semibold text-center transition cursor-pointer ${
+                            notifFilterTab === 'all'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          All ({userNotifications.length})
                         </button>
                       </div>
                     </div>
 
+                    {/* Notification List */}
                     <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/80">
-                      {userNotifications.length === 0 ? (
+                      {displayedNotifications.length === 0 ? (
                         <div className="p-5 text-center text-xs text-slate-400 italic flex flex-col items-center gap-2">
                           <Check className="w-5 h-5 text-emerald-400/60" />
-                          <span>No active notifications for {currentStaff.name}. You're all caught up!</span>
+                          <span>
+                            {notifFilterTab === 'unread'
+                              ? userNotifications.length > 0
+                                ? 'No unread notifications! All caught up.'
+                                : `No active notifications for ${currentStaff.name}. You're all caught up!`
+                              : `No notifications recorded for ${currentStaff.name}.`}
+                          </span>
+                          {notifFilterTab === 'unread' && readNotifications.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setNotifFilterTab('all')}
+                              className="text-xs text-blue-400 hover:text-blue-300 underline font-medium mt-1 cursor-pointer"
+                            >
+                              View {readNotifications.length} previously read {readNotifications.length === 1 ? 'alert' : 'alerts'}
+                            </button>
+                          )}
                         </div>
                       ) : (
-                        userNotifications.map((notif) => (
+                        displayedNotifications.map((notif) => (
                           <div
                             key={notif.id}
                             onClick={() => handleNotificationClick(notif)}
                             className={`p-3 text-xs transition cursor-pointer hover:bg-slate-850 space-y-1.5 group relative ${
-                              notif.read ? 'opacity-80 bg-slate-900/90' : 'bg-slate-850/90 border-l-3 border-blue-500'
+                              notif.read ? 'opacity-75 bg-slate-900/90' : 'bg-slate-850/90 border-l-3 border-blue-500'
                             }`}
                           >
                             <div className="flex items-start justify-between gap-1.5">
@@ -478,10 +543,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                                       e.stopPropagation();
                                       onDeleteNotification(notif.id);
                                     }}
-                                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded transition cursor-pointer"
-                                    title="Delete notification"
+                                    className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded transition cursor-pointer"
+                                    title="Delete notification permanently"
                                   >
-                                    <Trash2 className="w-3 h-3" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>
@@ -521,7 +586,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                                   title={notif.read ? 'Mark as unread' : 'Mark as read'}
                                 >
                                   <Check className="w-2.5 h-2.5" />
-                                  <span>{notif.read ? 'Unread' : 'Mark read'}</span>
+                                  <span>{notif.read ? 'Mark unread' : 'Mark read'}</span>
                                 </button>
                               </div>
                             </div>

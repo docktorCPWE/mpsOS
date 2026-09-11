@@ -321,19 +321,7 @@ export function isMessageRelevantForUser(msg: ChatMessage, staff?: StaffUser, jo
   return false;
 }
 
-export const INITIAL_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: 'notif-greg-welcome',
-    recipientName: 'Greg Hyatt',
-    recipientEmail: 'arkcwd@gmail.com',
-    title: 'Workspace Ready for Staff Onboarding',
-    message: 'All mock staff profiles removed. When staff sign up, you can configure their permissions in Staff Management.',
-    timestamp: new Date().toISOString(),
-    read: false,
-    type: 'comment',
-    senderName: 'System'
-  }
-];
+export const INITIAL_NOTIFICATIONS: AppNotification[] = [];
 
 export const INITIAL_JOBS: Job[] = [
   {
@@ -1136,9 +1124,9 @@ export function getStoredNotifications(): AppNotification[] {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       const cleaned = parsed.filter(n => {
-        if (dismissedIds.includes(n.id)) return false;
+        if (dismissedIds.includes(n.id) || n.id === 'notif-greg-welcome') return false;
         const text = (n.message || '').toLowerCase();
-        return !text.includes('m26-195') && !text.includes('testing dummy');
+        return !text.includes('m26-195') && !text.includes('testing dummy') && !text.includes('mock staff profiles removed');
       });
       localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;

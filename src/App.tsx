@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries } from './data/mockData';
 import { 
@@ -111,6 +111,7 @@ export default function App() {
   const [isStaffManagementOpen, setIsStaffManagementOpen] = useState(false);
   const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
   const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
+  const devCardsCloudDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
     setSelectedJobForDetail(job);
@@ -214,7 +215,21 @@ export default function App() {
 
     const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
       if (cards && cards.length > 0) {
-        setDevCards(cards);
+        setDevCards((prev) => {
+          return cards.map((c) => {
+            const local = prev.find((p) => p.id === c.id);
+            if (local) {
+              return {
+                ...c,
+                // Preserve local notes if user is editing or running
+                currentNotes: (local.isActive && local.currentNotes) ? local.currentNotes : (c.currentNotes || local.currentNotes),
+                isActive: local.isActive ?? c.isActive,
+                activeTimerStart: local.activeTimerStart ?? c.activeTimerStart
+              };
+            }
+            return c;
+          });
+        });
         saveStoredGregDevCards(cards);
       }
     });
@@ -356,6 +371,22 @@ export default function App() {
         n.recipientName.toLowerCase().includes(recipientName.toLowerCase()) ||
         recipientName.toLowerCase().includes(n.recipientName.toLowerCase())
       );
+      toRemove.forEach(n => addDismissedNotificationId(n.id));
+      return prev.filter(n => !toRemove.includes(n));
+    });
+  };
+
+  // Clear only read notifications for staff recipient
+  const handleClearReadNotifications = (recipientName?: string) => {
+    updateNotificationsState(prev => {
+      const toRemove = prev.filter(n => {
+        if (!n.read) return false;
+        if (!recipientName) return true;
+        return (
+          n.recipientName.toLowerCase().includes(recipientName.toLowerCase()) ||
+          recipientName.toLowerCase().includes(n.recipientName.toLowerCase())
+        );
+      });
       toRemove.forEach(n => addDismissedNotificationId(n.id));
       return prev.filter(n => !toRemove.includes(n));
     });
@@ -1956,6 +1987,7 @@ export default function App() {
         onDeleteNotification={handleDeleteNotification}
         onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
         onClearAllNotifications={handleClearAllNotifications}
+        onClearReadNotifications={handleClearReadNotifications}
         onSelectJob={handleOpenJobDetail}
         onOpenNewJobModal={() => {
           if (!canUserCreateJob(currentStaff)) {
@@ -2018,7 +2050,13 @@ export default function App() {
             onUpdateDevCards={(updated) => {
               setDevCards(updated);
               saveStoredGregDevCards(updated);
-              saveDevProjectCardsToFirestore(updated);
+              // Debounce saving dev cards to Firestore to prevent frequent write-snapshot feedback loops while typing
+              if (devCardsCloudDebounceRef.current) {
+                clearTimeout(devCardsCloudDebounceRef.current);
+              }
+              devCardsCloudDebounceRef.current = setTimeout(() => {
+                saveDevProjectCardsToFirestore(updated).catch((err) => console.warn('Firestore dev card save error:', err));
+              }, 1200);
             }}
             onUpdateDevEntries={(updated) => {
               setDevEntries(updated);
