@@ -126,27 +126,27 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   return (
     <>
       <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-30 shadow-md">
-        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between py-3.5 sm:py-4 gap-4">
+        <div className="w-full px-3 sm:px-5 lg:px-6">
+          <div className="flex items-center justify-between py-2 sm:py-2.5 gap-2 sm:gap-4">
             
-            {/* Logo & OS Branding - Spacious, Prominent & Unsqueezed */}
-            <div className="flex items-center gap-4 shrink-0">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-600/30 ring-1 ring-white/20 shrink-0">
-                <Compass className="w-7 h-7 sm:w-8 sm:h-8 animate-spin-slow shrink-0 text-white" />
+            {/* Logo & OS Branding - Compact & Sleek */}
+            <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-600/30 ring-1 ring-white/20 shrink-0">
+                <Compass className="w-5 h-5 sm:w-5.5 sm:h-5.5 animate-spin-slow shrink-0 text-white" />
               </div>
               <div className="flex flex-col justify-center shrink-0">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white font-sans">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-white font-sans leading-none">
                     My Plan Store
                   </h1>
-                  <span className="text-xs sm:text-sm font-mono font-bold text-sky-300 px-2 py-0.5 rounded-lg bg-sky-950/90 border border-sky-800/80 uppercase shadow-xs">
+                  <span className="text-[10px] font-mono font-bold text-sky-300 px-1.5 py-0.5 rounded bg-sky-950/90 border border-sky-800/80 uppercase shadow-xs">
                     OS
                   </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full hidden sm:inline-block">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700 px-1.5 py-0.5 rounded-full hidden 2xl:inline-block">
                     v2.4 Pro
                   </span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 font-medium tracking-normal mt-0.5">
+                <p className="text-[11px] text-slate-400 font-medium tracking-normal mt-0.5 hidden xl:block leading-none">
                   Architectural Drafting & Customer Workflow Engine
                 </p>
               </div>
@@ -166,7 +166,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     ).length;
 
                 return (
-                  <div className="hidden 2xl:flex items-center gap-4 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-300 shrink-0 shadow-inner">
+                  <div className="hidden xl:flex items-center gap-3 bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 shrink-0 shadow-inner">
                     <div className="flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-blue-400" />
                       <span>{isAllAuthorized ? 'Active Plans' : `${currentStaff.name.split(' ')[0]}'s Plans`}: <strong className="text-white">{relevantCount}</strong></span>
@@ -185,7 +185,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                       <>
                         <div className="flex items-center gap-1.5">
                           <Share2 className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Delegated Tasks Active</span>
+                          <span>Delegated Tasks</span>
                         </div>
                         <span className="text-slate-700">|</span>
                       </>
@@ -199,7 +199,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     <span className="text-slate-700">|</span>
 
                     {/* Firestore Cloud Database Indicator */}
-                    <div className="flex items-center gap-1.5 font-mono text-[11px] text-emerald-300" title="Connected to Google Cloud Firestore">
+                    <div className="flex items-center gap-1 font-mono text-[11px] text-emerald-300" title="Connected to Google Cloud Firestore">
                       <Database className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Cloud DB</span>
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -209,142 +209,129 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               })()
             )}
 
-            {/* Right Controls: Staff Switcher, Notifications & Role Switcher */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-start lg:justify-end">
-              
-              {/* Active Staff User Switcher */}
-              <div className="relative">
+            {/* Right Controls: Streamlined Horizontal Layout */}
+            <div className="flex items-center gap-1.5 sm:gap-2 justify-end shrink-0 flex-nowrap overflow-x-auto scrollbar-none py-0.5">
+
+              {/* Role Switcher Navigation Pills */}
+              <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
                 <button
-                  onClick={() => {
-                    setShowStaffDropdown(!showStaffDropdown);
-                    setShowNotifDropdown(false);
-                  }}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 px-3 py-1.5 rounded-xl text-xs transition cursor-pointer shadow-xs relative"
-                  title="Switch Staff Identity (Test Financial & Delegation Access)"
+                  onClick={() => setUserRole('drafter')}
+                  className={`flex items-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    userRole === 'drafter'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
                 >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] relative ${
-                    currentStaff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
-                  }`}>
-                    {currentStaff.name.split(' ').map(n => n[0]).join('')}
-                    {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
-                    )}
-                  </div>
-                  
-                  <div className="text-left hidden sm:block">
-                    <div className="font-bold text-white leading-tight flex items-center gap-1">
-                      <span>{currentStaff.name}</span>
-                      {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
-                        <span className="text-[9px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded-full font-mono">
-                          {waitingForKyleCount} TO REVIEW
-                        </span>
-                      )}
-                      {currentStaff.canAccessFinancials && (
-                        <span className="text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono">
-                          FINANCE
-                        </span>
-                      )}
-                      {currentStaff.canDelegate && (
-                        <span className="text-[9px] bg-indigo-400/20 text-indigo-300 border border-indigo-400/30 px-1 py-0.2 rounded font-mono">
-                          LEAD
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[130px]">
-                      {currentStaff.title}
-                    </div>
-                  </div>
+                  <LayoutDashboard className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Drafter Studio</span>
+                  <span className="sm:hidden">Studio</span>
                 </button>
 
-                {/* Staff Dropdown Menu */}
-                {showStaffDropdown && (
-                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/60">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                        Switch Active Staff Identity
-                      </span>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Test role-based permissions & delegation workflows:
-                      </p>
-                    </div>
+                <button
+                  onClick={handleAdminTabClick}
+                  className={`flex items-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md transition cursor-pointer relative ${
+                    userRole === 'admin'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : !isAuthorizedForAdmin
+                      ? 'text-slate-500 hover:text-amber-300 hover:bg-slate-900/60'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                  title={
+                    isAuthorizedForAdmin
+                      ? (currentStaff.name === 'Kyle' ? 'Admin & Project Management Center' : 'Admin & Billing Center')
+                      : 'Restricted: Financial & Admin Access limited to Jason, Greg Hyatt, Drew Lupkey, and Kyle'
+                  }
+                >
+                  {isAuthorizedForAdmin ? (
+                    <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>{currentStaff.name === 'Kyle' ? 'Admin & Ops' : 'Admin & Billing'}</span>
+                  {!isAuthorizedForAdmin && (
+                    <span className="text-[8px] bg-slate-800 text-amber-400 px-1 rounded font-mono">
+                      Locked
+                    </span>
+                  )}
+                </button>
 
-                    <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
-                      {(staffList.length > 0 ? staffList : [currentStaff]).map((staff) => {
-                        const isCurrent = staff.id === currentStaff.id;
-                        return (
-                          <button
-                            key={staff.id}
-                            onClick={() => handleStaffChange(staff)}
-                            className={`w-full text-left p-2.5 transition flex items-start justify-between cursor-pointer ${
-                              isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-xs flex items-center gap-1.5 text-white">
-                                <span>{staff.name}</span>
-                                {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                                {staff.name.toLowerCase().includes('greg hyatt') && (
-                                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono">
-                                    OWNER
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-slate-400">{staff.title}</div>
-                              <div className="flex flex-wrap items-center gap-1 pt-1">
-                                {staff.canAccessFinancials ? (
-                                  <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                    💰 Financial
-                                  </span>
-                                ) : (
-                                  <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
-                                    🔒 No Financials
-                                  </span>
-                                )}
-                                {staff.canDelegate && (
-                                  <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
-                                    ⚡ Delegator
-                                  </span>
-                                )}
-                                {staff.canManageStaff && (
-                                  <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
-                                    🛡️ Admin
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Manage Staff Action Button in Dropdown */}
-                    {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
-                      <div className="p-2 border-t border-slate-800 bg-slate-950">
-                        <button
-                          onClick={() => {
-                            setShowStaffDropdown(false);
-                            onOpenStaffManagement();
-                          }}
-                          className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Manage Staff & Permissions</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <button
+                  onClick={() => setUserRole('customer')}
+                  className={`flex items-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    userRole === 'customer'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Customer View</span>
+                  <span className="sm:hidden">Portal</span>
+                </button>
               </div>
+
+              {/* Customer Switcher Dropdown (If Customer Mode) */}
+              {userRole === 'customer' && (
+                <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 px-2 py-1 rounded-lg text-xs shrink-0">
+                  <UserCheck className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="text-slate-400 font-medium hidden sm:inline">Portal:</span>
+                  <select
+                    value={selectedCustomerId}
+                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    className="bg-slate-900 text-white text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 py-0.5 px-1.5 rounded border border-slate-700 cursor-pointer"
+                  >
+                    {jobs.map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {job.job_number} - {job.customer_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Job Creation Action: Strictly Kyle or Jason Barnett */}
+              {userRole !== 'customer' && (
+                canUserCreateJob(currentStaff) ? (
+                  <button
+                    onClick={onOpenNewJobModal}
+                    className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1 rounded-lg transition shadow-xs border border-blue-400/20 active:scale-95 cursor-pointer shrink-0"
+                    title="Create new project (Authorized for Kyle & Jason Barnett)"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>New Job</span>
+                  </button>
+                ) : (
+                  <div
+                    className="flex items-center gap-1 bg-slate-800/80 text-slate-400 text-xs font-medium px-2 py-1 rounded-lg border border-slate-700/60 cursor-not-allowed select-none shrink-0"
+                    title="Creation Restricted: Only Kyle or Jason Barnett can create a new job"
+                  >
+                    <Lock className="w-3 h-3 text-slate-500" />
+                    <span className="hidden xl:inline text-[11px]">New Job</span>
+                    <span className="text-[9px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.2 rounded">Kyle / Jason only</span>
+                  </div>
+                )
+              )}
+
+              {/* Staff Management Button for Greg Hyatt & Authorized Managers */}
+              {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
+                <button
+                  onClick={onOpenStaffManagement}
+                  className="flex items-center gap-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/40 text-xs font-semibold px-2.5 py-1 rounded-lg transition shadow-xs active:scale-95 cursor-pointer shrink-0"
+                  title="Manage Staff Directory & Permission Levels"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="hidden sm:inline">Staff & Perms</span>
+                </button>
+              )}
 
               {/* Kyle's Review Inbox Button - Visible strictly to Kyle */}
               {onOpenKyleInbox && currentStaff.name.toLowerCase().includes('kyle') && (
                 <button
                   onClick={onOpenKyleInbox}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                  className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition cursor-pointer shadow-xs shrink-0"
                   title="Open Kyle's Delegation Review Inbox"
                 >
                   <Mail className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">Kyle's Review Inbox</span>
+                  <span className="hidden sm:inline">Kyle's Inbox</span>
                   {waitingForKyleCount > 0 && (
                     <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.2 rounded-full font-mono">
                       {waitingForKyleCount}
@@ -358,7 +345,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 <button
                   type="button"
                   onClick={onToggleChat}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer relative shadow-xs ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer relative shadow-xs shrink-0 ${
                     isChatOpen
                       ? 'bg-blue-600 text-white border border-blue-400 shadow-blue-500/20'
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600'
@@ -366,7 +353,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   title="Open Team Studio Chat (@mentions & #MPS-plans)"
                 >
                   <MessageSquare className={`w-3.5 h-3.5 ${isChatOpen ? 'text-white' : 'text-blue-400'}`} />
-                  <span className="hidden sm:inline">Studio Chat</span>
+                  <span className="hidden sm:inline">Chat</span>
                   {unreadChatCount > 0 && (
                     <span className="bg-blue-500 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full font-mono animate-pulse">
                       {unreadChatCount}
@@ -376,13 +363,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               )}
 
               {/* Notification Bell Dropdown */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button
                   onClick={() => {
                     setShowNotifDropdown(!showNotifDropdown);
                     setShowStaffDropdown(false);
                   }}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition relative cursor-pointer"
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition relative cursor-pointer"
                   title="View Notifications & Delegated Tasks"
                 >
                   <Bell className="w-4 h-4 text-slate-300" />
@@ -598,122 +585,136 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 )}
               </div>
 
-              {/* Customer Switcher Dropdown (If Customer Mode) */}
-              {userRole === 'customer' && (
-                <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-lg text-xs">
-                  <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span className="text-slate-400 font-medium">Select Portal:</span>
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="bg-slate-900 text-white text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 py-1 px-2 rounded border border-slate-700 cursor-pointer"
-                  >
-                    {jobs.map((job) => (
-                      <option key={job.id} value={job.id}>
-                        {job.job_number} - {job.customer_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Staff Management Button for Greg Hyatt & Authorized Managers */}
-              {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
-                <button
-                  onClick={onOpenStaffManagement}
-                  className="flex items-center gap-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/40 text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-xs active:scale-95 cursor-pointer"
-                  title="Manage Staff Directory & Permission Levels"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
-                  <span className="hidden sm:inline">Staff & Perms</span>
-                </button>
-              )}
-
-              {/* Job Creation Action: Strictly Kyle or Jason Barnett */}
-              {userRole !== 'customer' && (
-                canUserCreateJob(currentStaff) ? (
-                  <button
-                    onClick={onOpenNewJobModal}
-                    className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-sm border border-blue-400/20 active:scale-95 cursor-pointer"
-                    title="Create new project (Authorized for Kyle & Jason Barnett)"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>New Job</span>
-                  </button>
-                ) : (
-                  <div
-                    className="flex items-center gap-1.5 bg-slate-800/80 text-slate-500 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-not-allowed select-none"
-                    title="Creation Restricted: Only Kyle or Jason Barnett can create a new job"
-                  >
-                    <Lock className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="hidden md:inline">New Job</span>
-                    <span className="text-[10px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.2 rounded">Kyle / Jason only</span>
-                  </div>
-                )
-              )}
-
               {/* Reset Demo Data Button */}
               <button
                 onClick={onResetData}
                 title="Reset to default mock data"
-                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 cursor-pointer shrink-0"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
 
-              {/* Role Switcher Navigation Pills */}
-              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <div className="h-4 w-px bg-slate-800 shrink-0 hidden sm:block mx-0.5" />
+
+              {/* Active Staff User Switcher */}
+              <div className="relative shrink-0">
                 <button
-                  onClick={() => setUserRole('drafter')}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    userRole === 'drafter'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
+                  onClick={() => {
+                    setShowStaffDropdown(!showStaffDropdown);
+                    setShowNotifDropdown(false);
+                  }}
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 px-2 sm:px-2.5 py-1 rounded-lg text-xs transition cursor-pointer shadow-xs relative"
+                  title="Switch Staff Identity (Test Financial & Delegation Access)"
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5" />
-                  <span>Drafter Studio</span>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] relative shrink-0 ${
+                    currentStaff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
+                  }`}>
+                    {currentStaff.name.split(' ').map(n => n[0]).join('')}
+                    {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
+                    )}
+                  </div>
+                  
+                  <div className="text-left hidden sm:block">
+                    <div className="font-bold text-white leading-tight flex items-center gap-1 text-xs">
+                      <span>{currentStaff.name}</span>
+                      {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
+                        <span className="text-[8px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded-full font-mono">
+                          {waitingForKyleCount}
+                        </span>
+                      )}
+                      {currentStaff.canAccessFinancials && (
+                        <span className="text-[8px] bg-amber-400/20 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          FINANCE
+                        </span>
+                      )}
+                      {currentStaff.canDelegate && (
+                        <span className="text-[8px] bg-indigo-400/20 text-indigo-300 border border-indigo-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          LEAD
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </button>
 
-                <button
-                  onClick={handleAdminTabClick}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer relative ${
-                    userRole === 'admin'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : !isAuthorizedForAdmin
-                      ? 'text-slate-500 hover:text-amber-300 hover:bg-slate-900/60'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                  title={
-                    isAuthorizedForAdmin
-                      ? (currentStaff.name === 'Kyle' ? 'Admin & Project Management Center' : 'Admin & Billing Center')
-                      : 'Restricted: Financial & Admin Access limited to Jason, Greg Hyatt, Drew Lupkey, and Kyle'
-                  }
-                >
-                  {isAuthorizedForAdmin ? (
-                    <Building2 className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Lock className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                  <span>{currentStaff.name === 'Kyle' ? 'Admin & Ops' : 'Admin & Billing'}</span>
-                  {!isAuthorizedForAdmin && (
-                    <span className="text-[9px] bg-slate-800 text-amber-400 px-1 rounded font-mono">
-                      Locked
-                    </span>
-                  )}
-                </button>
+                {/* Staff Dropdown Menu */}
+                {showStaffDropdown && (
+                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/60">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+                        Switch Active Staff Identity
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Test role-based permissions & delegation workflows:
+                      </p>
+                    </div>
 
-                <button
-                  onClick={() => setUserRole('customer')}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    userRole === 'customer'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Customer View</span>
-                </button>
+                    <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
+                      {(staffList.length > 0 ? staffList : [currentStaff]).map((staff) => {
+                        const isCurrent = staff.id === currentStaff.id;
+                        return (
+                          <button
+                            key={staff.id}
+                            onClick={() => handleStaffChange(staff)}
+                            className={`w-full text-left p-2.5 transition flex items-start justify-between cursor-pointer ${
+                              isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-xs flex items-center gap-1.5 text-white">
+                                <span>{staff.name}</span>
+                                {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                {staff.name.toLowerCase().includes('greg hyatt') && (
+                                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono">
+                                    OWNER
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{staff.title}</div>
+                              <div className="flex flex-wrap items-center gap-1 pt-1">
+                                {staff.canAccessFinancials ? (
+                                  <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
+                                    💰 Financial
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
+                                    🔒 No Financials
+                                  </span>
+                                )}
+                                {staff.canDelegate && (
+                                  <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
+                                    ⚡ Delegator
+                                  </span>
+                                )}
+                                {staff.canManageStaff && (
+                                  <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
+                                    🛡️ Admin
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Manage Staff Action Button in Dropdown */}
+                    {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
+                      <div className="p-2 border-t border-slate-800 bg-slate-950">
+                        <button
+                          onClick={() => {
+                            setShowStaffDropdown(false);
+                            onOpenStaffManagement();
+                          }}
+                          className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Manage Staff & Permissions</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Authenticated User Sign Out Button */}
@@ -721,7 +722,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 <button
                   onClick={onSignOut}
                   title={authUser ? `Signed in as ${authUser.email}. Click to Sign Out` : 'Sign Out'}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-800/60 rounded-xl text-xs font-medium transition cursor-pointer"
+                  className="flex items-center gap-1 px-2 py-1 bg-slate-850 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-800/60 rounded-lg text-xs font-medium transition cursor-pointer shrink-0"
                 >
                   <LogOut className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-300" />
                   <span className="hidden xl:inline">Sign Out</span>
