@@ -143,9 +143,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   return (
     <>
-      <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-40 shadow-md">
-        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3">
+      <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-40 shadow-md w-full">
+        {/* Row 1: Brand Logo, System Live Status & Staff Profile Identity */}
+        <div className="w-full px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-2 sm:py-2.5 gap-4">
             
             {/* Logo & OS Branding - Compact & Sleek */}
             <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
@@ -227,11 +228,175 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               })()
             )}
 
-            {/* Right Controls: Streamlined Horizontal Layout */}
-            <div className="flex items-center gap-2 sm:gap-2.5 justify-end shrink-0 flex-wrap py-0.5">
+            {/* Right: Active Staff User Switcher & Sign Out (Identity Section) */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Active Staff User Switcher */}
+              <div ref={staffDropdownRef} className="relative shrink-0">
+                <button
+                  id="staff-identity-switcher-btn"
+                  type="button"
+                  onClick={() => {
+                    setShowStaffDropdown(prev => !prev);
+                    setShowNotifDropdown(false);
+                  }}
+                  className={`flex items-center gap-2 border px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition cursor-pointer shadow-xs text-left select-none ${
+                    showStaffDropdown
+                      ? 'bg-slate-800 border-blue-500/80 ring-2 ring-blue-500/20'
+                      : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700 hover:border-slate-600'
+                  }`}
+                  title="Switch Staff Identity (Test Financial, Delegations & View Team Errors)"
+                >
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 relative ${
+                    currentStaff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
+                  }`}>
+                    {currentStaff.name.split(' ').map(n => n[0]).join('')}
+                    {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
+                    )}
+                  </div>
+                  
+                  <div className="text-left hidden sm:block">
+                    <div className="font-bold text-white leading-tight flex items-center gap-1.5 text-xs">
+                      <span>{currentStaff.name}</span>
+                      {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
+                        <span className="text-[8px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded-full font-mono">
+                          {waitingForKyleCount}
+                        </span>
+                      )}
+                      {currentStaff.name.toLowerCase().includes('greg hyatt') && (
+                        <span className="text-[8px] bg-amber-500/25 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          OWNER
+                        </span>
+                      )}
+                      {currentStaff.canAccessFinancials && (
+                        <span className="text-[8px] bg-amber-400/20 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          FINANCE
+                        </span>
+                      )}
+                      {currentStaff.canDelegate && (
+                        <span className="text-[8px] bg-indigo-400/20 text-indigo-300 border border-indigo-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
+                          LEAD
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[140px]">
+                      {currentStaff.title}
+                    </div>
+                  </div>
 
-              {/* Role Switcher Navigation Pills */}
-              <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showStaffDropdown ? 'rotate-180 text-blue-400' : ''}`} />
+                </button>
+
+                {/* Staff Dropdown Menu */}
+                {showStaffDropdown && (
+                  <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+                        Switch Active Staff Identity
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Select a team member to test permissions, view their projects, and diagnose errors:
+                      </p>
+                    </div>
+
+                    <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
+                      {((staffList && staffList.length > 0) ? staffList : STAFF_USERS).map((staff) => {
+                        const isCurrent = staff.id === currentStaff.id;
+                        return (
+                          <button
+                            key={staff.id}
+                            onClick={() => handleStaffChange(staff)}
+                            className={`w-full text-left p-2.5 transition flex items-start justify-between cursor-pointer ${
+                              isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
+                                staff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
+                              }`}>
+                                {staff.name.split(' ').map(n => n[0]).join('')}
+                              </div>
+                              <div className="space-y-0.5 min-w-0 flex-1">
+                                <div className="font-bold text-xs flex items-center gap-1.5 text-white">
+                                  <span className="truncate">{staff.name}</span>
+                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                  {staff.name.toLowerCase().includes('greg hyatt') && (
+                                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono shrink-0">
+                                      OWNER
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">{staff.title}</div>
+                                <div className="flex flex-wrap items-center gap-1 pt-1">
+                                  {staff.canAccessFinancials ? (
+                                    <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
+                                      💰 Financial
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
+                                      🔒 No Financials
+                                    </span>
+                                  )}
+                                  {staff.canDelegate && (
+                                    <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
+                                      ⚡ Delegator
+                                    </span>
+                                  )}
+                                  {staff.canManageStaff && (
+                                    <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
+                                      🛡️ Admin
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Manage Staff Action Button in Dropdown */}
+                    {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
+                      <div className="p-2 border-t border-slate-800 bg-slate-950">
+                        <button
+                          onClick={() => {
+                            setShowStaffDropdown(false);
+                            onOpenStaffManagement();
+                          }}
+                          className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Manage Staff & Permissions</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Authenticated User Sign Out Button */}
+              {onSignOut && (
+                <button
+                  onClick={onSignOut}
+                  title={authUser ? `Signed in as ${authUser.email}. Click to Sign Out` : 'Sign Out'}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-800/60 rounded-xl text-xs font-medium transition cursor-pointer shrink-0"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-300" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              )}
+            </div>
+
+          </div>
+        </div>
+
+        {/* Row 2: Secondary Navigation Tabs & Operational Action Controls */}
+        <div className="w-full bg-slate-950/80 border-t border-slate-800/80 px-4 sm:px-6 lg:px-8 py-1.5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+
+            {/* Left: Role Switcher Navigation Tabs */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 shrink-0">
                 <button
                   onClick={() => setUserRole('drafter')}
                   className={`flex items-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md transition cursor-pointer ${
@@ -289,13 +454,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
               {/* Customer Switcher Dropdown (If Customer Mode) */}
               {userRole === 'customer' && (
-                <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 px-2 py-1 rounded-lg text-xs shrink-0">
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 px-2 py-1 rounded-lg text-xs shrink-0">
                   <UserCheck className="w-3.5 h-3.5 text-blue-400" />
                   <span className="text-slate-400 font-medium hidden sm:inline">Portal:</span>
                   <select
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="bg-slate-900 text-white text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 py-0.5 px-1.5 rounded border border-slate-700 cursor-pointer"
+                    className="bg-slate-950 text-white text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 py-0.5 px-1.5 rounded border border-slate-700 cursor-pointer"
                   >
                     {jobs.map((job) => (
                       <option key={job.id} value={job.id}>
@@ -305,6 +470,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   </select>
                 </div>
               )}
+            </div>
+
+            {/* Right: Operational Action Controls */}
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
 
               {/* Job Creation Action: Strictly Kyle or Jason Barnett */}
               {userRole !== 'customer' && (
@@ -611,164 +780,6 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
-
-              <div className="h-4 w-px bg-slate-800 shrink-0 hidden sm:block mx-0.5" />
-
-              {/* Active Staff User Switcher */}
-              <div ref={staffDropdownRef} className="relative shrink-0">
-                <button
-                  id="staff-identity-switcher-btn"
-                  type="button"
-                  onClick={() => {
-                    setShowStaffDropdown(prev => !prev);
-                    setShowNotifDropdown(false);
-                  }}
-                  className={`flex items-center gap-2 border px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition cursor-pointer shadow-xs text-left select-none ${
-                    showStaffDropdown
-                      ? 'bg-slate-800 border-blue-500/80 ring-2 ring-blue-500/20'
-                      : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700 hover:border-slate-600'
-                  }`}
-                  title="Switch Staff Identity (Test Financial, Delegations & View Team Errors)"
-                >
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 relative ${
-                    currentStaff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
-                  }`}>
-                    {currentStaff.name.split(' ').map(n => n[0]).join('')}
-                    {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
-                    )}
-                  </div>
-                  
-                  <div className="text-left hidden sm:block">
-                    <div className="font-bold text-white leading-tight flex items-center gap-1.5 text-xs">
-                      <span>{currentStaff.name}</span>
-                      {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
-                        <span className="text-[8px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded-full font-mono">
-                          {waitingForKyleCount}
-                        </span>
-                      )}
-                      {currentStaff.name.toLowerCase().includes('greg hyatt') && (
-                        <span className="text-[8px] bg-amber-500/25 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
-                          OWNER
-                        </span>
-                      )}
-                      {currentStaff.canAccessFinancials && (
-                        <span className="text-[8px] bg-amber-400/20 text-amber-300 border border-amber-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
-                          FINANCE
-                        </span>
-                      )}
-                      {currentStaff.canDelegate && (
-                        <span className="text-[8px] bg-indigo-400/20 text-indigo-300 border border-indigo-400/30 px-1 py-0.2 rounded font-mono hidden md:inline">
-                          LEAD
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[140px]">
-                      {currentStaff.title}
-                    </div>
-                  </div>
-
-                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showStaffDropdown ? 'rotate-180 text-blue-400' : ''}`} />
-                </button>
-
-                {/* Staff Dropdown Menu */}
-                {showStaffDropdown && (
-                  <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                        Switch Active Staff Identity
-                      </span>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Select a team member to test permissions, view their projects, and diagnose errors:
-                      </p>
-                    </div>
-
-                    <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
-                      {((staffList && staffList.length > 0) ? staffList : STAFF_USERS).map((staff) => {
-                        const isCurrent = staff.id === currentStaff.id;
-                        return (
-                          <button
-                            key={staff.id}
-                            onClick={() => handleStaffChange(staff)}
-                            className={`w-full text-left p-2.5 transition flex items-start justify-between cursor-pointer ${
-                              isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
-                                staff.canAccessFinancials ? 'bg-amber-500 text-slate-950 font-mono' : 'bg-blue-600 text-white'
-                              }`}>
-                                {staff.name.split(' ').map(n => n[0]).join('')}
-                              </div>
-                              <div className="space-y-0.5 min-w-0 flex-1">
-                                <div className="font-bold text-xs flex items-center gap-1.5 text-white">
-                                  <span className="truncate">{staff.name}</span>
-                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                  {staff.name.toLowerCase().includes('greg hyatt') && (
-                                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono shrink-0">
-                                      OWNER
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400 truncate">{staff.title}</div>
-                                <div className="flex flex-wrap items-center gap-1 pt-1">
-                                  {staff.canAccessFinancials ? (
-                                    <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                      💰 Financial
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
-                                      🔒 No Financials
-                                    </span>
-                                  )}
-                                  {staff.canDelegate && (
-                                    <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
-                                      ⚡ Delegator
-                                    </span>
-                                  )}
-                                  {staff.canManageStaff && (
-                                    <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
-                                      🛡️ Admin
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Manage Staff Action Button in Dropdown */}
-                    {onOpenStaffManagement && canUserManageStaff(currentStaff) && (
-                      <div className="p-2 border-t border-slate-800 bg-slate-950">
-                        <button
-                          onClick={() => {
-                            setShowStaffDropdown(false);
-                            onOpenStaffManagement();
-                          }}
-                          className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Manage Staff & Permissions</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Authenticated User Sign Out Button */}
-              {onSignOut && (
-                <button
-                  onClick={onSignOut}
-                  title={authUser ? `Signed in as ${authUser.email}. Click to Sign Out` : 'Sign Out'}
-                  className="flex items-center gap-1 px-2 py-1 bg-slate-850 hover:bg-red-950/60 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-800/60 rounded-lg text-xs font-medium transition cursor-pointer shrink-0"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-300" />
-                  <span className="hidden xl:inline">Sign Out</span>
-                </button>
-              )}
 
             </div>
 
