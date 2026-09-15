@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry } from './types';
+import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
 import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout } from './data/mockData';
 import { 
   isUserGregHyatt, 
@@ -1469,10 +1469,35 @@ export default function App() {
       timestamp: new Date().toISOString()
     };
 
+    const taskDeliverables: DeliverableFile[] = (newTask.attachments || []).map((att, i) => {
+      let category: DeliverableFile['category'] = 'Floor Plan';
+      if (newTask.category === 'Exterior Elevations') category = 'Exterior Elevations';
+      else if (newTask.category === 'Foundation Plan') category = 'Foundation Plan';
+      else if (newTask.category === 'Electrical & Reflected Ceiling') category = 'Electrical & Reflected Ceiling';
+      else if (newTask.category === '3D Render') category = '3D Render';
+      else if (att.name.toLowerCase().endsWith('.dwg') || att.name.toLowerCase().endsWith('.dxf')) category = 'CAD / DWG File';
+      else if (att.name.toLowerCase().endsWith('.pdf')) category = 'PDF Specs';
+
+      return {
+        id: `deliv-task-${Date.now()}-${i}`,
+        title: `${newTask.componentTitle}: ${att.name}`,
+        category,
+        version: 'v1.0 (Task Reference)',
+        uploadedAt: new Date().toISOString(),
+        fileSize: att.size,
+        previewType: (category === 'CAD / DWG File' ? 'cad_file' : (category === '3D Render' || att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/)) ? 'render_image' : 'pdf_spec') as any,
+        fileUrl: att.url,
+        fileName: att.name,
+        changeNotes: `Attached for delegated component "${newTask.componentTitle}" (${newTask.assignedTo})`,
+        authorDrafter: newTask.delegatedBy
+      };
+    });
+
     const updatedJobs = jobs.map(j => {
       if (j.id === newTask.jobId) {
         return {
           ...j,
+          deliverables: [...(j.deliverables || []), ...taskDeliverables],
           delegated_tasks: [newTask, ...(j.delegated_tasks || [])],
           comments: [...j.comments, delegationComment],
           audit_logs: [

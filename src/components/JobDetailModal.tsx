@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
@@ -1975,6 +1975,65 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                 {task.dueDate && <span>• Due: <strong>{task.dueDate}</strong></span>}
                               </div>
 
+                              {/* Attached Reference / Working CAD Files (Always visible for all statuses) */}
+                              {task.attachments && task.attachments.length > 0 && (
+                                <div className="mt-2.5 bg-blue-50/70 border border-blue-200/80 p-2.5 rounded-xl space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-blue-900 flex items-center gap-1.5">
+                                      <Paperclip className="w-3.5 h-3.5 text-blue-600" />
+                                      <span>Attached Component & Reference Files ({task.attachments.length})</span>
+                                    </span>
+                                    <span className="text-[10px] text-blue-600 font-medium">Click to view or download</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {task.attachments.map((att) => (
+                                      <div key={att.id} className="bg-white p-2 rounded-lg border border-blue-200 flex items-center justify-between gap-2 shadow-2xs">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                                          <div className="min-w-0">
+                                            <p className="text-xs font-bold text-slate-800 truncate" title={att.name}>{att.name}</p>
+                                            <p className="text-[10px] text-slate-500 font-mono">{att.size}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          {att.url && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setPreviewModalFile({
+                                                id: att.id,
+                                                title: `${task.componentTitle}: ${att.name}`,
+                                                category: 'CAD / DWG File',
+                                                version: 'v1.0 (Reference)',
+                                                uploadedAt: task.delegatedAt,
+                                                fileSize: att.size,
+                                                previewType: att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/) ? 'render_image' : 'cad_file',
+                                                fileUrl: att.url,
+                                                fileName: att.name,
+                                                changeNotes: `Attached for delegated component "${task.componentTitle}". Delegated by ${task.delegatedBy} to ${task.assignedTo}.`,
+                                                authorDrafter: task.delegatedBy
+                                              })}
+                                              className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer border border-blue-200"
+                                            >
+                                              <Eye className="w-3 h-3" />
+                                              <span>View</span>
+                                            </button>
+                                          )}
+                                          <a
+                                            href={att.url || '#'}
+                                            download={att.name}
+                                            className="text-[11px] font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer border border-slate-200"
+                                            title="Download file"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Revision Request Banner */}
                               {isRevisionReq && task.revisionNotes && (
                                 <div className="mt-2 bg-orange-50 p-2.5 rounded-lg border border-orange-200 text-xs text-orange-950 space-y-1.5">
@@ -2513,6 +2572,86 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                     <FileText className="w-8 h-8 text-slate-400 mx-auto" />
                     <p className="text-xs font-bold text-slate-700">No deliverable sheets or renderings attached yet.</p>
                     <p className="text-[11px] text-slate-500">Use the form above to attach drawings, 3D renders, or CAD files with revision notes for the client.</p>
+                  </div>
+                )}
+
+                {/* Delegated Sub-Task & Working Reference Files Section */}
+                {job.delegated_tasks && job.delegated_tasks.some(t => t.attachments && t.attachments.length > 0) && (
+                  <div className="space-y-3 pt-6 border-t border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-mono flex items-center gap-2">
+                        <Paperclip className="w-4 h-4 text-blue-600" />
+                        <span>Delegated Component & Working Attachments</span>
+                      </h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {job.delegated_tasks
+                        .filter(t => t.attachments && t.attachments.length > 0)
+                        .flatMap(task =>
+                          (task.attachments || []).map(att => ({
+                            task,
+                            att
+                          }))
+                        )
+                        .map(({ task, att }) => (
+                          <div
+                            key={`${task.id}-${att.id}`}
+                            className="bg-white p-3.5 rounded-xl border border-slate-200 hover:border-blue-300 shadow-2xs transition flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-200">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-900 text-xs truncate" title={att.name}>
+                                  {att.name}
+                                </p>
+                                <p className="text-[10px] text-slate-500 flex items-center gap-1.5 truncate">
+                                  <span>{att.size}</span>
+                                  <span>•</span>
+                                  <span className="text-blue-700 font-medium">Task: {task.componentTitle}</span>
+                                  <span>({task.assignedTo})</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {att.url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewModalFile({
+                                    id: att.id,
+                                    title: `${task.componentTitle}: ${att.name}`,
+                                    category: 'CAD / DWG File',
+                                    version: 'v1.0 (Task Reference)',
+                                    uploadedAt: task.delegatedAt,
+                                    fileSize: att.size,
+                                    previewType: att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/) ? 'render_image' : 'cad_file',
+                                    fileUrl: att.url,
+                                    fileName: att.name,
+                                    changeNotes: `Attached for delegated component "${task.componentTitle}". Assigned to ${task.assignedTo}.`,
+                                    authorDrafter: task.delegatedBy
+                                  })}
+                                  className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>View</span>
+                                </button>
+                              )}
+                              <a
+                                href={att.url || '#'}
+                                download={att.name}
+                                className="text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer"
+                                title="Download file"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Download</span>
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -4002,16 +4141,23 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
             </div>
 
             <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[300px]">
-              {previewModalFile.fileUrl ? (
+              {previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:image') || previewModalFile.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|svg)$/)) ? (
                 <img
                   src={previewModalFile.fileUrl}
                   alt={previewModalFile.title}
                   className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
                 />
+              ) : previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:application/pdf') || previewModalFile.fileName?.toLowerCase().endsWith('.pdf')) ? (
+                <iframe
+                  src={previewModalFile.fileUrl}
+                  title={previewModalFile.fileName || previewModalFile.title}
+                  className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
+                />
               ) : (
-                <div className="p-12 text-center text-slate-400">
-                  <FileText className="w-12 h-12 mx-auto mb-2 text-slate-500" />
-                  <p className="text-sm font-semibold">{previewModalFile.fileName || 'CAD Drawing File'}</p>
+                <div className="p-12 text-center text-slate-400 space-y-2">
+                  <FileText className="w-12 h-12 mx-auto text-slate-500" />
+                  <p className="text-sm font-semibold text-white">{previewModalFile.fileName || 'CAD Drawing File'}</p>
+                  <p className="text-xs text-slate-400 font-mono">{previewModalFile.fileSize} • {previewModalFile.category}</p>
                 </div>
               )}
 

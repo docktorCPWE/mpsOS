@@ -447,15 +447,25 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
 
                           <div className="flex items-center gap-1 shrink-0">
                             {file.url && (
-                              <a
-                                href={file.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="p-1.5 text-slate-400 hover:text-blue-400 rounded transition cursor-pointer"
-                                title="Inspect deliverable"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </a>
+                              <>
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1.5 text-slate-400 hover:text-blue-400 rounded transition cursor-pointer"
+                                  title="Inspect / view file"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </a>
+                                <a
+                                  href={file.url}
+                                  download={file.name}
+                                  className="p-1.5 text-slate-400 hover:text-emerald-400 rounded transition cursor-pointer"
+                                  title="Download file"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </a>
+                              </>
                             )}
                           </div>
                         </div>

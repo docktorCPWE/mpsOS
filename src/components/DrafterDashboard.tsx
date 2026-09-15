@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check } from 'lucide-react';
-import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry } from '../types';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye } from 'lucide-react';
+import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout } from '../data/mockData';
@@ -136,6 +136,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const [showKyleReviewDrawer, setShowKyleReviewDrawer] = useState(false);
   const [delegationFilter, setDelegationFilter] = useState<'all' | 'my_assigned' | 'pending' | 'completed' | 'waiting_kyle' | 'revisions_requested' | 'approved'>('all');
   const [revisionModalTask, setRevisionModalTask] = useState<{ task: DelegatedWorkItem; job?: Job } | null>(null);
+  const [previewingAttachment, setPreviewingAttachment] = useState<{
+    file: TaskAttachment;
+    taskTitle: string;
+    jobNumber?: string;
+  } | null>(null);
 
   // Whenever the active staff user is switched, update the board scope
   useEffect(() => {
@@ -1082,25 +1087,67 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                                 "{task.completionNotes}"
                               </p>
                             )}
+                          </div>
+                        )}
 
-                            {task.attachments && task.attachments.length > 0 && (
-                              <div className="pt-1 flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] text-emerald-800 font-semibold flex items-center gap-1">
-                                  <Paperclip className="w-3 h-3 text-emerald-700" />
-                                  <span>Review Deliverables ({task.attachments.length}):</span>
-                                </span>
-                                {task.attachments.map((att) => (
-                                  <span
-                                    key={att.id}
-                                    className="bg-white text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 shadow-2xs"
-                                    title={`${att.name} (${att.size})`}
-                                  >
-                                    <FileText className="w-3 h-3 text-emerald-600" />
-                                    <span className="truncate max-w-[140px]">{att.name}</span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                        {/* Attached Project & CAD Files Tray (Always visible for all task statuses) */}
+                        {task.attachments && task.attachments.length > 0 && (
+                          <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-2.5 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-blue-950 flex items-center gap-1.5">
+                                <Paperclip className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Attached Plan & Reference Files ({task.attachments.length})</span>
+                              </span>
+                              <span className="text-[10px] text-blue-600 font-medium">Click to view or download</span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {task.attachments.map((file) => (
+                                <div
+                                  key={file.id}
+                                  className="flex items-center justify-between p-2 bg-white rounded-lg border border-blue-200/80 hover:border-blue-400 text-xs shadow-2xs transition group"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-7 h-7 rounded bg-blue-100/70 text-blue-700 flex items-center justify-center shrink-0 border border-blue-200">
+                                      <FileText className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="font-bold text-slate-900 text-xs truncate max-w-[200px] sm:max-w-xs" title={file.name}>
+                                        {file.name}
+                                      </p>
+                                      <span className="text-[10px] text-slate-500 font-mono">{file.size}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {file.url && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPreviewingAttachment({
+                                          file,
+                                          taskTitle: task.componentTitle,
+                                          jobNumber: parentJob?.job_number || task.jobNumber
+                                        })}
+                                        className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition flex items-center gap-1 cursor-pointer border border-blue-200"
+                                        title="Preview file"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                        <span>View</span>
+                                      </button>
+                                    )}
+                                    <a
+                                      href={file.url || '#'}
+                                      download={file.name}
+                                      className="px-2 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition flex items-center gap-1 cursor-pointer border border-slate-200"
+                                      title="Download file"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      <span>Download</span>
+                                    </a>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
 
@@ -1119,10 +1166,19 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                           <div className="flex items-center gap-2">
                             {task.attachments && task.attachments.length > 0 && (
-                              <span className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2 py-1 rounded font-semibold text-[10px]" title="Attached blueprint/CAD files">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewingAttachment({
+                                  file: task.attachments![0],
+                                  taskTitle: task.componentTitle,
+                                  jobNumber: parentJob?.job_number || task.jobNumber
+                                })}
+                                className="flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded font-bold text-[10px] transition cursor-pointer"
+                                title="Open attached file viewer"
+                              >
                                 <Paperclip className="w-3 h-3 text-blue-600" />
-                                <span>{task.attachments.length} Files</span>
-                              </span>
+                                <span>{task.attachments.length} {task.attachments.length === 1 ? 'File' : 'Files'}</span>
+                              </button>
                             )}
 
                             {parentJob && (
@@ -1920,6 +1976,102 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           }}
           performedByRole="staff"
         />
+      )}
+
+      {/* Lightbox File / Attachment Preview Modal in Drafter Dashboard */}
+      {previewingAttachment && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full overflow-hidden text-white shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-mono font-bold text-blue-400 uppercase bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800">
+                  {previewingAttachment.jobNumber ? `Job #${previewingAttachment.jobNumber}` : 'Attached File'}
+                </span>
+                <span className="font-bold text-sm text-white truncate max-w-md">
+                  {previewingAttachment.file.name}
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  ({previewingAttachment.file.size})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewingAttachment(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[320px]">
+              {(previewingAttachment.file.url && previewingAttachment.file.url.startsWith('data:image')) || previewingAttachment.file.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|svg)$/) ? (
+                <img
+                  src={previewingAttachment.file.url}
+                  alt={previewingAttachment.file.name}
+                  className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
+                />
+              ) : previewingAttachment.file.url && (previewingAttachment.file.url.startsWith('data:application/pdf') || previewingAttachment.file.name.toLowerCase().endsWith('.pdf')) ? (
+                <iframe
+                  src={previewingAttachment.file.url}
+                  title={previewingAttachment.file.name}
+                  className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
+                />
+              ) : (
+                <div className="p-12 text-center text-slate-300 space-y-3">
+                  <div className="w-16 h-16 rounded-2xl bg-blue-950/80 border border-blue-700/60 text-blue-400 flex items-center justify-center mx-auto">
+                    <FileText className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <p className="text-base font-bold text-white">{previewingAttachment.file.name}</p>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">{previewingAttachment.file.size} • {previewingAttachment.file.type || 'Attached File'}</p>
+                  </div>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Binary or CAD drawing files can be downloaded directly to open in your CAD software (AutoCAD, Chief Architect, Revit).
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-4 bg-slate-950 border border-slate-800 p-3 rounded-xl text-xs w-full text-slate-300 flex items-center justify-between gap-2">
+                <span className="text-slate-400">Attached to Component: <strong className="text-white">{previewingAttachment.taskTitle}</strong></span>
+                <span className="text-[10px] text-slate-500 font-mono">{previewingAttachment.file.type || 'Attached File'}</span>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
+              <div className="text-xs text-slate-400 font-mono truncate max-w-xs">
+                {previewingAttachment.file.name}
+              </div>
+              <div className="flex items-center gap-2">
+                {previewingAttachment.file.url && (
+                  <a
+                    href={previewingAttachment.file.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in Tab</span>
+                  </a>
+                )}
+                <a
+                  href={previewingAttachment.file.url || '#'}
+                  download={previewingAttachment.file.name}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download File</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewingAttachment(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

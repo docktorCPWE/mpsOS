@@ -442,7 +442,34 @@ export const INITIAL_JOBS: Job[] = [
         billableAmount: 123.25
       }
     ],
-    delegated_tasks: [],
+    delegated_tasks: [
+      {
+        id: 'del-214-1',
+        jobId: '214',
+        jobNumber: '26214',
+        customerName: 'Robert Vance',
+        componentTitle: 'Preliminary Layout Redlines',
+        category: 'Floor Plan',
+        priority: 'High',
+        assignedTo: 'Kyle',
+        assignedToEmail: 'kyle@myplanstore.com',
+        delegatedBy: 'Kyle',
+        delegatedAt: '2026-09-14T10:00:00.000Z',
+        dueDate: '2026-09-18',
+        neededWorkDescription: 'Update preliminary layout dimensions per customer redline markup notes.',
+        notes: 'Check master suite setback clearance against lot survey.',
+        status: 'Pending',
+        attachments: [
+          {
+            id: 'att-214-1',
+            name: 'Vance_Residence_Markup.png',
+            size: '2.4 MB',
+            type: 'image/png',
+            url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
+          }
+        ]
+      }
+    ],
     deliverables: [
       {
         id: 'deliv-214-1',

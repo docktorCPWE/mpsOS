@@ -133,18 +133,38 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
-    setTimeout(() => {
-      const newFiles: TaskAttachment[] = Array.from(files).map((f: File, i: number) => ({
-        id: `att-upload-${Date.now()}-${i}`,
-        name: f.name,
-        size: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
-        type: f.type || 'application/octet-stream',
-        url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80'
-      }));
+    const fileList = Array.from(files) as File[];
+    let loadedCount = 0;
+    const newFiles: TaskAttachment[] = [];
 
-      setAttachments(prev => [...prev, ...newFiles]);
-      setIsUploading(false);
-    }, 400);
+    fileList.forEach((file: File, index: number) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = (event.target?.result as string) || '';
+        newFiles.push({
+          id: `att-upload-${Date.now()}-${index}`,
+          name: file.name,
+          size: file.size < 1024 * 1024 
+            ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+            : `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+          type: file.type || 'application/octet-stream',
+          url: dataUrl
+        });
+        loadedCount++;
+        if (loadedCount === fileList.length) {
+          setAttachments(prev => [...prev, ...newFiles]);
+          setIsUploading(false);
+        }
+      };
+      reader.onerror = () => {
+        loadedCount++;
+        if (loadedCount === fileList.length) {
+          setAttachments(prev => [...prev, ...newFiles]);
+          setIsUploading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleRemoveAttachment = (id: string) => {
