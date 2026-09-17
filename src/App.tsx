@@ -2355,6 +2355,10 @@ export default function App() {
         timeCards={timeCards}
         jobs={jobs}
         initialSelectedStaffId={timeCardModalStaffId}
+        onUpdateTimeCards={(updated) => {
+          setTimeCards(updated);
+          saveStoredTimeCards(updated);
+        }}
       />
 
       {/* MODAL 10: Greg Hyatt Dev Project Time Entries Review & CSV Export Modal */}

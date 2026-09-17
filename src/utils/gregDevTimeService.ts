@@ -1,4 +1,5 @@
 import { GregDevProjectCard, GregDevTimeEntry, StaffUser, StandardGregDevProjectType } from '../types';
+import { getLocalDateString } from './timeCardExport';
 
 export const GREG_DEV_STORAGE_CARDS_KEY = 'myplanstore_greg_dev_cards_v1';
 export const GREG_DEV_STORAGE_ENTRIES_KEY = 'myplanstore_greg_dev_entries_v1';
@@ -77,7 +78,7 @@ export const INITIAL_GREG_DEV_CARDS: GregDevProjectCard[] = [
     colorTheme: 'indigo',
     isActive: false,
     isPausedByBreak: false,
-    todaySeconds: 5400, // 1h 30m previously logged today
+    todaySeconds: 0,
     totalSeconds: 54000,
     currentNotes: 'Time card sync & drafter workload optimization'
   },
@@ -87,7 +88,7 @@ export const INITIAL_GREG_DEV_CARDS: GregDevProjectCard[] = [
     colorTheme: 'cyan',
     isActive: false,
     isPausedByBreak: false,
-    todaySeconds: 3600, // 1h
+    todaySeconds: 0,
     totalSeconds: 28800,
     currentNotes: 'Video clip render pipeline & compression'
   },
@@ -97,55 +98,55 @@ export const INITIAL_GREG_DEV_CARDS: GregDevProjectCard[] = [
     colorTheme: 'purple',
     isActive: false,
     isPausedByBreak: false,
-    todaySeconds: 2700, // 45m
+    todaySeconds: 0,
     totalSeconds: 32400,
     currentNotes: 'Stem separation DSP testing'
   }
 ];
 
-// Seed realistic initial entries for Greg so Daily, Weekly, and Monthly reports are full and insightful immediately
+// Seed realistic initial entries for Greg for past days so Weekly and Monthly reports are full, while today starts clean
 export const INITIAL_GREG_DEV_ENTRIES: GregDevTimeEntry[] = [
   {
-    id: 'dev-log-today-1',
+    id: 'dev-log-prev-1',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     projectType: 'MPS OS Dev',
-    date: new Date().toISOString().split('T')[0],
-    startTime: new Date(Date.now() - 5400000).toISOString(),
-    endTime: new Date().toISOString(),
+    date: '2026-09-08',
+    startTime: '2026-09-08T13:30:00.000Z',
+    endTime: '2026-09-08T15:00:00.000Z',
     durationSeconds: 5400, // 1.5 hrs
-    notes: 'MPS OS Dev: Time clock multi-card architecture & Firestore rules deployment',
+    notes: 'MPS OS Dev: Multi-card time clock architecture & Firestore synchronization',
     hourlyRate: 150,
     billableAmount: 225,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-08T15:00:00.000Z'
   },
   {
-    id: 'dev-log-today-2',
+    id: 'dev-log-prev-2',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     projectType: 'BigX Media Dev',
-    date: new Date().toISOString().split('T')[0],
-    startTime: new Date(Date.now() - 10800000).toISOString(),
-    endTime: new Date(Date.now() - 7200000).toISOString(),
+    date: '2026-09-08',
+    startTime: '2026-09-08T10:00:00.000Z',
+    endTime: '2026-09-08T11:00:00.000Z',
     durationSeconds: 3600, // 1.0 hr
     notes: 'BigX Media Dev: Video encoding queue & thumbnail extraction automation',
     hourlyRate: 150,
     billableAmount: 150,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-08T11:00:00.000Z'
   },
   {
-    id: 'dev-log-today-3',
+    id: 'dev-log-prev-3',
     staffId: 'staff-greg',
     staffName: 'Greg Hyatt',
     projectType: 'Sound Extraction Dev',
-    date: new Date().toISOString().split('T')[0],
-    startTime: new Date(Date.now() - 14400000).toISOString(),
-    endTime: new Date(Date.now() - 11700000).toISOString(),
+    date: '2026-09-07',
+    startTime: '2026-09-07T14:00:00.000Z',
+    endTime: '2026-09-07T14:45:00.000Z',
     durationSeconds: 2700, // 0.75 hr
     notes: 'Sound Extraction Dev: WAV stem splitting and frequency curve isolation',
     hourlyRate: 150,
     billableAmount: 112.5,
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-07T14:45:00.000Z'
   },
   // Yesterday entry
   {
@@ -222,16 +223,56 @@ export const INITIAL_GREG_DEV_ENTRIES: GregDevTimeEntry[] = [
   }
 ];
 
+/**
+ * Reconciles project cards so their todaySeconds accurately reflects ONLY entries
+ * completed today, preventing multi-day inflation or runaway numbers.
+ */
+export function reconcileGregDevCardsWithEntries(
+  cards: GregDevProjectCard[],
+  entries: GregDevTimeEntry[],
+  todayStr: string = getLocalDateString(new Date())
+): GregDevProjectCard[] {
+  return cards.map(card => {
+    const todaySec = entries
+      .filter(e => {
+        if (e.projectType !== card.projectType) return false;
+        const entryDate = e.date || (e.startTime ? getLocalDateString(new Date(e.startTime)) : '');
+        return entryDate === todayStr;
+      })
+      .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+
+    const allTimeSec = entries
+      .filter(e => e.projectType === card.projectType)
+      .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+
+    return {
+      ...card,
+      todaySeconds: todaySec,
+      totalSeconds: Math.max(card.totalSeconds || 0, allTimeSec)
+    };
+  });
+}
+
 export function getStoredGregDevCards(): GregDevProjectCard[] {
   try {
     const raw = localStorage.getItem(GREG_DEV_STORAGE_CARDS_KEY);
-    if (!raw) {
-      localStorage.setItem(GREG_DEV_STORAGE_CARDS_KEY, JSON.stringify(INITIAL_GREG_DEV_CARDS));
-      return INITIAL_GREG_DEV_CARDS;
+    let cards = INITIAL_GREG_DEV_CARDS;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cards = parsed;
+        }
+      } catch {
+        cards = INITIAL_GREG_DEV_CARDS;
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    return INITIAL_GREG_DEV_CARDS;
+
+    // Auto-reconcile with stored entries so today's total is strictly accurate for today
+    const entries = getStoredGregDevEntries();
+    const reconciled = reconcileGregDevCardsWithEntries(cards, entries);
+    localStorage.setItem(GREG_DEV_STORAGE_CARDS_KEY, JSON.stringify(reconciled));
+    return reconciled;
   } catch (err) {
     console.warn('Error reading stored Greg dev cards:', err);
     return INITIAL_GREG_DEV_CARDS;

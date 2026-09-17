@@ -101,6 +101,7 @@ const getThemeStyles = (color: string) => {
 
 interface DevProjectCardItemProps {
   card: GregDevProjectCard;
+  devEntries?: GregDevTimeEntry[];
   currentStaff: StaffUser;
   nowMs: number;
   isClockedIn: boolean;
@@ -115,6 +116,7 @@ interface DevProjectCardItemProps {
 // Top-level card component: never recreated or remounted by parent 1-second tickers
 const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   card,
+  devEntries,
   currentStaff,
   nowMs,
   isClockedIn,
@@ -184,6 +186,18 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
     onStopTimer(card.id, localNotes);
   };
 
+  // Calculate today's logged seconds strictly from finalized time entries for today
+  const todayStr = getLocalDateString(new Date(nowMs));
+  const entriesTodaySec = (devEntries && devEntries.length > 0)
+    ? devEntries
+        .filter(e => {
+          if (e.projectType !== card.projectType) return false;
+          const entryDate = e.date || (e.startTime ? getLocalDateString(new Date(e.startTime)) : '');
+          return entryDate === todayStr;
+        })
+        .reduce((sum, e) => sum + (e.durationSeconds || 0), 0)
+    : (card.todaySeconds || 0);
+
   // Calculate live timer for active running session
   let liveElapsedSec = 0;
   if (card.isActive && card.activeTimerStart) {
@@ -191,7 +205,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   }
 
   // Total today including live running time
-  const todayTotalSec = (card.todaySeconds || 0) + liveElapsedSec;
+  const todayTotalSec = entriesTodaySec + liveElapsedSec;
   const totalHoursDec = (todayTotalSec / 3600).toFixed(2);
   const estimatedValue = (parseFloat(totalHoursDec) * (currentStaff.hourlyRate || 150)).toFixed(2);
 
@@ -470,13 +484,20 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     // Update card
     const updatedCards = devCards.map(c => {
       if (c.id === cardId) {
+        const cardTodaySec = updatedEntries
+          .filter(e => e.projectType === c.projectType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
+          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+        const cardTotalSec = updatedEntries
+          .filter(e => e.projectType === c.projectType)
+          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+
         return {
           ...c,
           isActive: false,
           isPausedByBreak: false,
           activeTimerStart: undefined,
-          todaySeconds: (c.todaySeconds || 0) + durationSeconds,
-          totalSeconds: (c.totalSeconds || 0) + durationSeconds,
+          todaySeconds: cardTodaySec,
+          totalSeconds: Math.max(c.totalSeconds || 0, cardTotalSec),
           lastStoppedAt: new Date(endMs).toISOString(),
           currentNotes: noteToLog
         };
@@ -701,6 +722,7 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
                 <DevProjectCardItem
                   key={card.id}
                   card={card}
+                  devEntries={devEntries}
                   currentStaff={currentStaff}
                   nowMs={nowMs}
                   isClockedIn={isClockedIn}

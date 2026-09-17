@@ -17,7 +17,10 @@ import {
   Search,
   Filter,
   Plus,
-  Briefcase
+  Briefcase,
+  Edit2,
+  Trash2,
+  Save
 } from 'lucide-react';
 import { StaffUser, TimeCardShift, Job } from '../types';
 import { isStaffExemptFromClock } from '../data/mockData';
@@ -28,6 +31,7 @@ import {
   calculateShiftWorkSeconds,
   calculateShiftBreakSeconds,
   getEmployeeWeeklySummary,
+  getWeekDateRangeLabel,
   exportSingleEmployeeTimeCardCSV,
   exportTeamTimeCardsSummaryCSV
 } from '../utils/timeCardExport';
@@ -41,6 +45,7 @@ interface TimeCardModalProps {
   jobs: Job[];
   initialSelectedStaffId?: string;
   onAddManualShift?: (shift: TimeCardShift) => void;
+  onUpdateTimeCards?: (shifts: TimeCardShift[]) => void;
 }
 
 export const TimeCardModal: React.FC<TimeCardModalProps> = ({
@@ -51,7 +56,8 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
   timeCards,
   jobs,
   initialSelectedStaffId,
-  onAddManualShift
+  onAddManualShift,
+  onUpdateTimeCards
 }) => {
   const isJason = isStaffExemptFromClock(currentStaff);
   const isManagerOrAdmin = isJason || currentStaff.role === 'admin' || currentStaff.canAccessFinancials || currentStaff.canManageStaff;
@@ -72,6 +78,16 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
   });
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [metricScope, setMetricScope] = useState<'this_week' | 'all_shifts'>('this_week');
+
+  // Shift Editing State
+  const [editingShift, setEditingShift] = useState<TimeCardShift | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editClockIn, setEditClockIn] = useState('');
+  const [editClockOut, setEditClockOut] = useState('');
+  const [editBreakMinutes, setEditBreakMinutes] = useState(0);
+  const [editNotes, setEditNotes] = useState('');
+  const [editStatus, setEditStatus] = useState<'clocked_in' | 'clocked_out'>('clocked_out');
 
   if (!isOpen) return null;
 
@@ -85,6 +101,94 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
 
   // Weekly calculations for the selected staff
   const staffSummary = getEmployeeWeeklySummary(targetStaff, timeCards, jobs);
+
+  // All-shifts calculations for selected staff
+  const allShiftsWorkSec = selectedStaffShifts.reduce((acc, s) => acc + calculateShiftWorkSeconds(s), 0);
+  const allShiftsBreakSec = selectedStaffShifts.reduce((acc, s) => acc + calculateShiftBreakSeconds(s), 0);
+  const allShiftsWorkHours = allShiftsWorkSec / 3600;
+  const allShiftsBreakHours = allShiftsBreakSec / 3600;
+  const allShiftsGrossPay = allShiftsWorkHours * (targetStaff.hourlyRate || 75);
+
+  const displayWorkHours = metricScope === 'all_shifts' ? allShiftsWorkHours : staffSummary.totalShiftHours;
+  const displayBreakHours = metricScope === 'all_shifts' ? allShiftsBreakHours : staffSummary.totalBreakHours;
+  const displayGrossPay = metricScope === 'all_shifts' ? allShiftsGrossPay : staffSummary.estimatedGrossPay;
+
+  // Open Edit Modal for a specific shift
+  const handleOpenEdit = (shift: TimeCardShift) => {
+    setEditingShift(shift);
+    setEditDate(shift.date || '');
+    setEditStatus(shift.status === 'clocked_in' ? 'clocked_in' : 'clocked_out');
+    
+    // Extract HH:mm in local time
+    if (shift.clockInTime) {
+      const inD = new Date(shift.clockInTime);
+      setEditClockIn(`${String(inD.getHours()).padStart(2, '0')}:${String(inD.getMinutes()).padStart(2, '0')}`);
+    } else {
+      setEditClockIn('08:00');
+    }
+
+    if (shift.clockOutTime) {
+      const outD = new Date(shift.clockOutTime);
+      setEditClockOut(`${String(outD.getHours()).padStart(2, '0')}:${String(outD.getMinutes()).padStart(2, '0')}`);
+    } else {
+      setEditClockOut('17:00');
+    }
+
+    const breakSec = calculateShiftBreakSeconds(shift);
+    setEditBreakMinutes(Math.round(breakSec / 60));
+    setEditNotes(shift.notes || '');
+  };
+
+  const handleSaveShiftEdit = () => {
+    if (!editingShift || !onUpdateTimeCards) return;
+
+    const [inHours, inMins] = editClockIn.split(':').map(Number);
+    const [outHours, outMins] = editClockOut.split(':').map(Number);
+    const [year, month, day] = editDate.split('-').map(Number);
+
+    const inDate = new Date(year, month - 1, day, inHours, inMins, 0, 0);
+    const outDate = editStatus === 'clocked_in' 
+      ? undefined 
+      : new Date(year, month - 1, day, outHours, outMins, 0, 0);
+
+    const grossSec = outDate ? Math.max(0, Math.floor((outDate.getTime() - inDate.getTime()) / 1000)) : 0;
+    const breakSec = Math.max(0, editBreakMinutes * 60);
+    const netWorkSec = Math.max(0, grossSec - breakSec);
+
+    const updatedBreaks = breakSec > 0 && outDate ? [
+      {
+        id: `brk-${editingShift.id}`,
+        startTime: new Date(inDate.getTime() + Math.floor(grossSec / 2) * 1000 - (breakSec / 2) * 1000).toISOString(),
+        endTime: new Date(inDate.getTime() + Math.floor(grossSec / 2) * 1000 + (breakSec / 2) * 1000).toISOString(),
+        durationSeconds: breakSec
+      }
+    ] : [];
+
+    const updatedShift: TimeCardShift = {
+      ...editingShift,
+      date: editDate,
+      clockInTime: inDate.toISOString(),
+      clockOutTime: outDate ? outDate.toISOString() : undefined,
+      status: editStatus,
+      breaks: updatedBreaks,
+      totalWorkSeconds: editStatus === 'clocked_in' ? undefined : netWorkSec,
+      totalBreakSeconds: breakSec,
+      notes: editNotes.trim() || 'Regular Shift',
+      missedClockOut: false
+    };
+
+    const updatedList = timeCards.map(s => s.id === editingShift.id ? updatedShift : s);
+    onUpdateTimeCards(updatedList);
+    setEditingShift(null);
+  };
+
+  const handleDeleteShift = (shiftId: string) => {
+    if (!window.confirm('Are you sure you want to delete this shift record?')) return;
+    if (!onUpdateTimeCards) return;
+    const updatedList = timeCards.filter(s => s.id !== shiftId);
+    onUpdateTimeCards(updatedList);
+    setEditingShift(null);
+  };
 
   // Find project logs associated with this employee
   const employeeProjectLogs = jobs.flatMap(j => 
@@ -243,18 +347,42 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                   </div>
                 </div>
 
-                {/* 4 Metrics Metric Strip */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
+                {/* 4 Metrics Metric Strip with Scope Toggle */}
+                <div className="flex items-center justify-between pt-4 pb-1">
+                  <span className="text-xs font-bold text-slate-700">Summary Statistics</span>
+                  <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100 text-xs">
+                    <button
+                      onClick={() => setMetricScope('this_week')}
+                      className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all cursor-pointer ${
+                        metricScope === 'this_week' ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      This Week ({getWeekDateRangeLabel()})
+                    </button>
+                    <button
+                      onClick={() => setMetricScope('all_shifts')}
+                      className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all cursor-pointer ${
+                        metricScope === 'all_shifts' ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      All Recorded Shifts ({selectedStaffShifts.length})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
                     <div className="flex items-center justify-between text-slate-500 text-xs">
                       <span>Total Shift Work</span>
                       <Clock className="w-3.5 h-3.5 text-blue-600" />
                     </div>
                     <p className="text-lg font-bold font-mono text-slate-900 mt-1">
-                      {staffSummary.totalShiftHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
+                      {displayWorkHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
                     </p>
                     <span className="text-[10px] text-slate-500">
-                      Regular: {staffSummary.regularHours.toFixed(1)}h {staffSummary.overtimeHours > 0 && `• OT: ${staffSummary.overtimeHours.toFixed(1)}h`}
+                      {metricScope === 'this_week' 
+                        ? `Regular: ${staffSummary.regularHours.toFixed(1)}h ${staffSummary.overtimeHours > 0 ? `• OT: ${staffSummary.overtimeHours.toFixed(1)}h` : ''}`
+                        : `${selectedStaffShifts.length} shifts logged`}
                     </span>
                   </div>
 
@@ -264,7 +392,7 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                       <Coffee className="w-3.5 h-3.5 text-amber-600" />
                     </div>
                     <p className="text-lg font-bold font-mono text-slate-900 mt-1">
-                      {staffSummary.totalBreakHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
+                      {displayBreakHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
                     </p>
                     <span className="text-[10px] text-slate-500">
                       Unpaid meal/rest periods
@@ -290,7 +418,7 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                       <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
                     </div>
                     <p className="text-lg font-bold font-mono text-emerald-700 mt-1">
-                      ${staffSummary.estimatedGrossPay.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ${displayGrossPay.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </p>
                     <span className="text-[10px] text-slate-500">
                       Pay period accrual
@@ -346,6 +474,7 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                             <th className="py-2.5 px-3 text-right">Work Hours</th>
                             <th className="py-2.5 px-3 text-right">Pay Est.</th>
                             <th className="py-2.5 px-3">Shift Notes</th>
+                            <th className="py-2.5 px-3 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-mono">
@@ -405,6 +534,16 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                                 </td>
                                 <td className="py-2.5 px-3 font-sans text-slate-600 max-w-xs truncate text-[11px]">
                                   {shift.notes || '--'}
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap font-sans">
+                                  <button
+                                    onClick={() => handleOpenEdit(shift)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 rounded-md text-[11px] font-semibold transition-all cursor-pointer"
+                                    title="Edit shift punches, breaks, or notes"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                    <span>Edit</span>
+                                  </button>
                                 </td>
                               </tr>
                             );
@@ -594,6 +733,223 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
         </div>
 
       </div>
+
+      {/* SUB-MODAL: Edit Specific Shift Record */}
+      {editingShift && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-400">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Edit Shift Punch Record</h3>
+                  <p className="text-[11px] text-slate-400">{targetStaff.name} • ${targetStaff.hourlyRate || 75}/hr</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingShift(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Date & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Shift Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Shift Status
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="clocked_out">Completed (Clocked Out)</option>
+                    <option value="clocked_in">Active (Clocked In)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Clock In & Clock Out Times */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-emerald-600" />
+                    <span>Clock In Time</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={editClockIn}
+                    onChange={(e) => setEditClockIn(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-blue-600" />
+                    <span>Clock Out Time</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={editClockOut}
+                    disabled={editStatus === 'clocked_in'}
+                    onChange={(e) => setEditClockOut(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editStatus === 'clocked_in' 
+                        ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
+                        : 'bg-slate-50 border-slate-200 text-slate-900'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Break Duration */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Coffee className="w-3 h-3 text-amber-600" />
+                    <span>Total Break Time (Minutes)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-normal">Unpaid meal/rest</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="300"
+                    step="5"
+                    value={editBreakMinutes}
+                    onChange={(e) => setEditBreakMinutes(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex items-center gap-1">
+                    {[0, 15, 30, 45, 60].map((mins) => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => setEditBreakMinutes(mins)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                          editBreakMinutes === mins
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {mins === 0 ? 'None' : `${mins}m`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Shift Hours Preview Calculation */}
+              {editStatus === 'clocked_out' && (
+                <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-blue-800 tracking-wider">
+                    Calculated Shift Summary
+                  </span>
+                  <div className="grid grid-cols-3 gap-2 mt-1 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Gross Span</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {(() => {
+                          const [ih, im] = editClockIn.split(':').map(Number);
+                          const [oh, om] = editClockOut.split(':').map(Number);
+                          const totalMins = Math.max(0, (oh * 60 + om) - (ih * 60 + im));
+                          return `${(totalMins / 60).toFixed(2)} hrs`;
+                        })()}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Net Work</span>
+                      <span className="font-mono font-bold text-blue-700">
+                        {(() => {
+                          const [ih, im] = editClockIn.split(':').map(Number);
+                          const [oh, om] = editClockOut.split(':').map(Number);
+                          const totalMins = Math.max(0, (oh * 60 + om) - (ih * 60 + im));
+                          const netMins = Math.max(0, totalMins - editBreakMinutes);
+                          return `${(netMins / 60).toFixed(2)} hrs`;
+                        })()}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Est. Earnings</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        {(() => {
+                          const [ih, im] = editClockIn.split(':').map(Number);
+                          const [oh, om] = editClockOut.split(':').map(Number);
+                          const totalMins = Math.max(0, (oh * 60 + om) - (ih * 60 + im));
+                          const netMins = Math.max(0, totalMins - editBreakMinutes);
+                          const rate = targetStaff.hourlyRate || 75;
+                          return `$${((netMins / 60) * rate).toFixed(2)}`;
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Shift Notes / Tasks Performed
+                </label>
+                <textarea
+                  rows={2}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="e.g. Regular Shift, MPS OS Dev, Drafter coordination..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => handleDeleteShift(editingShift.id)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Shift</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingShift(null)}
+                  className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveShiftEdit}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

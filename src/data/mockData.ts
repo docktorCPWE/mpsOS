@@ -1,4 +1,5 @@
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, AppNotification, ChatMessage, TimeCardShift, PayrollEntry } from '../types';
+import { getLocalDateString } from '../utils/timeCardExport';
 
 export function isStaffExemptFromClock(userNameOrStaff?: string | StaffUser): boolean {
   // No one is hardcoded exempt; all staff including Greg use the shift timeclock bar
@@ -1649,21 +1650,61 @@ export const INITIAL_TIME_CARDS: TimeCardShift[] = ALL_RAW_TIME_CARDS;
 
 /**
  * Automatically inspects and reconciles shifts to prevent runaway timers or missed clock-outs from corrupting data.
- * Closes any shift that was left clocked in on a past date or exceeded 16 continuous hours.
+ * Closes genuine runaway shifts that exceeded 16 continuous hours without clocking out.
+ * Heals any previously auto-closed shifts for Greg Hyatt to his actual clock-out punch (3:10 PM).
  */
 export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: number = Date.now()): { shifts: TimeCardShift[]; wasReconciled: boolean } {
-  const d = new Date(nowMs);
-  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const todayStr = getLocalDateString(new Date(nowMs));
   let wasReconciled = false;
 
   const reconciled = shifts.map(shift => {
-    // If shift is marked clocked_in or on_break but belongs to a past date or is runaway (>16 hrs)
+    // 1. Repair previously auto-closed shift for Greg Hyatt (clock-in ~6:27 AM, actual clock out 3:10 PM)
+    if (
+      (shift.staffId === 'staff-greg' || (shift.staffName && shift.staffName.toLowerCase().includes('greg'))) &&
+      shift.missedClockOut &&
+      shift.clockInTime &&
+      (shift.clockInTime.includes('06:27') || shift.clockInTime.includes('6:27') || (shift.clockOutTime && shift.clockOutTime.includes('14:57')))
+    ) {
+      wasReconciled = true;
+      const clockInDate = new Date(shift.clockInTime);
+      const actualOutDate = new Date(clockInDate);
+      actualOutDate.setHours(15, 10, 0, 0); // 3:10 PM actual clock out
+
+      const startMs = clockInDate.getTime();
+      const endMs = actualOutDate.getTime();
+      const grossSec = Math.max(0, Math.floor((endMs - startMs) / 1000)); // 31,380s = 8h 43m
+      const breakSec = 1800; // 30m break (10:27 AM - 10:57 AM)
+      const workSec = Math.max(0, grossSec - breakSec); // 29,580s = 8.22 hrs (8h 13m)
+
+      const healedBreaks = [
+        {
+          id: `brk-healed-${shift.id}`,
+          startTime: new Date(startMs + 4 * 3600 * 1000).toISOString(),
+          endTime: new Date(startMs + 4.5 * 3600 * 1000).toISOString(),
+          durationSeconds: breakSec
+        }
+      ];
+
+      return {
+        ...shift,
+        date: todayStr,
+        status: 'clocked_out' as const,
+        clockOutTime: actualOutDate.toISOString(),
+        breaks: healedBreaks,
+        totalWorkSeconds: workSec,
+        totalBreakSeconds: breakSec,
+        notes: 'Regular Shift (Clocked in 6:27 AM - Clocked out 3:10 PM)',
+        missedClockOut: false
+      };
+    }
+
+    // 2. Only auto-close genuine runaway shifts if elapsed hours exceed 16 hours!
+    // Active normal shifts (e.g. 6 to 12 hours) must NEVER be auto-closed prematurely!
     if (shift.status === 'clocked_in' || shift.status === 'on_break') {
-      const isPastDate = shift.date && shift.date < todayStr;
       const startMs = shift.clockInTime ? new Date(shift.clockInTime).getTime() : 0;
       const elapsedHours = startMs ? (nowMs - startMs) / (3600 * 1000) : 0;
 
-      if (isPastDate || elapsedHours > 16) {
+      if (elapsedHours > 16) {
         wasReconciled = true;
         const standardWorkSec = 28800; // 8.0 hrs standard capped shift
         const standardBreakSec = 1800; // 30 min lunch break
@@ -1692,8 +1733,8 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
           totalWorkSeconds: standardWorkSec,
           totalBreakSeconds: standardBreakSec,
           notes: shift.notes && shift.notes !== 'Active shift'
-            ? `${shift.notes} (Auto-closed: Missed clock out)`
-            : 'Regular Shift (Auto-closed: Missed clock out)',
+            ? `${shift.notes} (Auto-closed: Runaway >16 hrs)`
+            : 'Regular Shift (Auto-closed: Runaway >16 hrs)',
           missedClockOut: true
         };
       }
