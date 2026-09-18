@@ -31,6 +31,7 @@ import {
   calculateShiftWorkSeconds,
   calculateShiftBreakSeconds,
   getEmployeeWeeklySummary,
+  getEmployeeAllTimeSummary,
   getWeekDateRangeLabel,
   exportSingleEmployeeTimeCardCSV,
   exportTeamTimeCardsSummaryCSV
@@ -101,17 +102,12 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
 
   // Weekly calculations for the selected staff
   const staffSummary = getEmployeeWeeklySummary(targetStaff, timeCards, jobs);
+  const allTimeSummary = getEmployeeAllTimeSummary(targetStaff, timeCards, jobs);
 
-  // All-shifts calculations for selected staff
-  const allShiftsWorkSec = selectedStaffShifts.reduce((acc, s) => acc + calculateShiftWorkSeconds(s), 0);
-  const allShiftsBreakSec = selectedStaffShifts.reduce((acc, s) => acc + calculateShiftBreakSeconds(s), 0);
-  const allShiftsWorkHours = allShiftsWorkSec / 3600;
-  const allShiftsBreakHours = allShiftsBreakSec / 3600;
-  const allShiftsGrossPay = allShiftsWorkHours * (targetStaff.hourlyRate || 75);
-
-  const displayWorkHours = metricScope === 'all_shifts' ? allShiftsWorkHours : staffSummary.totalShiftHours;
-  const displayBreakHours = metricScope === 'all_shifts' ? allShiftsBreakHours : staffSummary.totalBreakHours;
-  const displayGrossPay = metricScope === 'all_shifts' ? allShiftsGrossPay : staffSummary.estimatedGrossPay;
+  const displayWorkHours = metricScope === 'all_shifts' ? allTimeSummary.totalShiftHours : staffSummary.totalShiftHours;
+  const displayBreakHours = metricScope === 'all_shifts' ? allTimeSummary.totalBreakHours : staffSummary.totalBreakHours;
+  const displayProjectHours = metricScope === 'all_shifts' ? allTimeSummary.totalProjectHours : staffSummary.totalProjectHours;
+  const displayGrossPay = metricScope === 'all_shifts' ? allTimeSummary.estimatedGrossPay : staffSummary.estimatedGrossPay;
 
   // Open Edit Modal for a specific shift
   const handleOpenEdit = (shift: TimeCardShift) => {
@@ -405,10 +401,10 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                       <Layers className="w-3.5 h-3.5 text-indigo-600" />
                     </div>
                     <p className="text-lg font-bold font-mono text-slate-900 mt-1">
-                      {staffSummary.totalProjectHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
+                      {displayProjectHours.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span>
                     </p>
                     <span className="text-[10px] text-slate-500">
-                      Direct drafting on CAD jobs
+                      {metricScope === 'this_week' ? 'Direct drafting on CAD jobs this week' : 'All-time drafting on CAD jobs'}
                     </span>
                   </div>
 
@@ -494,12 +490,22 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                                 <td className="py-2.5 px-3 whitespace-nowrap font-sans">
                                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                     shift.status === 'clocked_in'
-                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 animate-pulse'
                                       : shift.status === 'on_break'
                                       ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : shift.missedClockOut
+                                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
                                       : 'bg-slate-100 text-slate-700 border border-slate-200'
-                                  }`}>
-                                    {shift.status === 'clocked_in' ? 'Clocked In' : shift.status === 'on_break' ? 'On Break' : 'Completed'}
+                                  }`}
+                                  title={shift.missedClockOut ? 'Auto-closed after exceeding 16h without clocking out. Click Edit to adjust actual punch.' : undefined}
+                                  >
+                                    {shift.status === 'clocked_in' 
+                                      ? 'Clocked In' 
+                                      : shift.status === 'on_break' 
+                                      ? 'On Break' 
+                                      : shift.missedClockOut 
+                                      ? 'Auto-Closed (Missed Punch)' 
+                                      : 'Completed'}
                                   </span>
                                 </td>
                                 <td className="py-2.5 px-3 text-slate-800 whitespace-nowrap">

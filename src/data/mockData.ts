@@ -1739,6 +1739,36 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
         };
       }
     }
+
+    // 3. Global integrity check for ALL staff members on completed shifts:
+    // If a shift has valid clockInTime and clockOutTime, ensure totalWorkSeconds and totalBreakSeconds
+    // reflect the exact punch arithmetic rather than being 0 or uncalculated.
+    if (shift.status === 'clocked_out' && shift.clockInTime && shift.clockOutTime) {
+      const inMs = new Date(shift.clockInTime).getTime();
+      const outMs = new Date(shift.clockOutTime).getTime();
+      if (!isNaN(inMs) && !isNaN(outMs) && outMs >= inMs) {
+        const grossSec = Math.max(0, Math.floor((outMs - inMs) / 1000));
+        const breakSec = (shift.breaks || []).reduce((sum, b) => {
+          if (typeof b.durationSeconds === 'number' && b.durationSeconds >= 0) return sum + b.durationSeconds;
+          if (b.startTime && b.endTime) {
+            return sum + Math.max(0, Math.floor((new Date(b.endTime).getTime() - new Date(b.startTime).getTime()) / 1000));
+          }
+          return sum;
+        }, 0);
+        const accurateWorkSec = Math.max(0, grossSec - breakSec);
+
+        // If totalWorkSeconds is missing, null, or 0 (and shift was > 0 sec), heal it
+        if (typeof shift.totalWorkSeconds !== 'number' || (shift.totalWorkSeconds === 0 && grossSec > 60)) {
+          wasReconciled = true;
+          return {
+            ...shift,
+            totalWorkSeconds: accurateWorkSec,
+            totalBreakSeconds: breakSec
+          };
+        }
+      }
+    }
+
     return shift;
   });
 

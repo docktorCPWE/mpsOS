@@ -481,6 +481,11 @@ export default function App() {
           timestamp: new Date().toISOString()
         };
 
+        const updatedLogs = newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []);
+        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+        const totalMins = Math.round(totalSec / 60);
+        const totalHours = Number((totalSec / 3600).toFixed(2));
+
         return {
           ...j,
           active_timer_start: undefined,
@@ -492,7 +497,10 @@ export default function App() {
           paused_timer_drafter_id: undefined,
           paused_timer_drafter_name: undefined,
           paused_elapsed_seconds: undefined,
-          time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
+          time_logs: updatedLogs,
+          total_time_entries: updatedLogs.length,
+          total_duration_minutes: totalMins,
+          total_duration_hours: totalHours,
           comments: [...(j.comments || []), timerComment],
           audit_logs: [
             {
@@ -617,13 +625,10 @@ export default function App() {
     // Helper to determine if an active timer belongs to the current staff member
     const isJobTimerForCurrentStaff = (j: Job) => {
       if (!j.active_timer_start) return false;
-      if (j.active_timer_drafter_id && j.active_timer_drafter_id === currentStaff.id) return true;
-      if (j.active_timer_drafter_name && j.active_timer_drafter_name.toLowerCase() === curStaffLower) return true;
+      if (j.active_timer_drafter_id) return j.active_timer_drafter_id === currentStaff.id;
+      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase() === curStaffLower;
       const assigned = (j.assigned_drafter || '').toLowerCase();
       if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
-      // Fallback: if only one job timer is running in the entire workspace
-      const allActiveTimers = jobs.filter(item => Boolean(item.active_timer_start));
-      if (allActiveTimers.length === 1 && allActiveTimers[0].id === j.id) return true;
       return false;
     };
 
@@ -648,6 +653,11 @@ export default function App() {
           hourlyRate: j.hourly_rate || 85
         };
 
+        const updatedLogs = [...(j.time_logs || []), partialLog];
+        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+        const totalMins = Math.round(totalSec / 60);
+        const totalHours = Number((totalSec / 3600).toFixed(2));
+
         return {
           ...j,
           active_timer_start: undefined,
@@ -658,7 +668,10 @@ export default function App() {
           paused_timer_task: taskNote,
           paused_timer_drafter_id: currentStaff.id,
           paused_timer_drafter_name: currentStaff.name,
-          time_logs: [...(j.time_logs || []), partialLog],
+          time_logs: updatedLogs,
+          total_time_entries: updatedLogs.length,
+          total_duration_minutes: totalMins,
+          total_duration_hours: totalHours,
           audit_logs: [
             {
               id: `a-${Date.now()}`,
@@ -792,13 +805,10 @@ export default function App() {
     const isJobPausedForCurrentStaff = (j: Job) => {
       if (!j.paused_by_break && !pausedJobIds.includes(j.id)) return false;
       if (pausedJobIds.includes(j.id)) return true;
-      if (j.paused_timer_drafter_id && j.paused_timer_drafter_id === currentStaff.id) return true;
-      if (j.paused_timer_drafter_name && j.paused_timer_drafter_name.toLowerCase() === curStaffLower) return true;
+      if (j.paused_timer_drafter_id) return j.paused_timer_drafter_id === currentStaff.id;
+      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase() === curStaffLower;
       const assigned = (j.assigned_drafter || '').toLowerCase();
       if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
-      // Fallback: if only one job was paused across the system
-      const allPausedJobs = jobs.filter(item => Boolean(item.paused_by_break));
-      if (allPausedJobs.length === 1 && allPausedJobs[0].id === j.id) return true;
       return false;
     };
 
@@ -898,12 +908,12 @@ export default function App() {
     // Helper to determine if an active or paused timer belongs to this clocking-out staff
     const isJobTimerForCurrentStaff = (j: Job) => {
       if (!j.active_timer_start && !j.paused_by_break) return false;
-      if (j.active_timer_drafter_id === currentStaff.id || j.paused_timer_drafter_id === currentStaff.id) return true;
-      if (j.active_timer_drafter_name?.toLowerCase() === curStaffLower || j.paused_timer_drafter_name?.toLowerCase() === curStaffLower) return true;
+      if (j.active_timer_drafter_id) return j.active_timer_drafter_id === currentStaff.id;
+      if (j.paused_timer_drafter_id) return j.paused_timer_drafter_id === currentStaff.id;
+      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase() === curStaffLower;
+      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase() === curStaffLower;
       const assigned = (j.assigned_drafter || '').toLowerCase();
       if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
-      // If timer is running without an explicit drafter ID and current user is an individual drafter
-      if (!j.active_timer_drafter_id && !j.paused_timer_drafter_id) return true;
       return false;
     };
 
@@ -930,6 +940,11 @@ export default function App() {
           };
         }
 
+        const updatedLogs = newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []);
+        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+        const totalMins = Math.round(totalSec / 60);
+        const totalHours = Number((totalSec / 3600).toFixed(2));
+
         return {
           ...j,
           active_timer_start: undefined,
@@ -940,7 +955,10 @@ export default function App() {
           paused_timer_task: undefined,
           paused_timer_drafter_id: undefined,
           paused_timer_drafter_name: undefined,
-          time_logs: newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []),
+          time_logs: updatedLogs,
+          total_time_entries: updatedLogs.length,
+          total_duration_minutes: totalMins,
+          total_duration_hours: totalHours,
           audit_logs: [
             {
               id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,

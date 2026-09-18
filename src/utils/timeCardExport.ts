@@ -139,8 +139,8 @@ export function formatMinutesToReadable(totalMinutes: number): string {
 export function calculateShiftWorkSeconds(shift: TimeCardShift, nowMs: number = Date.now()): number {
   if (!shift.clockInTime) return 0;
 
-  // If already clocked out with a valid recorded total, use it directly
-  if (shift.status === 'clocked_out' && typeof shift.totalWorkSeconds === 'number' && shift.totalWorkSeconds >= 0 && shift.clockOutTime) {
+  // If already clocked out with a valid positive recorded total, use it directly
+  if (shift.status === 'clocked_out' && typeof shift.totalWorkSeconds === 'number' && shift.totalWorkSeconds > 0 && shift.clockOutTime) {
     return shift.totalWorkSeconds;
   }
 

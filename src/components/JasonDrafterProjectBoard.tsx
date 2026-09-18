@@ -278,13 +278,13 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
     // Live timer check
     const activeRunningJob = allInvolvedJobs.find(j => 
       Boolean(j.active_timer_start) && 
-      (matchesThisDrafter(j.active_timer_drafter_name) || matchesThisDrafter(j.assigned_drafter))
+      (matchesThisDrafter(j.active_timer_drafter_name) || (!j.active_timer_drafter_name && matchesThisDrafter(j.assigned_drafter)))
     );
 
     // Paused by break timer check
     const pausedBreakJob = allInvolvedJobs.find(j =>
       Boolean(j.paused_by_break) &&
-      (matchesThisDrafter(j.paused_timer_drafter_name) || matchesThisDrafter(j.assigned_drafter))
+      (matchesThisDrafter(j.paused_timer_drafter_name) || (!j.paused_timer_drafter_name && matchesThisDrafter(j.assigned_drafter)))
     );
 
     // Roadblock count
@@ -297,7 +297,7 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
         matchesThisDrafter(tl.drafterName)
       );
       totalSeconds += logs.reduce((acc, l) => acc + l.durationSeconds, 0);
-      if (j.active_timer_start && matchesThisDrafter(j.assigned_drafter)) {
+      if (j.active_timer_start && (matchesThisDrafter(j.active_timer_drafter_name) || (!j.active_timer_drafter_name && matchesThisDrafter(j.assigned_drafter)))) {
         totalSeconds += Math.max(0, Math.floor((nowTimestamp - new Date(j.active_timer_start).getTime()) / 1000));
       }
     });
