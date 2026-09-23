@@ -326,7 +326,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const activeDrafterStats = activeDrafterTarget !== 'all' ? getDrafterStats(activeDrafterTarget) : null;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
+    <div className="space-y-6 max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
       
       {/* Top Section Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -354,17 +354,6 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Export Invoicing CSV</span>
-            </button>
-          )}
-
-          {canDelegate && onOpenDelegateModal && jobs.length > 0 && (
-            <button
-              onClick={() => onOpenDelegateModal(jobs[0])}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition active:scale-95 cursor-pointer"
-              title="Delegate work component or sub-task to another drafter"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>+ Delegate Work Component</span>
             </button>
           )}
 
@@ -718,16 +707,6 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {canDelegate && onOpenDelegateModal && jobs.length > 0 && (
-                <button
-                  onClick={() => onOpenDelegateModal(jobs[0])}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs transition flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Delegate Component</span>
-                </button>
-              )}
-
               <button
                 onClick={() => setShowDelegationHub(!showDelegationHub)}
                 className="text-indigo-300 hover:text-white p-1 rounded-lg transition"
@@ -1749,11 +1728,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       {/* VIEW MODE 3: DETAILED TABLE VIEW */}
       {viewMode === 'table' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-700">
+          <div className="overflow-x-auto pb-2">
+            <table className="w-full min-w-[1300px] text-left text-xs text-slate-700">
               <thead className="bg-slate-50 border-b border-slate-200 uppercase font-mono text-[10px] text-slate-500 tracking-wider">
                 <tr>
-                  <th className="p-3.5">Job # / Owner</th>
+                  <th className="p-3.5 pl-4">Job # / Owner</th>
                   <th className="p-3.5">Project & Customer</th>
                   <th className="p-3.5">Builder</th>
                   <th className="p-3.5">Goal & Style</th>
@@ -1763,7 +1742,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   {canAccessFinancials && <th className="p-3.5">Invoicing ($)</th>}
                   <th className="p-3.5">Delegated</th>
                   <th className="p-3.5">Timer Controls</th>
-                  <th className="p-3.5 text-right">Actions</th>
+                  <th className="p-3.5 pr-8 text-right min-w-[240px] whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1920,12 +1899,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           </button>
                         )}
                       </td>
-                      <td className="p-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="p-3.5 pr-8 text-right min-w-[240px] whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-2 shrink-0">
                           {canDelegate && onOpenDelegateModal && (
                             <button
                               onClick={() => onOpenDelegateModal(job)}
-                              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold px-2.5 py-1 rounded text-xs transition cursor-pointer"
+                              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold px-2.5 py-1.5 rounded-lg text-xs transition cursor-pointer shrink-0"
                               title="Delegate work component on this plan"
                             >
                               Delegate
@@ -1933,9 +1912,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           )}
                           <button
                             onClick={() => onSelectJob(job)}
-                            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded shadow-xs text-xs cursor-pointer"
+                            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3.5 py-1.5 rounded-lg shadow-xs text-xs flex items-center gap-1.5 cursor-pointer shrink-0 transition active:scale-95"
                           >
-                            Open Project
+                            <span>Open Project</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
