@@ -184,9 +184,8 @@ export const JobCard: React.FC<JobCardProps> = ({
         {/* Header Row: Job Number, Owner Badge, & Status Badges */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md shadow-2xs flex items-center gap-1">
-              <span className="text-[10px] text-blue-500 font-sans uppercase">MPS</span>
-              <span>#{job.job_number}</span>
+            <span className="text-sm sm:text-base font-mono font-black bg-black text-white border border-black px-3 py-1 rounded-md shadow-xs flex items-center gap-1 tracking-wide">
+              <span>#{job.job_number.replace(/^#/, '')}</span>
             </span>
 
             {/* Owner Badge */}

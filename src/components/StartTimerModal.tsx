@@ -107,8 +107,8 @@ export const StartTimerModal: React.FC<StartTimerModalProps> = ({
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-start justify-between gap-3 text-xs">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="font-mono font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
-                  MPS #{job.job_number}
+                <span className="font-mono font-black text-xs sm:text-sm bg-black text-white px-2.5 py-1 rounded border border-black shadow-xs tracking-wide">
+                  #{job.job_number.replace(/^#/, '')}
                 </span>
                 <span className="font-bold text-slate-900 text-sm">
                   {job.customer_name}

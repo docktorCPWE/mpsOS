@@ -103,8 +103,8 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
           <div className="flex flex-wrap justify-between items-start gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-mono font-bold bg-blue-600/30 text-blue-300 border border-blue-400/30 px-3 py-1 rounded-full">
-                  JOB #{job.job_number}
+                <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-slate-700 px-3 py-1 rounded-full shadow-xs tracking-wide">
+                  #{job.job_number.replace(/^#/, '')}
                 </span>
                 <span className="text-xs text-slate-300 font-medium">
                   {job.style} • {job.sq_ft} sq ft

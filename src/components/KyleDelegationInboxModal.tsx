@@ -273,8 +273,8 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                   >
                     <div className="flex items-center justify-between gap-1 text-[10px]">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800/80 px-1.5 py-0.5 rounded">
-                          MPS #{task.jobNumber}
+                        <span className="font-mono font-black text-xs bg-black text-white border border-slate-700 px-2 py-0.5 rounded shadow-xs tracking-wide">
+                          #{task.jobNumber.replace(/^#/, '')}
                         </span>
                         <span className="font-semibold text-slate-400">
                           {task.customerName}
@@ -349,7 +349,9 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                       </h3>
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-300">
                         <span>Project:</span>
-                        <strong className="text-blue-400 font-mono">MPS #{activeTask.jobNumber}</strong>
+                        <span className="font-mono font-black text-xs bg-black text-white border border-slate-700 px-2.5 py-0.5 rounded shadow-xs tracking-wide">
+                          #{activeTask.jobNumber.replace(/^#/, '')}
+                        </span>
                         <span>•</span>
                         <span>{activeTask.customerName}</span>
                       </div>

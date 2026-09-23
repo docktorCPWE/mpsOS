@@ -123,7 +123,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           id: `c-${Date.now()}`,
           author: 'System Intake',
           role: 'system',
-          text: `Intake order created for ${customerName} (${style} - ${sqFt} sq ft). Job / MPS Number: ${finalJobNumber}${
+          text: `Intake order created for ${customerName} (${style} - ${sqFt} sq ft). Job Number: ${finalJobNumber}${
             depositCollected && effectiveDepositAmount > 0 
               ? ` • Upfront Deposit Collected: $${effectiveDepositAmount.toLocaleString()} (Net Invoice Balance: $${netBalanceDue.toLocaleString()})`
               : ''
@@ -138,7 +138,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           action: 'Job Intake Created',
           performedBy: assignedDrafter.split(',')[0],
           timestamp: new Date().toISOString(),
-          details: `Registered new job with Job/MPS Number ${finalJobNumber}. Assigned to ${assignedDrafter}.${
+          details: `Registered new job with Job Number ${finalJobNumber}. Assigned to ${assignedDrafter}.${
             depositCollected && effectiveDepositAmount > 0
               ? ` Deposit recorded: $${effectiveDepositAmount.toLocaleString()} via ${depositNotes || 'Retainer'}.`
               : ''
@@ -191,14 +191,14 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           <div className="space-y-3">
             <div>
               <label className="block font-bold text-blue-950 mb-1 flex items-center justify-between">
-                <span>Job Number / MPS Number *</span>
-                <span className="text-[10px] text-slate-500 font-mono font-normal">Primary Identifier (e.g., MPS-1042)</span>
+                <span>Job Number *</span>
+                <span className="text-[10px] text-slate-500 font-mono font-normal">Primary Identifier (e.g. M26-215 or 1042)</span>
               </label>
               <input
                 type="text"
                 value={jobNumber}
                 onChange={(e) => setJobNumber(e.target.value)}
-                placeholder="e.g. MPS-1042 or M26-215"
+                placeholder="e.g. M26-215 or 1042"
                 className="w-full bg-blue-50/60 border border-blue-300 rounded-lg p-2.5 text-xs font-mono font-bold text-blue-950 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
                 required
               />

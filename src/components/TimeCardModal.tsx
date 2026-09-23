@@ -572,7 +572,9 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
                     {employeeProjectLogs.map((log) => (
                       <div key={log.id} className="bg-white border border-slate-200 rounded-lg p-2 flex items-center justify-between text-xs">
                         <div>
-                          <span className="font-bold text-blue-700 mr-2">{log.job.job_number}</span>
+                          <span className="font-mono font-black text-xs bg-black text-white px-2 py-0.5 rounded mr-2 shadow-xs tracking-wide">
+                            #{log.job.job_number.replace(/^#/, '')}
+                          </span>
                           <span className="text-slate-800">{log.job.customer_name}</span>
                           <span className="text-slate-500 text-[11px] ml-2">({log.taskDescription || 'CAD Drafting'})</span>
                         </div>

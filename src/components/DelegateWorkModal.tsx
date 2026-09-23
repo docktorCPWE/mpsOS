@@ -217,8 +217,8 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-base text-white">Delegate Work Component</h3>
-                <span className="text-[10px] font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">
-                  MPS #{job.job_number}
+                <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-slate-700 px-2.5 py-0.5 rounded shadow-xs tracking-wide">
+                  #{job.job_number.replace(/^#/, '')}
                 </span>
               </div>
               <p className="text-xs text-slate-400">

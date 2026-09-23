@@ -356,7 +356,7 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                 confirmClockOut ? (
                   <div className="flex items-center gap-1.5 bg-rose-950 border border-rose-600 px-2 py-1 rounded-xl animate-fadeIn">
                     <span className="text-[11px] text-rose-300 font-semibold">
-                      {userRunningJobTimer ? `Stop MPS #${userRunningJobTimer.job_number} & Clock Out?` : 'End Shift?'}
+                      {userRunningJobTimer ? `Stop #${userRunningJobTimer.job_number.replace(/^#/, '')} & Clock Out?` : 'End Shift?'}
                     </span>
                     <button
                       onClick={() => {

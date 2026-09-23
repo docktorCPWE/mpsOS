@@ -75,9 +75,12 @@ export const RequestRevisionModal: React.FC<RequestRevisionModalProps> = ({
                   Revision #{currentRevNumber}
                 </span>
               </div>
-              <p className="text-xs text-amber-100/90 mt-0.5">
-                MPS #{task.jobNumber} • Sending feedback to <strong className="text-white underline">{drafterName}</strong>
-              </p>
+              <div className="flex items-center gap-2 mt-1 text-xs text-amber-100/90 flex-wrap">
+                <span className="font-mono font-black text-xs bg-black text-white border border-slate-700 px-2 py-0.5 rounded shadow-xs tracking-wide">
+                  #{task.jobNumber.replace(/^#/, '')}
+                </span>
+                <span>• Sending feedback to <strong className="text-white underline">{drafterName}</strong></span>
+              </div>
             </div>
           </div>
 

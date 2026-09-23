@@ -116,7 +116,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     const tmpl = DELEGATION_COMPLETION_TEMPLATES.find(t => t.id === initialTemplateId);
     if (tmpl) {
       const generated = tmpl.generateText({
-        projectNumber: task.jobNumber ? `MPS #${task.jobNumber}` : (job ? `MPS #${job.job_number}` : 'MPS #1042'),
+        projectNumber: task.jobNumber ? `#${task.jobNumber.replace(/^#/, '')}` : (job ? `#${job.job_number.replace(/^#/, '')}` : '#1042'),
         customerName: task.customerName || (job ? job.customer_name : 'Customer'),
         drafterName: currentStaff.name || 'Aaron',
         attachedFiles: reviewFiles.map(f => f.name),
@@ -137,14 +137,14 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     setErrorMsg('');
 
     if (templateId === 'custom') {
-      setCompletionNotes(`Kyle,\n\nThe work for ${task.componentTitle} on MPS #${task.jobNumber || job?.job_number} — ${task.customerName || job?.customer_name} has been completed and is ready for review.\n\nFiles:\n${reviewFiles.length > 0 ? reviewFiles.map(f => `• ${f.name}`).join('\n') : '[FILE LINKS OR ATTACHMENTS]'}\n\nDrafter notes:\n[NOTES]\n\nPlease review and either approve it or return with corrections.\n\n${currentStaff.name}`);
+      setCompletionNotes(`Kyle,\n\nThe work for ${task.componentTitle} on #${(task.jobNumber || job?.job_number || '').replace(/^#/, '')} — ${task.customerName || job?.customer_name} has been completed and is ready for review.\n\nFiles:\n${reviewFiles.length > 0 ? reviewFiles.map(f => `• ${f.name}`).join('\n') : '[FILE LINKS OR ATTACHMENTS]'}\n\nDrafter notes:\n[NOTES]\n\nPlease review and either approve it or return with corrections.\n\n${currentStaff.name}`);
       return;
     }
 
     const tmpl = DELEGATION_COMPLETION_TEMPLATES.find(t => t.id === templateId);
     if (tmpl) {
       const text = tmpl.generateText({
-        projectNumber: task.jobNumber ? `MPS #${task.jobNumber}` : (job ? `MPS #${job.job_number}` : 'MPS #1042'),
+        projectNumber: task.jobNumber ? `#${task.jobNumber.replace(/^#/, '')}` : (job ? `#${job.job_number.replace(/^#/, '')}` : '#1042'),
         customerName: task.customerName || (job ? job.customer_name : 'Customer'),
         drafterName: currentStaff.name || 'Aaron',
         attachedFiles: reviewFiles.map(f => f.name),
@@ -316,8 +316,8 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
                     ? `Submit Revised Deliverable (Rev #${task.revisionCount || 1})` 
                     : 'Mark Task Completed & Submit for Review'}
                 </h3>
-                <span className="text-[10px] font-mono font-bold bg-black/40 text-amber-200 border border-white/20 px-2 py-0.5 rounded">
-                  MPS #{task.jobNumber}
+                <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-slate-700 px-2.5 py-0.5 rounded shadow-xs tracking-wide">
+                  #{task.jobNumber.replace(/^#/, '')}
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
@@ -688,7 +688,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
               </div>
               <p className="text-slate-600 mt-1">
                 <strong className="text-slate-800">{currentStaff.name}</strong> has completed the delegated component on{' '}
-                <strong className="text-blue-700">MPS #{task.jobNumber}</strong> ({task.customerName}).
+                <span className="font-mono font-black text-xs bg-black text-white px-2 py-0.5 rounded shadow-xs">#{task.jobNumber.replace(/^#/, '')}</span> ({task.customerName}).
               </p>
               <div className="text-[10px] text-slate-500 font-mono flex items-center gap-3 pt-1">
                 <span>📁 {reviewFiles.length} file(s) attached</span>

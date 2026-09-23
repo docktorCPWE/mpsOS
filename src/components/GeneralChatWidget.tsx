@@ -536,7 +536,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search chat text, drafter name, or #MPS..."
+            placeholder="Search chat text, drafter name, or #Job..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"

@@ -907,8 +907,8 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-mono font-bold text-xs text-blue-300 group-hover/card:text-blue-200">
-                                  #{job.job_number}
+                                <span className="font-mono font-black text-xs bg-black text-white px-2 py-0.5 rounded border border-slate-700 shadow-xs tracking-wide">
+                                  #{job.job_number.replace(/^#/, '')}
                                 </span>
                                 <span className="text-white font-semibold text-xs truncate max-w-[130px]" title={job.customer_name}>
                                   {job.customer_name}
@@ -957,8 +957,8 @@ export const JasonDrafterProjectBoard: React.FC<JasonDrafterProjectBoardProps> =
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="font-mono font-bold text-xs text-indigo-300">
-                                    #{job.job_number}
+                                  <span className="font-mono font-black text-xs bg-black text-white px-2 py-0.5 rounded border border-slate-700 shadow-xs tracking-wide">
+                                    #{job.job_number.replace(/^#/, '')}
                                   </span>
                                   <span className="text-white font-semibold text-xs truncate max-w-[130px]">
                                     {job.customer_name}

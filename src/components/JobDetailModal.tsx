@@ -1250,9 +1250,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         <div className="bg-slate-900 text-white p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-mono font-bold bg-blue-600 text-white px-2.5 py-1 rounded border border-blue-400/30 flex items-center gap-1 shadow-2xs">
-                <span className="text-[10px] text-blue-200 font-sans font-bold uppercase">MPS #:</span>
-                <span>{job.job_number}</span>
+              <span className="text-sm sm:text-base font-mono font-black bg-black text-white px-3 py-1 rounded-md border border-slate-800 flex items-center shadow-xs tracking-wide">
+                <span>#{job.job_number.replace(/^#/, '')}</span>
               </span>
               {isJobArchived(job) && (
                 <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded flex items-center gap-1">
@@ -1591,9 +1590,9 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                  {/* Field 1: Job # / MPS Number */}
-                  <div className="bg-blue-50/80 p-2.5 rounded-xl border border-blue-200">
-                    <span className="text-[10px] text-blue-800 font-bold uppercase block font-mono">Job # / MPS Number:</span>
+                  {/* Field 1: Job Number */}
+                  <div className="bg-slate-100 p-2.5 rounded-xl border border-slate-300">
+                    <span className="text-[10px] text-slate-700 font-bold uppercase block font-mono">Job Number:</span>
                     {isEditingMpsNumber ? (
                       <div className="flex items-center gap-1 mt-1">
                         <input
@@ -1628,7 +1627,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                           type="button"
                           onClick={() => setIsEditingMpsNumber(true)}
                           className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-0.5"
-                          title="Edit Job / MPS Number"
+                          title="Edit Job Number"
                         >
                           <Edit3 className="w-3 h-3" />
                           <span>Edit</span>

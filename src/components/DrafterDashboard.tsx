@@ -537,8 +537,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded">
-                              MPS #{task.jobNumber}
+                            <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs tracking-wide">
+                              #{task.jobNumber.replace(/^#/, '')}
                             </span>
                             <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
                               {task.category}
@@ -916,8 +916,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded">
-                                MPS #{task.jobNumber}
+                              <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs tracking-wide">
+                                #{task.jobNumber.replace(/^#/, '')}
                               </span>
                               <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
                                 {task.category}
@@ -1376,12 +1376,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       {/* Filter & Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
         
-        {/* Search Input for MPS #, Customer, Style, Drafter */}
+        {/* Search Input for Job #, Customer, Style, Drafter */}
         <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder={isIndividualDrafter ? `Search within ${currentStaff.name}'s assigned plans (MPS #, customer, style)...` : "Search by MPS # (e.g. 195, M26-195), customer name, house style, or drafter..."}
+            placeholder={isIndividualDrafter ? `Search within ${currentStaff.name}'s assigned plans (Job #, customer, style)...` : "Search by Job # (e.g. 195, M26-195), customer name, house style, or drafter..."}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
@@ -1562,8 +1562,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       >
                         <div className="flex justify-between items-start gap-1 flex-wrap">
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
-                              MPS #{job.job_number}
+                            <span className="text-xs sm:text-sm font-mono font-black bg-black text-white px-2.5 py-1 rounded-md border border-black shadow-xs tracking-wide">
+                              #{job.job_number.replace(/^#/, '')}
                             </span>
                             {job.owner && (
                               <span className="text-[9px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`Owner: ${job.owner}`}>
@@ -1775,10 +1775,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                   return (
                     <tr key={job.id} className={`transition ${isRunning ? 'bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
-                      <td className="p-3.5 font-mono font-bold text-blue-700">
-                        <div className="flex flex-col gap-1">
+                      <td className="p-3.5">
+                        <div className="flex flex-col gap-1.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span>MPS #{job.job_number}</span>
+                            <span className="text-sm sm:text-base font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs inline-flex items-center tracking-wide">
+                              #{job.job_number.replace(/^#/, '')}
+                            </span>
                             {job.owner && (
                               <span className="text-[9px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.2 rounded">
                                 {job.owner}
