@@ -259,8 +259,13 @@ export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
 }
 
 export async function purgeRemovedMockStaff(): Promise<void> {
-  // Aaron, James, and Ethan are active staff drafters and must not be purged
-  return;
+  // Purge deprecated mock staff documents (staff-aaron, staff-james) if lingering in Firestore
+  try {
+    await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
+    await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+  } catch (err) {
+    console.warn('[Firestore] Notice during mock staff purge:', err);
+  }
 }
 
 // ----------------------------------------------------
@@ -343,45 +348,103 @@ export async function markChatMessagesAsReadInFirestore(messageIds: string[], st
 
 /**
  * Clean up dummy data from Firestore (such as job-1 / M26-195 Testing Dummy,
- * any dummy chat messages, and removing James from drafting assignments)
+ * lingering dummy staff-aaron / staff-james docs, dummy chat messages,
+ * and sanitizing synthetic Aaron/James entries to Kyle while preserving real James Barnett records)
  */
 export async function purgeDummyDataFromFirestore(): Promise<void> {
   try {
     // 1. Delete job-1 if present
     try {
-      await deleteDoc(doc(db, 'jobs', 'job-1'));
+      await deleteDoc(doc(db, 'jobs', 'job-1')).catch(() => {});
     } catch {
       // Ignored if already deleted
     }
 
-    // 2. Scan jobs collection to delete any remaining dummy job and remove James from jobs
+    // 2. Delete synthetic dummy staff docs
     try {
+      await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
+      await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+    } catch {
+      // Ignored
+    }
+
+    // 3. Scan jobs collection to delete any dummy jobs and sanitize synthetic Aaron/James logs
+    try {
+      const isDummyJames = (val?: string) => Boolean(val && val.trim().toLowerCase() === 'james');
+      const isDummyAaron = (val?: string) => Boolean(val && val.trim().toLowerCase() === 'aaron');
+
       const jobsSnap = await getDocs(collection(db, 'jobs'));
       for (const d of jobsSnap.docs) {
         const j = d.data() as Job;
         if (d.id === 'job-1' || j.job_number === 'M26-195' || (j.customer_name || '').toLowerCase().includes('testing dummy')) {
           await deleteDoc(doc(db, 'jobs', d.id));
           console.log(`[Firestore] Purged dummy job doc: ${d.id}`);
-        } else if ((j.assigned_drafter || '').toLowerCase().includes('james')) {
-          const sanitizedLogs = (j.time_logs || []).map(tl => 
-            (tl.drafterName || '').toLowerCase().includes('james') ? { ...tl, drafterName: 'Kyle' } : tl
-          );
-          const sanitizedDelegated = (j.delegated_tasks || []).filter(
-            dt => !(dt.assignedTo || '').toLowerCase().includes('james')
-          );
-          await updateDoc(doc(db, 'jobs', d.id), {
-            assigned_drafter: 'Kyle',
-            time_logs: sanitizedLogs,
-            delegated_tasks: sanitizedDelegated
+          continue;
+        }
+
+        let needsUpdate = false;
+        const updates: Record<string, any> = {};
+
+        if (isDummyJames(j.assigned_drafter) || isDummyAaron(j.assigned_drafter)) {
+          updates.assigned_drafter = 'Kyle';
+          needsUpdate = true;
+        }
+
+        if (Array.isArray(j.time_logs) && j.time_logs.length > 0) {
+          let logsChanged = false;
+          const sanitizedLogs = j.time_logs.map(tl => {
+            if (isDummyJames(tl.drafterName) || isDummyAaron(tl.drafterName)) {
+              logsChanged = true;
+              return { ...tl, drafterName: 'Kyle' };
+            }
+            return tl;
           });
-          console.log(`[Firestore] Purged James assignment on job: ${d.id}`);
+          if (logsChanged) {
+            updates.time_logs = sanitizedLogs;
+            needsUpdate = true;
+          }
+        }
+
+        if (Array.isArray(j.delegated_tasks) && j.delegated_tasks.length > 0) {
+          let tasksChanged = false;
+          const sanitizedDelegated = j.delegated_tasks.map(dt => {
+            if (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) {
+              tasksChanged = true;
+              return { ...dt, assignedTo: 'Kyle' };
+            }
+            return dt;
+          });
+          if (tasksChanged) {
+            updates.delegated_tasks = sanitizedDelegated;
+            needsUpdate = true;
+          }
+        }
+
+        if (Array.isArray(j.comments) && j.comments.length > 0) {
+          let commentsChanged = false;
+          const sanitizedComments = j.comments.map(c => {
+            if (isDummyJames(c.author) || isDummyAaron(c.author)) {
+              commentsChanged = true;
+              return { ...c, author: 'Kyle' };
+            }
+            return c;
+          });
+          if (commentsChanged) {
+            updates.comments = sanitizedComments;
+            needsUpdate = true;
+          }
+        }
+
+        if (needsUpdate) {
+          await updateDoc(doc(db, 'jobs', d.id), updates);
+          console.log(`[Firestore] Sanitized dummy drafter assignments on job: ${d.id}`);
         }
       }
     } catch (e) {
       console.warn('[Firestore] Notice during jobs purge:', e);
     }
 
-    // 3. Scan discussions to purge mock/dummy messages
+    // 4. Scan discussions to purge mock/dummy messages
     try {
       const chatSnap = await getDocs(collection(db, 'discussions'));
       const batch = writeBatch(db);

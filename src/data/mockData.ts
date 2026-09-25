@@ -88,49 +88,9 @@ export const STAFF_USERS: StaffUser[] = [
     canAccessPayroll: true
   },
   {
-    id: 'staff-aaron',
-    name: 'Aaron',
-    email: 'aaron@myplanstore.com',
-    title: 'Architectural & CAD Drafter',
-    phone: '(555) 678-9012',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 85,
-    status: 'active',
-    joinedDate: '2022-04-10',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: true,
-    canManageRoadblocks: false,
-    canAccessPayroll: false
-  },
-  {
-    id: 'staff-james',
-    name: 'James',
-    email: 'james@myplanstore.com',
-    title: 'Architectural Drafter',
-    phone: '(555) 789-0123',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 80,
-    status: 'active',
-    joinedDate: '2022-08-15',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: true,
-    canManageRoadblocks: false,
-    canAccessPayroll: false
-  },
-  {
     id: 'staff-ethan',
-    name: 'Ethan',
-    email: 'ethan@myplanstore.com',
+    name: 'Ethan Pierce',
+    email: 'ethanp.dwg@gmail.com',
     title: 'Junior Drafter & CAD Specialist',
     phone: '(555) 890-1234',
     role: 'drafter',
@@ -411,7 +371,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-214-5',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-08-26T11:00:00.000Z',
         durationSeconds: 3600, // 60 min (1.00h)
         taskDescription: 'Electrical Schematics & Reflected Ceiling Layout',
@@ -588,7 +548,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-218-5',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-08-29T14:00:00.000Z',
         durationSeconds: 2700, // 45m
         taskDescription: 'Electrical & Lighting Plan for Remodel Zones',
@@ -720,12 +680,12 @@ export const INITIAL_JOBS: Job[] = [
     total_time_entries: 4,
     total_duration_minutes: 313,
     total_duration_hours: 5.22,
-    assigned_drafter: 'Aaron',
+    assigned_drafter: 'Kyle',
     project_manager: 'Jason',
     time_logs: [
       {
         id: 't-236-1',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-09-01T09:00:00.000Z',
         durationSeconds: 4800, // 80 min
         taskDescription: 'Remodel Intake & Site Photo Dimension Conversion',
@@ -736,7 +696,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-236-2',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-09-02T10:30:00.000Z',
         durationSeconds: 4800, // 80 min
         taskDescription: 'Existing Footprint CAD Tracing & As-Built Walls',
@@ -747,7 +707,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-236-3',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-09-03T13:00:00.000Z',
         durationSeconds: 4800, // 80 min
         taskDescription: 'Conceptual Kitchen & Living Room Reconfiguration',
@@ -758,7 +718,7 @@ export const INITIAL_JOBS: Job[] = [
       },
       {
         id: 't-236-4',
-        drafterName: 'Aaron',
+        drafterName: 'Kyle',
         startTime: '2026-09-04T15:00:00.000Z',
         durationSeconds: 4380, // 73 min -> 80+80+80+73 = 313 mins = 5.22 hrs
         taskDescription: 'Client Review Intake Notes & Wall Opening Callouts',
@@ -773,7 +733,7 @@ export const INITIAL_JOBS: Job[] = [
     comments: [
       {
         id: 'c-236-1',
-        author: 'Aaron',
+        author: 'Kyle',
         role: 'drafter',
         text: 'Initial as-built dimensions converted into CAD. Ready for customer scope review.',
         timestamp: '2026-09-04T16:00:00.000Z'
@@ -1038,8 +998,15 @@ export function getStoredStaff(): StaffUser[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure dummy staff-aaron or staff-james are stripped
+      const filtered = parsed.filter(
+        (s: StaffUser) => s.id !== 'staff-aaron' &&
+                          s.id !== 'staff-james' &&
+                          s.email !== 'aaron@myplanstore.com' &&
+                          s.email !== 'james@myplanstore.com'
+      );
       // Ensure each core team member is present; if already present, PRESERVE their customized permissions
-      const result = [...parsed];
+      const result = [...filtered];
       for (const core of STAFF_USERS) {
         const index = result.findIndex(
           s => s.id === core.id ||
@@ -1101,32 +1068,41 @@ export function getStoredJobs(): Job[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Filter out dummy job-1 or Testing Dummy or M26-195, and remove James assignments
+      const isDummyJames = (val?: string) => {
+        if (!val) return false;
+        return val.trim().toLowerCase() === 'james';
+      };
+      const isDummyAaron = (val?: string) => {
+        if (!val) return false;
+        return val.trim().toLowerCase() === 'aaron';
+      };
+
+      // Filter out dummy job-1 or Testing Dummy or M26-195, and remove dummy James/Aaron assignments
       const cleaned = parsed
         .filter((j: Job) => j.id !== 'job-1' && j.job_number !== 'M26-195' && j.customer_name !== 'Testing Dummy')
         .map((j: Job) => {
           let updated = { ...j };
-          if ((updated.assigned_drafter || '').toLowerCase().includes('james')) {
+          if (isDummyJames(updated.assigned_drafter) || isDummyAaron(updated.assigned_drafter)) {
             updated.assigned_drafter = 'Kyle';
           }
           if (updated.time_logs && updated.time_logs.length > 0) {
             updated.time_logs = updated.time_logs.map(tl => 
-              (tl.drafterName || '').toLowerCase().includes('james') ? { ...tl, drafterName: 'Kyle' } : tl
+              (isDummyJames(tl.drafterName) || isDummyAaron(tl.drafterName)) ? { ...tl, drafterName: 'Kyle' } : tl
             );
           }
           if (updated.delegated_tasks && updated.delegated_tasks.length > 0) {
-            updated.delegated_tasks = updated.delegated_tasks.filter(
-              dt => !(dt.assignedTo || '').toLowerCase().includes('james')
+            updated.delegated_tasks = updated.delegated_tasks.map(dt => 
+              (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) ? { ...dt, assignedTo: 'Kyle' } : dt
             );
           }
           if (updated.deliverables && updated.deliverables.length > 0) {
             updated.deliverables = updated.deliverables.map(d =>
-              (d.authorDrafter || '').toLowerCase().includes('james') ? { ...d, authorDrafter: 'Kyle' } : d
+              (isDummyJames(d.authorDrafter) || isDummyAaron(d.authorDrafter)) ? { ...d, authorDrafter: 'Kyle' } : d
             );
           }
           if (updated.comments && updated.comments.length > 0) {
             updated.comments = updated.comments.map(c =>
-              (c.author || '').toLowerCase().includes('james') ? { ...c, author: 'Kyle' } : c
+              (isDummyJames(c.author) || isDummyAaron(c.author)) ? { ...c, author: 'Kyle' } : c
             );
           }
           return updated;
@@ -1354,130 +1330,6 @@ const ALL_RAW_TIME_CARDS: TimeCardShift[] = [
     notes: 'Structural revisions and customer redlines'
   },
 
-  // James (Drafter) - Previous & Current Week
-  {
-    id: 'shift-james-prev-mon',
-    staffId: 'staff-james',
-    staffName: 'James',
-    date: '2026-08-24',
-    clockInTime: '2026-08-24T08:00:00.000Z',
-    clockOutTime: '2026-08-24T16:30:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-james-mon-1',
-        startTime: '2026-08-24T12:00:00.000Z',
-        endTime: '2026-08-24T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Initial blueprint setup and dimensional stringing'
-  },
-  {
-    id: 'shift-james-cur-mon',
-    staffId: 'staff-james',
-    staffName: 'James',
-    date: '2026-09-07',
-    clockInTime: '2026-09-07T08:00:00.000Z',
-    clockOutTime: '2026-09-07T16:30:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-james-cur-mon-1',
-        startTime: '2026-09-07T12:00:00.000Z',
-        endTime: '2026-09-07T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Section cuts and roof details'
-  },
-  {
-    id: 'shift-james-cur-tue',
-    staffId: 'staff-james',
-    staffName: 'James',
-    date: '2026-09-08',
-    clockInTime: '2026-09-08T08:00:00.000Z',
-    clockOutTime: '2026-09-08T16:30:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-james-cur-tue-1',
-        startTime: '2026-09-08T12:00:00.000Z',
-        endTime: '2026-09-08T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Framing geometry & wall schedule updates'
-  },
-
-  // Aaron (Drafter) - Previous & Current Week
-  {
-    id: 'shift-aaron-prev-mon',
-    staffId: 'staff-aaron',
-    staffName: 'Aaron',
-    date: '2026-08-24',
-    clockInTime: '2026-08-24T08:15:00.000Z',
-    clockOutTime: '2026-08-24T16:45:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-aaron-mon-1',
-        startTime: '2026-08-24T12:00:00.000Z',
-        endTime: '2026-08-24T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Electrical layouts and ceiling plan layers'
-  },
-  {
-    id: 'shift-aaron-cur-mon',
-    staffId: 'staff-aaron',
-    staffName: 'Aaron',
-    date: '2026-09-07',
-    clockInTime: '2026-09-07T08:15:00.000Z',
-    clockOutTime: '2026-09-07T16:45:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-aaron-cur-mon-1',
-        startTime: '2026-09-07T12:00:00.000Z',
-        endTime: '2026-09-07T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Reflected ceiling plans and plumbing runs'
-  },
-  {
-    id: 'shift-aaron-cur-tue',
-    staffId: 'staff-aaron',
-    staffName: 'Aaron',
-    date: '2026-09-08',
-    clockInTime: '2026-09-08T08:10:00.000Z',
-    clockOutTime: '2026-09-08T16:40:00.000Z',
-    status: 'clocked_out',
-    breaks: [
-      {
-        id: 'brk-aaron-cur-tue-1',
-        startTime: '2026-09-08T12:00:00.000Z',
-        endTime: '2026-09-08T12:30:00.000Z',
-        durationSeconds: 1800
-      }
-    ],
-    totalWorkSeconds: 28800,
-    totalBreakSeconds: 1800,
-    notes: 'Window and door schedule coordination'
-  },
-
   // Drew Lupkey (Finance) - Previous & Current Week
   {
     id: 'shift-drew-prev-mon',
@@ -1657,7 +1509,28 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
   const todayStr = getLocalDateString(new Date(nowMs));
   let wasReconciled = false;
 
-  const reconciled = shifts.map(shift => {
+  // 0. Remove any dummy shifts created for mock Aaron or mock James (preserve real James Barnett)
+  const isDummyShift = (s: TimeCardShift) => {
+    const name = (s.staffName || '').trim().toLowerCase();
+    const id = (s.id || '').toLowerCase();
+    const staffId = (s.staffId || '').toLowerCase();
+    return staffId === 'staff-aaron' ||
+           staffId === 'staff-james' ||
+           id.startsWith('shift-aaron-') ||
+           id.startsWith('shift-james-') ||
+           name === 'aaron' ||
+           name === 'james';
+  };
+
+  const nonDummyShifts = shifts.filter(s => {
+    if (isDummyShift(s)) {
+      wasReconciled = true;
+      return false;
+    }
+    return true;
+  });
+
+  const reconciled = nonDummyShifts.map(shift => {
     // 1. Repair previously auto-closed shift for Greg Hyatt (clock-in ~6:27 AM, actual clock out 3:10 PM)
     if (
       (shift.staffId === 'staff-greg' || (shift.staffName && shift.staffName.toLowerCase().includes('greg'))) &&

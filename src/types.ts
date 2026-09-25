@@ -100,7 +100,7 @@ export interface DelegatedWorkItem {
   componentTitle: string; // e.g. "Foundation & Slab Structural Detail", "Kitchen Island & Cabinetry Revisions", "Truss Layout Elevation"
   category: 'Floor Plan' | 'Exterior Elevations' | 'Foundation Plan' | 'Electrical & Reflected Ceiling' | '3D Render' | 'Structural Details' | 'Site Plan' | 'CAD Modeling' | 'Revisions' | 'General';
   priority: 'Normal' | 'High' | 'Urgent';
-  assignedTo: string; // Drafter name e.g. "Kyle", "James", "Aaron"
+  assignedTo: string; // Drafter name e.g. "Kyle", "James Barnett"
   assignedToEmail?: string;
   delegatedBy: string; // e.g. "Kyle", "Jason", "Greg Hyatt"
   delegatedAt: string; // ISO string

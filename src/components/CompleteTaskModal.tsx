@@ -118,7 +118,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       const generated = tmpl.generateText({
         projectNumber: task.jobNumber ? `#${task.jobNumber.replace(/^#/, '')}` : (job ? `#${job.job_number.replace(/^#/, '')}` : '#1042'),
         customerName: task.customerName || (job ? job.customer_name : 'Customer'),
-        drafterName: currentStaff.name || 'Aaron',
+        drafterName: currentStaff.name || 'Drafter',
         attachedFiles: reviewFiles.map(f => f.name),
         dateStr: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         revisionCount: task.revisionCount || 1
@@ -146,7 +146,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       const text = tmpl.generateText({
         projectNumber: task.jobNumber ? `#${task.jobNumber.replace(/^#/, '')}` : (job ? `#${job.job_number.replace(/^#/, '')}` : '#1042'),
         customerName: task.customerName || (job ? job.customer_name : 'Customer'),
-        drafterName: currentStaff.name || 'Aaron',
+        drafterName: currentStaff.name || 'Drafter',
         attachedFiles: reviewFiles.map(f => f.name),
         dateStr: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         revisionCount: task.revisionCount || 1

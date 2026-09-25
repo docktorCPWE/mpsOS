@@ -220,8 +220,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                 className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
               >
                 <option value="all" className="bg-slate-900">All Drafters</option>
-                <option value="James" className="bg-slate-900">James</option>
-                <option value="Aaron" className="bg-slate-900">Aaron</option>
+                <option value="James Barnett" className="bg-slate-900">James Barnett</option>
                 <option value="Kyle" className="bg-slate-900">Kyle</option>
               </select>
             </div>
@@ -249,7 +248,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
               <div className="p-8 text-center text-slate-500 space-y-2 my-auto">
                 <Inbox className="w-8 h-8 mx-auto text-slate-600 opacity-60" />
                 <p className="font-semibold text-xs text-slate-400">No submissions in this queue</p>
-                <p className="text-[11px]">When Aaron or other drafters mark delegated components complete, they will appear here.</p>
+                <p className="text-[11px]">When drafters mark delegated components complete, they will appear here.</p>
               </div>
             ) : (
               filteredTasks.map((task) => {

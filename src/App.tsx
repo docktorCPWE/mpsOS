@@ -173,7 +173,7 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          // Ensure all core staff (Greg, Kyle, Jason, Drew, Aaron, James, Ethan) exist in roster
+          // Ensure all core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
           const merged = [...cloudStaff];
           for (const core of STAFF_USERS) {
             const exists = merged.some(s => s.id === core.id || s.name.toLowerCase() === core.name.toLowerCase() || (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')));
@@ -182,15 +182,18 @@ export default function App() {
             }
           }
 
-          setStaffList(merged);
-          saveStoredStaff(merged);
+          // Filter out dummy staff-aaron or staff-james if lingering in local state
+          const cleanMerged = merged.filter(s => s.id !== 'staff-aaron' && s.id !== 'staff-james' && s.email !== 'aaron@myplanstore.com' && s.email !== 'james@myplanstore.com');
+
+          setStaffList(cleanMerged);
+          saveStoredStaff(cleanMerged);
 
           // Update currentStaff if matching cloud record has latest edits to capabilities
           setCurrentStaff(prevCurrent => {
-            const updatedMatch = merged.find(s => s.id === prevCurrent.id) ||
-                                 merged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
-                                 merged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
-                                 (prevCurrent.name.toLowerCase().includes('kyle') ? merged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
+            const updatedMatch = cleanMerged.find(s => s.id === prevCurrent.id) ||
+                                 cleanMerged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
+                                 cleanMerged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
+                                 (prevCurrent.name.toLowerCase().includes('kyle') ? cleanMerged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
             return updatedMatch ? { ...prevCurrent, ...updatedMatch } : prevCurrent;
           });
         }
