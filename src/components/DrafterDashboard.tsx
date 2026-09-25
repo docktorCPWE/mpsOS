@@ -123,7 +123,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     currentStaff?.name.toLowerCase().includes('greg')
   );
 
-  // Initialize selectedDrafter: If current logged-in user is an individual drafter (e.g. James, Aaron, Sarah, Alex, Elena),
+  // Initialize selectedDrafter: If current logged-in user is an individual drafter,
   // lock strictly to their own name so only their assigned cards display.
   const [selectedDrafter, setSelectedDrafter] = useState<string>(() => {
     return isAllCardsAuthorized ? 'all' : currentStaff.name;
@@ -187,7 +187,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       ...jobs.map(j => canonicalizeDrafterName(j.assigned_drafter.split(',')[0])),
       ...allDelegatedTasks.map(t => canonicalizeDrafterName(t.assignedTo))
     ])
-  ).filter(Boolean);
+  ).filter(Boolean).filter(name => {
+    const lower = name.trim().toLowerCase();
+    return lower !== 'aaron' && lower !== 'james';
+  });
 
   // Helper function to check if a job belongs to a specific drafter
   const isJobAssignedToDrafter = (job: Job, drafterName: string) => {
@@ -232,7 +235,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   };
 
   // Active drafter target:
-  // For individual drafters (e.g. James, Aaron, Sarah, Alex, Elena), target strictly currentStaff.name
+  // For individual drafters, target strictly currentStaff.name
   // For managers/leads (Kyle, Jason, Drew, Ethan, Greg), target selectedDrafter ('all' or specific drafter)
   const activeDrafterTarget = isAllCardsAuthorized ? selectedDrafter : currentStaff.name;
 
@@ -322,7 +325,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const totalInvoicingValue = filteredJobs.reduce((acc, j) => acc + calculateJobBillableAmount(j, nowTimestamp), 0);
   const runningTimers = filteredJobs.filter(j => j.active_timer_start);
 
-  const activeDrafterStaff = STAFF_USERS.find(s => s.name.toLowerCase() === activeDrafterTarget.toLowerCase()) || (isIndividualDrafter ? currentStaff : undefined);
+  const activeDrafterStaff = effectiveStaff.find(s => s.name.toLowerCase() === activeDrafterTarget.toLowerCase()) || (isIndividualDrafter ? currentStaff : undefined);
   const activeDrafterStats = activeDrafterTarget !== 'all' ? getDrafterStats(activeDrafterTarget) : null;
 
   return (
@@ -1184,7 +1187,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
       {/* DRAFTER WORKSPACE BANNER & QUICK SELECTOR CHIPS */}
       {isIndividualDrafter ? (
-        /* INDIVIDUAL DRAFTER SCOPED WORKSPACE HEADER (James, Aaron, Sarah, Alex, Elena) */
+        /* INDIVIDUAL DRAFTER SCOPED WORKSPACE HEADER */
         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-5 rounded-2xl border border-blue-800 shadow-md">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
@@ -1275,7 +1278,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             {draftersList.map((drafter) => {
               const stats = getDrafterStats(drafter);
               const isSelected = selectedDrafter.toLowerCase() === drafter.toLowerCase();
-              const staffObj = STAFF_USERS.find(s => s.name.toLowerCase() === drafter.toLowerCase());
+              const staffObj = effectiveStaff.find(s => s.name.toLowerCase() === drafter.toLowerCase());
 
               return (
                 <button

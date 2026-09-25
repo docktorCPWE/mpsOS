@@ -263,6 +263,25 @@ export async function purgeRemovedMockStaff(): Promise<void> {
   try {
     await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
     await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+    const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
+    if (staffSnap) {
+      for (const d of staffSnap.docs) {
+        const s = d.data();
+        const emailLower = (s.email || '').trim().toLowerCase();
+        const nameLower = (s.name || '').trim().toLowerCase();
+        if (
+          d.id === 'staff-aaron' ||
+          d.id === 'staff-james' ||
+          emailLower === 'aaron@myplanstore.com' ||
+          emailLower === 'james@myplanstore.com' ||
+          nameLower === 'aaron' ||
+          nameLower === 'james'
+        ) {
+          await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
+          console.log(`[Firestore] Purged mock staff doc: ${d.id}`);
+        }
+      }
+    }
   } catch (err) {
     console.warn('[Firestore] Notice during mock staff purge:', err);
   }
@@ -364,6 +383,25 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
     try {
       await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
       await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+      const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
+      if (staffSnap) {
+        for (const d of staffSnap.docs) {
+          const s = d.data();
+          const emailLower = (s.email || '').trim().toLowerCase();
+          const nameLower = (s.name || '').trim().toLowerCase();
+          if (
+            d.id === 'staff-aaron' ||
+            d.id === 'staff-james' ||
+            emailLower === 'aaron@myplanstore.com' ||
+            emailLower === 'james@myplanstore.com' ||
+            nameLower === 'aaron' ||
+            nameLower === 'james'
+          ) {
+            await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
+            console.log(`[Firestore] Purged mock staff doc: ${d.id}`);
+          }
+        }
+      }
     } catch {
       // Ignored
     }

@@ -998,12 +998,14 @@ export function getStoredStaff(): StaffUser[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure dummy staff-aaron or staff-james are stripped
+      // Ensure mock staff-aaron or staff-james are stripped
       const filtered = parsed.filter(
         (s: StaffUser) => s.id !== 'staff-aaron' &&
                           s.id !== 'staff-james' &&
                           s.email !== 'aaron@myplanstore.com' &&
-                          s.email !== 'james@myplanstore.com'
+                          s.email !== 'james@myplanstore.com' &&
+                          s.name.trim().toLowerCase() !== 'aaron' &&
+                          s.name.trim().toLowerCase() !== 'james'
       );
       // Ensure each core team member is present; if already present, PRESERVE their customized permissions
       const result = [...filtered];

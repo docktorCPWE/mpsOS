@@ -262,7 +262,7 @@ export interface ChatMessage {
   senderAvatar?: string;
   text: string;
   timestamp: string; // ISO string
-  mentions?: string[]; // Staff user names mentioned e.g. ["James", "Kyle"]
+  mentions?: string[]; // Staff user names mentioned e.g. ["Kyle", "Jason"]
   referencedJobNumbers?: string[]; // e.g. ["MPS-2024-001", "MPS-test"]
   replyToId?: string;
   replyToMessage?: {

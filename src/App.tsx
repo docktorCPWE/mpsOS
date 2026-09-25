@@ -182,8 +182,15 @@ export default function App() {
             }
           }
 
-          // Filter out dummy staff-aaron or staff-james if lingering in local state
-          const cleanMerged = merged.filter(s => s.id !== 'staff-aaron' && s.id !== 'staff-james' && s.email !== 'aaron@myplanstore.com' && s.email !== 'james@myplanstore.com');
+          // Filter out mock staff-aaron or staff-james
+          const cleanMerged = merged.filter(s => 
+            s.id !== 'staff-aaron' && 
+            s.id !== 'staff-james' && 
+            s.email !== 'aaron@myplanstore.com' && 
+            s.email !== 'james@myplanstore.com' &&
+            s.name.trim().toLowerCase() !== 'aaron' &&
+            s.name.trim().toLowerCase() !== 'james'
+          );
 
           setStaffList(cleanMerged);
           saveStoredStaff(cleanMerged);
@@ -2326,6 +2333,7 @@ export default function App() {
         onClose={() => setIsKyleInboxOpen(false)}
         jobs={jobs}
         currentStaff={currentStaff}
+        staffList={staffList}
         onSelectJob={(job) => {
           setSelectedJobForDetail(job);
           setIsKyleInboxOpen(false);

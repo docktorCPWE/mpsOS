@@ -32,6 +32,7 @@ interface KyleDelegationInboxModalProps {
   onClose: () => void;
   jobs: Job[];
   currentStaff: StaffUser;
+  staffList?: StaffUser[];
   onSelectJob: (job: Job) => void;
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNote?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNote: string) => void;
@@ -43,6 +44,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
   onClose,
   jobs,
   currentStaff,
+  staffList,
   onSelectJob,
   onApproveTaskReview,
   onRequestTaskRevision,
@@ -67,6 +69,17 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
       customerName: t.customerName || j.customer_name
     }))
   );
+
+  // Dynamic list of drafters (excluding any mock/dummy names)
+  const availableDrafters = Array.from(
+    new Set([
+      ...allTasks.map(t => t.assignedTo),
+      ...(staffList || []).map(s => s.name)
+    ])
+  ).filter(Boolean).filter(name => {
+    const lower = name.trim().toLowerCase();
+    return lower !== 'aaron' && lower !== 'james';
+  });
 
   // Filter tasks based on selected tab and filters
   const filteredTasks = allTasks.filter(task => {
@@ -220,8 +233,9 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                 className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
               >
                 <option value="all" className="bg-slate-900">All Drafters</option>
-                <option value="James Barnett" className="bg-slate-900">James Barnett</option>
-                <option value="Kyle" className="bg-slate-900">Kyle</option>
+                {availableDrafters.map(name => (
+                  <option key={name} value={name} className="bg-slate-900">{name}</option>
+                ))}
               </select>
             </div>
 

@@ -300,7 +300,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     </div>
 
                     <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
-                      {((staffList && staffList.length > 0) ? staffList : STAFF_USERS).map((staff) => {
+                      {((staffList && staffList.length > 0) ? staffList : STAFF_USERS)
+                        .filter(s => s.id !== 'staff-aaron' && s.id !== 'staff-james' && s.email !== 'aaron@myplanstore.com' && s.email !== 'james@myplanstore.com' && s.name.trim().toLowerCase() !== 'aaron' && s.name.trim().toLowerCase() !== 'james')
+                        .map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
                         return (
                           <button
