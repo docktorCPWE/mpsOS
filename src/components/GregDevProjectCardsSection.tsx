@@ -20,13 +20,22 @@ import {
   Share2, 
   Cpu,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Grid,
+  Kanban,
+  List,
+  Pin,
+  BookmarkCheck,
+  Check
 } from 'lucide-react';
 import { GregDevProjectCard, GregDevTimeEntry, StaffUser, StandardGregDevProjectType } from '../types';
 import { 
   PRESET_DEV_PROJECT_TYPES, 
   saveStoredGregDevCards, 
-  saveStoredGregDevEntries 
+  saveStoredGregDevEntries,
+  GregDevLayoutMode,
+  getStoredGregDevLayout,
+  saveStoredGregDevLayout
 } from '../utils/gregDevTimeService';
 import { formatSecondsToHHMMSS } from '../utils/timeUtils';
 import { formatMinutesToReadable, getLocalDateString } from '../utils/timeCardExport';
@@ -340,6 +349,215 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   );
 };
 
+// Streamlined list row component for list view layout
+const DevProjectListItem: React.FC<DevProjectCardItemProps> = ({
+  card,
+  devEntries,
+  currentStaff,
+  nowMs,
+  isClockedIn,
+  isOnBreak,
+  onUpdateNotes,
+  onStartTimer,
+  onStopTimer,
+  onDismissCard,
+  styles
+}) => {
+  const [localNotes, setLocalNotes] = useState(card.currentNotes || '');
+  const isFocusedRef = React.useRef(false);
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setLocalNotes(card.currentNotes || '');
+    }
+  }, [card.currentNotes]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleNotesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setLocalNotes(val);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      onUpdateNotes(card.id, val);
+    }, 400);
+  };
+
+  const handleNotesBlur = () => {
+    isFocusedRef.current = false;
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    onUpdateNotes(card.id, localNotes);
+  };
+
+  const handleNotesFocus = () => {
+    isFocusedRef.current = true;
+  };
+
+  const handleStart = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    onStartTimer(card.id, localNotes);
+  };
+
+  const handleStop = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    onStopTimer(card.id, localNotes);
+  };
+
+  const todayStr = getLocalDateString(new Date(nowMs));
+  const entriesTodaySec = (devEntries && devEntries.length > 0)
+    ? devEntries
+        .filter(e => {
+          if (e.projectType !== card.projectType) return false;
+          const entryDate = e.date || (e.startTime ? getLocalDateString(new Date(e.startTime)) : '');
+          return entryDate === todayStr;
+        })
+        .reduce((sum, e) => sum + (e.durationSeconds || 0), 0)
+    : (card.todaySeconds || 0);
+
+  let liveElapsedSec = 0;
+  if (card.isActive && card.activeTimerStart) {
+    liveElapsedSec = Math.max(0, Math.floor((nowMs - new Date(card.activeTimerStart).getTime()) / 1000));
+  }
+
+  const todayTotalSec = entriesTodaySec + liveElapsedSec;
+  const totalHoursDec = (todayTotalSec / 3600).toFixed(2);
+  const estimatedValue = (parseFloat(totalHoursDec) * (currentStaff.hourlyRate || 150)).toFixed(2);
+
+  return (
+    <div
+      className={`rounded-2xl border p-3.5 transition-all duration-200 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+        card.isActive
+          ? `${styles.bg} ${styles.activeBorder} shadow-lg shadow-black/40 ring-1 ring-emerald-500/30`
+          : card.isPausedByBreak
+          ? 'bg-amber-950/30 border-amber-500/40'
+          : 'bg-slate-800/60 border-slate-700/70 hover:border-slate-600'
+      }`}
+    >
+      {/* Left: Icon, Project Name & Status */}
+      <div className="flex items-center gap-3 min-w-[220px]">
+        <div className="p-2 rounded-xl bg-slate-800 border border-slate-700 shrink-0">
+          {getProjectIcon(card.projectType)}
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-bold text-white tracking-tight">
+              {card.projectType}
+            </h4>
+            {card.isActive ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-300 flex items-center gap-1 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                RUNNING
+              </span>
+            ) : card.isPausedByBreak ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 border border-amber-500/60 text-amber-300 flex items-center gap-1">
+                <Coffee className="w-3 h-3 text-amber-400" />
+                PAUSED
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 border border-slate-700 text-slate-400">
+                READY
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Billing Rate: ${currentStaff.hourlyRate || 150}/hr
+          </span>
+        </div>
+      </div>
+
+      {/* Middle: Notes Input */}
+      <div className="flex-1 min-w-[200px]">
+        <input
+          type="text"
+          value={localNotes}
+          onChange={handleNotesChange}
+          onFocus={handleNotesFocus}
+          onBlur={handleNotesBlur}
+          placeholder={`Notes for ${card.projectType}...`}
+          className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+        />
+      </div>
+
+      {/* Stats: Live Time & Today Total */}
+      <div className="flex items-center gap-4 shrink-0">
+        <div className="text-right min-w-[85px]">
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Session</span>
+          <span className={`text-sm font-mono font-bold ${
+            card.isActive ? 'text-emerald-400 animate-pulse' : card.isPausedByBreak ? 'text-amber-400' : 'text-slate-300'
+          }`}>
+            {formatSecondsToHHMMSS(liveElapsedSec)}
+          </span>
+        </div>
+
+        <div className="text-right min-w-[95px]">
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Today's Total</span>
+          <span className="text-xs font-mono font-bold text-white block">
+            {formatMinutesToReadable(todayTotalSec / 60)}
+          </span>
+          <span className="text-[10px] font-mono text-emerald-400 font-semibold block">
+            ${estimatedValue}
+          </span>
+        </div>
+      </div>
+
+      {/* Right: Actions */}
+      <div className="flex items-center gap-2 shrink-0">
+        {card.isActive ? (
+          <button
+            onClick={handleStop}
+            className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
+            title="Stop timer and log dev session"
+          >
+            <Square className="w-3.5 h-3.5 fill-white" />
+            <span>Stop & Log</span>
+          </button>
+        ) : card.isPausedByBreak ? (
+          <span className="py-1 px-2.5 bg-amber-950/60 border border-amber-500/40 rounded-xl text-[11px] text-amber-300 font-semibold whitespace-nowrap">
+            Paused by Break
+          </span>
+        ) : (
+          <button
+            onClick={handleStart}
+            disabled={!isClockedIn}
+            className={`flex items-center justify-center gap-1.5 py-1.5 px-3.5 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap ${
+              isClockedIn 
+                ? `${styles.button} hover:scale-[1.01]` 
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+            }`}
+            title={isClockedIn ? `Start independent timer on ${card.projectType}` : 'Clock in on primary time card first'}
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Start Timer</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => onDismissCard(card.id)}
+          className="p-1.5 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-700/50 transition-colors cursor-pointer"
+          title="Remove project card from active board"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 interface GregDevProjectCardsSectionProps {
   currentStaff: StaffUser;
   isClockedIn: boolean;
@@ -368,6 +586,19 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
   const [customTypeName, setCustomTypeName] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<GregDevLayoutMode>(() => getStoredGregDevLayout());
+  const [defaultLayout, setDefaultLayout] = useState<GregDevLayoutMode>(() => getStoredGregDevLayout());
+  const [justSavedDefault, setJustSavedDefault] = useState(false);
+
+  const handleSetDefaultLayout = () => {
+    setDefaultLayout(layoutMode);
+    saveStoredGregDevLayout(layoutMode);
+    setJustSavedDefault(true);
+    triggerToast(`Default view saved as "${layoutMode === 'grid' ? 'Grid' : layoutMode === 'kanban' ? 'Kanban' : 'Lists'}". It will load automatically.`);
+    setTimeout(() => {
+      setJustSavedDefault(false);
+    }, 2800);
+  };
 
   // Live second ticker for running project timers
   useEffect(() => {
@@ -696,10 +927,89 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
               <span>Review & Export Dev Hours</span>
             </button>
 
+            {/* View Switchers: Grid / Kanban / Lists + Make Default View */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 bg-slate-950/70 p-1 rounded-xl border border-slate-800">
+                <button
+                  id="greg-dev-layout-grid-btn"
+                  onClick={() => setLayoutMode('grid')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    layoutMode === 'grid' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Grid layout of project cards"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>Grid</span>
+                </button>
+
+                <button
+                  id="greg-dev-layout-kanban-btn"
+                  onClick={() => setLayoutMode('kanban')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    layoutMode === 'kanban' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Kanban columns by status (Running, Paused, Ready)"
+                >
+                  <Kanban className="w-3.5 h-3.5" />
+                  <span>Kanban</span>
+                </button>
+
+                <button
+                  id="greg-dev-layout-list-btn"
+                  onClick={() => setLayoutMode('list')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    layoutMode === 'list' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Streamlined list row layout of project cards"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span>Lists</span>
+                </button>
+              </div>
+
+              {/* Make Default Layout Button / Badge */}
+              {justSavedDefault ? (
+                <div
+                  id="greg-dev-layout-saved-feedback"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
+                  title={`Saved! ${layoutMode === 'grid' ? 'Grid' : layoutMode === 'kanban' ? 'Kanban' : 'Lists'} is now your default view when loaded.`}
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Saved as Default!</span>
+                </div>
+              ) : layoutMode === defaultLayout ? (
+                <div
+                  id="greg-dev-layout-active-badge"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 select-none shadow-2xs"
+                  title={`This is currently your default startup view for dev cards. It loads automatically whenever you log in.`}
+                >
+                  <BookmarkCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden sm:inline text-emerald-400">Default:</span>
+                  <span className="font-bold">
+                    {layoutMode === 'grid' ? 'Grid' : layoutMode === 'kanban' ? 'Kanban' : 'Lists'}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  id="greg-dev-make-default-btn"
+                  onClick={handleSetDefaultLayout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-indigo-500/40 bg-indigo-950/50 hover:bg-indigo-900/60 text-indigo-300 active:scale-95 shadow-2xs group"
+                  title={`Make ${layoutMode === 'grid' ? 'Grid' : layoutMode === 'kanban' ? 'Kanban' : 'Lists'} your default view when loaded`}
+                >
+                  <Pin className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-45 transition-transform shrink-0" />
+                  <span>Make Default</span>
+                  <span className="text-[10px] bg-indigo-900 text-indigo-200 font-bold px-1.5 py-0.5 rounded font-mono">
+                    {layoutMode === 'grid' ? 'Grid' : layoutMode === 'kanban' ? 'Kanban' : 'Lists'}
+                  </span>
+                </button>
+              )}
+            </div>
+
           </div>
         </div>
 
-        {/* Card Grid Area */}
+        {/* Project Cards Display Area (Grid / Kanban / Lists) */}
         <div className="p-4 sm:p-5">
           {devCards.length === 0 ? (
             <div className="text-center py-8 px-4 bg-slate-950/50 border border-slate-800/80 rounded-2xl">
@@ -716,10 +1026,153 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
                 <span>Activate MPS OS Dev Card</span>
               </button>
             </div>
-          ) : (
+          ) : layoutMode === 'grid' ? (
+            /* VIEW 1: GRID VIEW */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {devCards.map((card) => (
                 <DevProjectCardItem
+                  key={card.id}
+                  card={card}
+                  devEntries={devEntries}
+                  currentStaff={currentStaff}
+                  nowMs={nowMs}
+                  isClockedIn={isClockedIn}
+                  isOnBreak={isOnBreak}
+                  onUpdateNotes={handleUpdateNotes}
+                  onStartTimer={handleStartTimer}
+                  onStopTimer={handleStopTimer}
+                  onDismissCard={handleDismissCard}
+                  styles={getThemeStyles(card.colorTheme)}
+                />
+              ))}
+            </div>
+          ) : layoutMode === 'kanban' ? (
+            /* VIEW 2: KANBAN PIPELINE VIEW */
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Kanban Column 1: Active / Running Timers */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col min-h-[350px]">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                      Running / Active
+                    </h4>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40">
+                    {devCards.filter(c => c.isActive).length}
+                  </span>
+                </div>
+                <div className="space-y-3 flex-1">
+                  {devCards.filter(c => c.isActive).map((card) => (
+                    <DevProjectCardItem
+                      key={card.id}
+                      card={card}
+                      devEntries={devEntries}
+                      currentStaff={currentStaff}
+                      nowMs={nowMs}
+                      isClockedIn={isClockedIn}
+                      isOnBreak={isOnBreak}
+                      onUpdateNotes={handleUpdateNotes}
+                      onStartTimer={handleStartTimer}
+                      onStopTimer={handleStopTimer}
+                      onDismissCard={handleDismissCard}
+                      styles={getThemeStyles(card.colorTheme)}
+                    />
+                  ))}
+                  {devCards.filter(c => c.isActive).length === 0 && (
+                    <div className="h-40 border border-dashed border-slate-800/80 rounded-xl flex flex-col items-center justify-center text-center p-4 text-slate-500 text-xs">
+                      <Clock className="w-5 h-5 text-slate-600 mb-1" />
+                      <span>No active timers currently running.</span>
+                      <span className="text-[10px] text-slate-600 mt-0.5">Click "Start Timer" on any ready project card to begin tracking.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Kanban Column 2: Paused by Break */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col min-h-[350px]">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Coffee className="w-3.5 h-3.5 text-amber-400" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                      Paused (Shift Break)
+                    </h4>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/40">
+                    {devCards.filter(c => c.isPausedByBreak).length}
+                  </span>
+                </div>
+                <div className="space-y-3 flex-1">
+                  {devCards.filter(c => c.isPausedByBreak).map((card) => (
+                    <DevProjectCardItem
+                      key={card.id}
+                      card={card}
+                      devEntries={devEntries}
+                      currentStaff={currentStaff}
+                      nowMs={nowMs}
+                      isClockedIn={isClockedIn}
+                      isOnBreak={isOnBreak}
+                      onUpdateNotes={handleUpdateNotes}
+                      onStartTimer={handleStartTimer}
+                      onStopTimer={handleStopTimer}
+                      onDismissCard={handleDismissCard}
+                      styles={getThemeStyles(card.colorTheme)}
+                    />
+                  ))}
+                  {devCards.filter(c => c.isPausedByBreak).length === 0 && (
+                    <div className="h-40 border border-dashed border-slate-800/80 rounded-xl flex flex-col items-center justify-center text-center p-4 text-slate-500 text-xs">
+                      <Coffee className="w-5 h-5 text-slate-600 mb-1" />
+                      <span>No project timers paused.</span>
+                      <span className="text-[10px] text-slate-600 mt-0.5">When taking a shift break, running timers auto-pause here.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Kanban Column 3: Ready / Standby */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col min-h-[350px]">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Ready / Standby
+                    </h4>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                    {devCards.filter(c => !c.isActive && !c.isPausedByBreak).length}
+                  </span>
+                </div>
+                <div className="space-y-3 flex-1">
+                  {devCards.filter(c => !c.isActive && !c.isPausedByBreak).map((card) => (
+                    <DevProjectCardItem
+                      key={card.id}
+                      card={card}
+                      devEntries={devEntries}
+                      currentStaff={currentStaff}
+                      nowMs={nowMs}
+                      isClockedIn={isClockedIn}
+                      isOnBreak={isOnBreak}
+                      onUpdateNotes={handleUpdateNotes}
+                      onStartTimer={handleStartTimer}
+                      onStopTimer={handleStopTimer}
+                      onDismissCard={handleDismissCard}
+                      styles={getThemeStyles(card.colorTheme)}
+                    />
+                  ))}
+                  {devCards.filter(c => !c.isActive && !c.isPausedByBreak).length === 0 && (
+                    <div className="h-40 border border-dashed border-slate-800/80 rounded-xl flex flex-col items-center justify-center text-center p-4 text-slate-500 text-xs">
+                      <CheckCircle2 className="w-5 h-5 text-slate-600 mb-1" />
+                      <span>All activated project cards are currently active.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* VIEW 3: STREAMLINED LISTS VIEW */
+            <div className="space-y-2.5">
+              {devCards.map((card) => (
+                <DevProjectListItem
                   key={card.id}
                   card={card}
                   devEntries={devEntries}

@@ -64,6 +64,22 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'>(initialTab);
   const [roadblockNoteInput, setRoadblockNoteInput] = useState(job.roadblock_note || '');
   const [newCommentInput, setNewCommentInput] = useState('');
+  const [notesFilter, setNotesFilter] = useState<'job_notes' | 'all'>('job_notes');
+
+  // Helper to determine if a comment is an automated duplicate of an audit log entry
+  const isAuditLogDuplicate = (c: JobComment) => {
+    return (
+      c.text.includes('⏱️ Drafting Session Completed') ||
+      c.text.includes('⏱️ Drafting Time Logged') ||
+      c.text.startsWith('⏱️') ||
+      c.text.includes('ROADBLOCK FLAGGED') ||
+      c.text.includes('ROADBLOCK ACTIVATED') ||
+      c.text.startsWith('🚨') ||
+      c.text.includes('ROADBLOCK RESOLVED') ||
+      c.text.startsWith('✅ ROADBLOCK') ||
+      c.text.startsWith('Revision Requested (#')
+    );
+  };
 
   // Tagging & Mentions State
   const [selectedTaggedStaff, setSelectedTaggedStaff] = useState<StaffUser[]>([]);
@@ -1065,24 +1081,14 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
       taggedStaff: uniqueTaggedNames.length > 0 ? uniqueTaggedNames : undefined,
       replyToCommentId: replyingToComment?.id,
       replyToAuthor: replyingToComment?.author,
-      replyToText: replyingToComment ? replyingToComment.text.slice(0, 120) : undefined
+      replyToText: replyingToComment ? replyingToComment.text.slice(0, 120) : undefined,
+      isJobNote: true
     };
 
-    const newAuditLogs = [...job.audit_logs];
-    if (uniqueTaggedNames.length > 0) {
-      newAuditLogs.unshift({
-        id: `a-tag-${Date.now()}`,
-        action: 'Note & Staff Tag Dispatched',
-        performedBy: senderName,
-        timestamp: new Date().toISOString(),
-        details: `${senderName} tagged ${uniqueTaggedNames.join(', ')} on note for #${job.job_number}: "${commentText.slice(0, 70)}"`
-      });
-    }
-
+    // Specific job note added to project notes - not duplicated into audit_logs
     const updated: Job = {
       ...job,
-      comments: [...job.comments, newComment],
-      audit_logs: newAuditLogs
+      comments: [...job.comments, newComment]
     };
 
     onUpdateJob(updated);
@@ -1364,7 +1370,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
               activeTab === 'comments' ? 'bg-blue-600 text-white shadow-xs' : 'hover:bg-slate-200'
             }`}
           >
-            Messages & Notes ({displayedJob.comments.length})
+            Messages & Notes ({displayedJob.comments.filter(c => !isAuditLogDuplicate(c)).length})
           </button>
 
           <button
@@ -1416,6 +1422,230 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 Back to Live
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Quick Note & CAD Feedback Bar (Moved to be just below the navigation tabs) */}
+        {selectedSnapshotId === 'live' && (
+          <div className="bg-slate-50/90 border-b border-slate-200 px-6 py-2.5">
+            <form onSubmit={handleAddComment} className="space-y-2 relative">
+              {/* Floating @Mention Autocomplete Dropdown Popover */}
+              {mentionQuery !== null && (
+                <div className="absolute top-full left-0 mt-1.5 w-72 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 p-2 z-50 space-y-1">
+                  <div className="flex items-center justify-between px-2 py-1 border-b border-slate-800 text-[10px] text-slate-400 font-mono">
+                    <span className="flex items-center gap-1 font-bold text-blue-400">
+                      <AtSign className="w-3 h-3" /> Tag Team Member
+                    </span>
+                    <span>Filtering "@{mentionQuery}"</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-0.5">
+                    {availableStaff
+                      .filter(s => 
+                        !mentionQuery || 
+                        s.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+                        s.role.toLowerCase().includes(mentionQuery.toLowerCase())
+                      )
+                      .map(staff => (
+                        <button
+                          key={staff.id}
+                          type="button"
+                          onClick={() => handleSelectMentionSuggestion(staff)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-blue-600 text-xs transition flex items-center justify-between group cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-700 group-hover:bg-blue-500 text-[10px] flex items-center justify-center font-bold">
+                              {staff.name.charAt(0)}
+                            </span>
+                            <span className="font-bold text-white group-hover:text-white">{staff.name}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400 group-hover:text-blue-200 uppercase">
+                            {staff.role}
+                          </span>
+                        </button>
+                      ))}
+                    {availableStaff.filter(s => !mentionQuery || s.name.toLowerCase().includes(mentionQuery.toLowerCase())).length === 0 && (
+                      <div className="p-2 text-center text-xs text-slate-400 italic">No matching drafter or admin found.</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Replying Banner */}
+              {replyingToComment && (
+                <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center justify-between text-xs shadow-2xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <CornerDownRight className="w-4 h-4 text-blue-600 shrink-0" />
+                    <div className="truncate">
+                      <span className="font-bold text-blue-950">
+                        Replying & Following up with <strong>{replyingToComment.author}</strong>:
+                      </span>
+                      <span className="text-blue-700 ml-1.5 italic truncate">
+                        "{replyingToComment.text.slice(0, 60)}..."
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplyingToComment(null)}
+                    className="text-slate-400 hover:text-red-600 p-1 transition shrink-0 cursor-pointer"
+                    title="Cancel reply"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Active Tagged Staff Recipients Pill Bar */}
+              {selectedTaggedStaff.length > 0 && (
+                <div className="bg-slate-100 border border-slate-200 p-1.5 rounded-xl flex items-center gap-2 flex-wrap text-xs">
+                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                    <Bell className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Carrying details & notification to:</span>
+                  </span>
+                  {selectedTaggedStaff.map(staff => (
+                    <span
+                      key={staff.id}
+                      className="inline-flex items-center gap-1 bg-blue-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-full shadow-2xs"
+                    >
+                      <span>@{staff.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTaggedStaff(prev => prev.filter(s => s.id !== staff.id))}
+                        className="hover:text-red-200 transition p-0.5 cursor-pointer"
+                        title="Remove tag"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTaggedStaff([])}
+                    className="text-[10px] text-slate-500 hover:text-red-600 font-semibold underline ml-auto cursor-pointer"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              )}
+
+              {/* Quick Tag Shortcuts Bar */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+                  <AtSign className="w-3 h-3 text-blue-500" /> Tag:
+                </span>
+
+                {/* Prominent Quick-Tag Buttons for Primary Leads + Drafters */}
+                {availableStaff.slice(0, 5).map(staff => {
+                  const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
+                  return (
+                    <button
+                      key={staff.id}
+                      type="button"
+                      onClick={() => handleToggleTagStaff(staff)}
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg transition border flex items-center gap-1 shadow-2xs cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 text-white border-blue-700'
+                          : 'bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
+                      }`}
+                    >
+                      <span>@{staff.name.split(' ')[0]}</span>
+                      {isSelected && <Check className="w-3 h-3" />}
+                    </button>
+                  );
+                })}
+
+                {/* Tag Team Member Dropdown for remaining staff */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowTagDropdown(!showTagDropdown)}
+                    className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200 flex items-center gap-1 shadow-2xs cursor-pointer"
+                  >
+                    <span>+ More Staff...</span>
+                    <ChevronDown className="w-3 h-3 text-slate-500" />
+                  </button>
+
+                  {showTagDropdown && (
+                    <div className="absolute left-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-slate-200 p-1.5 z-50 space-y-0.5">
+                      <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                        Select Drafter / Lead to Tag
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-0.5">
+                        {availableStaff.map(staff => {
+                          const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
+                          return (
+                            <button
+                              key={staff.id}
+                              type="button"
+                              onClick={() => {
+                                handleToggleTagStaff(staff);
+                                setShowTagDropdown(false);
+                              }}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between cursor-pointer ${
+                                isSelected ? 'bg-blue-50 text-blue-900 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <span>{staff.name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{staff.role}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {commentAttachmentUrl && (
+                <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <img src={commentAttachmentUrl} alt="Attached" className="w-8 h-8 object-cover rounded" />
+                    <span className="font-semibold text-blue-900 truncate">{commentAttachmentName || 'Attached Image'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommentAttachmentUrl('');
+                      setCommentAttachmentName('');
+                    }}
+                    className="text-slate-400 hover:text-red-600 transition p-1 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-2 items-center">
+                <label className="cursor-pointer p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition shrink-0" title="Attach Image or CAD snippet">
+                  <Paperclip className="w-4 h-4" />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleCommentFileSelect}
+                    className="hidden"
+                  />
+                </label>
+
+                <input
+                  ref={commentInputRef}
+                  id="new-drafter-comment-input"
+                  type="text"
+                  value={newCommentInput}
+                  onChange={handleCommentInputChange}
+                  placeholder="Add specific job note, CAD feedback, or type @ to tag Jason, Drew, Kyle, or another drafter..."
+                  className="flex-1 border border-slate-300 bg-white rounded-lg p-2.5 text-xs focus:bg-white focus:border-blue-500 focus:outline-hidden transition shadow-2xs"
+                />
+
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition shrink-0 flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  title="Add specific note to project"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Job Note</span>
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
@@ -2675,8 +2905,63 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 </div>
               )}
 
+              {/* Note Filter & View Control */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-100/90 p-2.5 rounded-xl border border-slate-200">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotesFilter('job_notes')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      notesFilter === 'job_notes'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Specific Job Notes ({displayedJob.comments.filter(c => !isAuditLogDuplicate(c)).length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNotesFilter('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      notesFilter === 'all'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    <span>All Activity ({displayedJob.comments.length})</span>
+                  </button>
+                </div>
+
+                <div className="text-[11px] text-slate-500 font-medium">
+                  {notesFilter === 'job_notes' ? (
+                    <span className="flex items-center gap-1 text-slate-600">
+                      <Check className="w-3 h-3 text-emerald-600" /> Filtered to specific job notes (audit trail in Audit Log tab)
+                    </span>
+                  ) : (
+                    <span>Displaying all notes alongside automated system logs</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Empty state if no specific job notes */}
+              {displayedJob.comments.filter(c => notesFilter === 'all' || !isAuditLogDuplicate(c)).length === 0 && (
+                <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-300 space-y-2">
+                  <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-800">No Specific Job Notes Yet</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Use the "Add Job Note" button above to record CAD feedback, client communication, or instructions for the project.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-3">
-                {displayedJob.comments.map(c => {
+                {displayedJob.comments
+                  .filter(c => notesFilter === 'all' || !isAuditLogDuplicate(c))
+                  .map(c => {
                   const isRoadblockFlag = c.text.includes('ROADBLOCK FLAGGED') || c.text.includes('ROADBLOCK ACTIVATED') || c.text.startsWith('🚨');
                   const isRoadblockResolved = c.text.includes('ROADBLOCK RESOLVED') || c.text.startsWith('✅ ROADBLOCK');
                   const isTimerLog = c.text.includes('⏱️ Drafting Session Completed') || c.text.includes('⏱️ Drafting Time Logged') || c.text.startsWith('⏱️');
@@ -2731,6 +3016,13 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                           }`}>
                             {c.role}
                           </span>
+
+                          {(c.isJobNote || (!isRoadblockFlag && !isRoadblockResolved && !isTimerLog)) && (
+                            <span className="bg-blue-100 text-blue-800 border border-blue-200 font-mono text-[10px] px-2 py-0.2 rounded-full font-bold flex items-center gap-1 shadow-2xs">
+                              <FileText className="w-2.5 h-2.5 text-blue-600" />
+                              <span>JOB NOTE</span>
+                            </span>
+                          )}
 
                           {isHighlighted && (
                             <span className="bg-blue-600 text-white font-mono text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-2xs animate-pulse">
@@ -2882,225 +3174,12 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 })}
               </div>
 
-              {selectedSnapshotId === 'live' && (
-                <form onSubmit={handleAddComment} className="space-y-2.5 pt-3 border-t border-slate-200 relative">
-                  
-                  {/* Floating @Mention Autocomplete Dropdown Popover */}
-                  {mentionQuery !== null && (
-                    <div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 p-2 z-50 space-y-1">
-                      <div className="flex items-center justify-between px-2 py-1 border-b border-slate-800 text-[10px] text-slate-400 font-mono">
-                        <span className="flex items-center gap-1 font-bold text-blue-400">
-                          <AtSign className="w-3 h-3" /> Tag Team Member
-                        </span>
-                        <span>Filtering "@{mentionQuery}"</span>
-                      </div>
-                      <div className="max-h-48 overflow-y-auto space-y-0.5">
-                        {availableStaff
-                          .filter(s => 
-                            !mentionQuery || 
-                            s.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-                            s.role.toLowerCase().includes(mentionQuery.toLowerCase())
-                          )
-                          .map(staff => (
-                            <button
-                              key={staff.id}
-                              type="button"
-                              onClick={() => handleSelectMentionSuggestion(staff)}
-                              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-blue-600 text-xs transition flex items-center justify-between group"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="w-5 h-5 rounded-full bg-slate-700 group-hover:bg-blue-500 text-[10px] flex items-center justify-center font-bold">
-                                  {staff.name.charAt(0)}
-                                </span>
-                                <span className="font-bold text-white group-hover:text-white">{staff.name}</span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 group-hover:text-blue-200 uppercase">
-                                {staff.role}
-                              </span>
-                            </button>
-                          ))}
-                        {availableStaff.filter(s => !mentionQuery || s.name.toLowerCase().includes(mentionQuery.toLowerCase())).length === 0 && (
-                          <div className="p-2 text-center text-xs text-slate-400 italic">No matching drafter or admin found.</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Replying Banner */}
-                  {replyingToComment && (
-                    <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-xl flex items-center justify-between text-xs shadow-2xs">
-                      <div className="flex items-center gap-2 truncate">
-                        <CornerDownRight className="w-4 h-4 text-blue-600 shrink-0" />
-                        <div className="truncate">
-                          <span className="font-bold text-blue-950">
-                            Replying & Following up with <strong>{replyingToComment.author}</strong>:
-                          </span>
-                          <span className="text-blue-700 ml-1.5 italic truncate">
-                            "{replyingToComment.text.slice(0, 60)}..."
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setReplyingToComment(null)}
-                        className="text-slate-400 hover:text-red-600 p-1 transition shrink-0"
-                        title="Cancel reply"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Active Tagged Staff Recipients Pill Bar */}
-                  {selectedTaggedStaff.length > 0 && (
-                    <div className="bg-slate-100 border border-slate-200 p-2 rounded-xl flex items-center gap-2 flex-wrap text-xs">
-                      <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
-                        <Bell className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Carrying details & notification to:</span>
-                      </span>
-                      {selectedTaggedStaff.map(staff => (
-                        <span
-                          key={staff.id}
-                          className="inline-flex items-center gap-1 bg-blue-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-full shadow-2xs"
-                        >
-                          <span>@{staff.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTaggedStaff(prev => prev.filter(s => s.id !== staff.id))}
-                            className="hover:text-red-200 transition p-0.5"
-                            title="Remove tag"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTaggedStaff([])}
-                        className="text-[10px] text-slate-500 hover:text-red-600 font-semibold underline ml-auto"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Quick Tag Shortcuts Bar */}
-                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
-                      <AtSign className="w-3 h-3 text-blue-500" /> Tag:
-                    </span>
-
-                    {/* Prominent Quick-Tag Buttons for Primary Leads (Jason, Drew, Kyle) + Drafters */}
-                    {availableStaff.slice(0, 5).map(staff => {
-                      const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
-                      return (
-                        <button
-                          key={staff.id}
-                          type="button"
-                          onClick={() => handleToggleTagStaff(staff)}
-                          className={`text-[11px] font-bold px-2 py-1 rounded-lg transition border flex items-center gap-1 shadow-2xs ${
-                            isSelected
-                              ? 'bg-blue-600 text-white border-blue-700'
-                              : 'bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
-                          }`}
-                        >
-                          <span>@{staff.name.split(' ')[0]}</span>
-                          {isSelected && <Check className="w-3 h-3" />}
-                        </button>
-                      );
-                    })}
-
-                    {/* Tag Team Member Dropdown for remaining staff */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowTagDropdown(!showTagDropdown)}
-                        className="text-[11px] font-bold px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200 flex items-center gap-1 shadow-2xs"
-                      >
-                        <span>+ More Staff...</span>
-                        <ChevronDown className="w-3 h-3 text-slate-500" />
-                      </button>
-
-                      {showTagDropdown && (
-                        <div className="absolute left-0 bottom-full mb-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200 p-1.5 z-40 space-y-0.5">
-                          <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                            Select Drafter / Lead to Tag
-                          </div>
-                          <div className="max-h-48 overflow-y-auto space-y-0.5">
-                            {availableStaff.map(staff => {
-                              const isSelected = selectedTaggedStaff.some(s => s.id === staff.id);
-                              return (
-                                <button
-                                  key={staff.id}
-                                  type="button"
-                                  onClick={() => {
-                                    handleToggleTagStaff(staff);
-                                    setShowTagDropdown(false);
-                                  }}
-                                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between ${
-                                    isSelected ? 'bg-blue-50 text-blue-900 font-bold' : 'hover:bg-slate-50 text-slate-700'
-                                  }`}
-                                >
-                                  <span>{staff.name}</span>
-                                  <span className="text-[10px] text-slate-400 font-mono">{staff.role}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {commentAttachmentUrl && (
-                    <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 truncate">
-                        <img src={commentAttachmentUrl} alt="Attached" className="w-8 h-8 object-cover rounded" />
-                        <span className="font-semibold text-blue-900 truncate">{commentAttachmentName || 'Attached Image'}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCommentAttachmentUrl('');
-                          setCommentAttachmentName('');
-                        }}
-                        className="text-slate-400 hover:text-red-600 transition p-1"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 items-center">
-                    <label className="cursor-pointer p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition shrink-0" title="Attach Image or CAD snippet">
-                      <Paperclip className="w-4 h-4" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCommentFileSelect}
-                        className="hidden"
-                      />
-                    </label>
-
-                    <input
-                      ref={commentInputRef}
-                      id="new-drafter-comment-input"
-                      type="text"
-                      value={newCommentInput}
-                      onChange={handleCommentInputChange}
-                      placeholder="Add note, CAD feedback, or type @ to tag Jason, Drew, Kyle, or another drafter..."
-                      className="flex-1 border border-slate-300 bg-slate-50 rounded-lg p-2.5 text-xs focus:bg-white focus:border-blue-500 focus:outline-hidden transition"
-                    />
-
-                    <button
-                      type="submit"
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition shrink-0 flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{replyingToComment ? 'Send Reply' : 'Post Note'}</span>
-                    </button>
-                  </div>
-                </form>
+              {/* Empty state when no comments exist */}
+              {displayedJob.comments.length === 0 && (
+                <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-500 space-y-1">
+                  <p className="font-semibold text-xs text-slate-700">No project notes or comments recorded yet.</p>
+                  <p className="text-[11px] text-slate-400">Use the note box directly below the tabs above to post CAD notes, feedback, or tag team members.</p>
+                </div>
               )}
             </div>
           )}

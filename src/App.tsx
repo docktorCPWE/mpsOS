@@ -1122,7 +1122,7 @@ export default function App() {
     saveStoredActiveStaffId(staff.id);
   };
 
-  const handleUpdatePreferredLayout = (staffId: string, layout: 'board' | 'grid' | 'table') => {
+  const handleUpdatePreferredLayout = (staffId: string, layout: 'board' | 'grid' | 'list' | 'table') => {
     saveStoredPreferredLayout(staffId, layout, currentStaff.email);
 
     setCurrentStaff(prev => {
@@ -1423,6 +1423,35 @@ export default function App() {
     });
 
     updateJobsState(updatedJobs);
+  };
+
+  // 3b. Add Specific Job Note (From Drafter Dashboard Table or Modals)
+  const handleAddJobNote = (jobId: string, text: string, customTimestamp?: string) => {
+    const updatedJobs = jobs.map(j => {
+      if (j.id === jobId) {
+        const newNote: JobComment = {
+          id: `c-note-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          author: currentStaff.name,
+          authorId: currentStaff.id,
+          role: 'drafter',
+          text: text.trim(),
+          timestamp: customTimestamp || new Date().toISOString(),
+          isJobNote: true
+        };
+
+        return {
+          ...j,
+          comments: [...(j.comments || []), newNote]
+        };
+      }
+      return j;
+    });
+
+    updateJobsState(updatedJobs);
+    if (selectedJobForDetail && selectedJobForDetail.id === jobId) {
+      const updatedJob = updatedJobs.find(j => j.id === jobId);
+      if (updatedJob) setSelectedJobForDetail(updatedJob);
+    }
   };
 
   // 4. Customer Formal Approval
@@ -2183,6 +2212,7 @@ export default function App() {
             devCards={devCards}
             devEntries={devEntries}
             onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
+            onAddJobNote={handleAddJobNote}
           />
         ) : userRole === 'admin' ? (
           <AdminBillingDashboard

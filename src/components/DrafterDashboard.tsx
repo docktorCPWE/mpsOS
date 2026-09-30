@@ -23,7 +23,7 @@ interface DrafterDashboardProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   onOpenKyleInbox?: () => void;
-  onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'table') => void;
+  onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'list' | 'table') => void;
   onUpdateCustomerContact?: (customerName: string, updatedContact: {
     customer_name?: string;
     customer_email?: string;
@@ -37,6 +37,7 @@ interface DrafterDashboardProps {
   devCards?: GregDevProjectCard[];
   devEntries?: GregDevTimeEntry[];
   onOpenDevReviewModal?: () => void;
+  onAddJobNote?: (jobId: string, text: string, timestamp?: string) => void;
 }
 
 const PHASES: JobPhase[] = [
@@ -71,19 +72,55 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   devCards,
   devEntries,
   onOpenDevReviewModal,
+  onAddJobNote,
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
 
+  // Add Job Note Modal state
+  const [addJobNoteModalJob, setAddJobNoteModalJob] = useState<Job | null>(null);
+  const [noteModalTimestamp, setNoteModalTimestamp] = useState<string>('');
+  const [noteModalIsoTimestamp, setNoteModalIsoTimestamp] = useState<string>('');
+  const [noteModalText, setNoteModalText] = useState<string>('');
+  const [noteSavedFeedback, setNoteSavedFeedback] = useState<boolean>(false);
+
+  const handleOpenAddJobNoteModal = (job: Job) => {
+    const now = new Date();
+    setAddJobNoteModalJob(job);
+    setNoteModalIsoTimestamp(now.toISOString());
+    setNoteModalTimestamp(now.toLocaleString('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'medium'
+    }));
+    setNoteModalText('');
+    setNoteSavedFeedback(false);
+  };
+
+  const handleSaveJobNoteSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addJobNoteModalJob || !noteModalText.trim()) return;
+
+    if (onAddJobNote) {
+      onAddJobNote(addJobNoteModalJob.id, noteModalText.trim(), noteModalIsoTimestamp);
+    }
+
+    setNoteSavedFeedback(true);
+    setTimeout(() => {
+      setAddJobNoteModalJob(null);
+      setNoteModalText('');
+      setNoteSavedFeedback(false);
+    }, 1100);
+  };
+
   // Preferred default layout management
-  const getStaffDefaultLayout = (): 'board' | 'grid' | 'table' => {
+  const getStaffDefaultLayout = (): 'board' | 'grid' | 'list' | 'table' => {
     if (currentStaff?.preferredLayout) {
       return currentStaff.preferredLayout;
     }
     return getStoredPreferredLayout(currentStaff?.id || currentStaff?.email);
   };
 
-  const [defaultLayout, setDefaultLayout] = useState<'board' | 'grid' | 'table'>(() => getStaffDefaultLayout());
-  const [viewMode, setViewMode] = useState<'board' | 'grid' | 'table'>(() => getStaffDefaultLayout());
+  const [defaultLayout, setDefaultLayout] = useState<'board' | 'grid' | 'list' | 'table'>(() => getStaffDefaultLayout());
+  const [viewMode, setViewMode] = useState<'board' | 'grid' | 'list' | 'table'>(() => getStaffDefaultLayout());
   const [justSavedDefault, setJustSavedDefault] = useState(false);
 
   // When active staff member changes or their preferredLayout is updated, reflect their preference
@@ -383,7 +420,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <span>New Job Intake</span>
           </button>
 
-          {/* View Switchers (Board / Grid / Table) + Make Default Button */}
+          {/* View Switchers (Grid / Kanban / Lists / Table) + Make Default Button */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button
@@ -392,9 +429,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
                   viewMode === 'grid' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
+                title="Grid layout of project cards"
               >
                 <Grid className="w-3.5 h-3.5" />
-                <span>Grid Cards</span>
+                <span>Grid</span>
               </button>
 
               <button
@@ -403,9 +441,22 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
                   viewMode === 'board' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
+                title="Kanban columns by workflow phase"
               >
                 <Kanban className="w-3.5 h-3.5" />
                 <span>Kanban</span>
+              </button>
+
+              <button
+                id="view-mode-list-btn"
+                onClick={() => setViewMode('list')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  viewMode === 'list' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Streamlined list layout of project cards"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Lists</span>
               </button>
 
               <button
@@ -414,8 +465,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
                   viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
+                title="Detailed data table sheet view"
               >
-                <List className="w-3.5 h-3.5" />
+                <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Table</span>
               </button>
             </div>
@@ -425,7 +477,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               <div 
                 id="default-layout-saved-feedback"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
-                title={`Saved! ${viewMode === 'grid' ? 'Grid Cards' : viewMode === 'board' ? 'Kanban' : 'Table'} will now load automatically whenever you log in.`}
+                title={`Saved! ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} will now load automatically whenever you log in.`}
               >
                 <Check className="w-3.5 h-3.5 stroke-[3]" />
                 <span>Saved as Default!</span>
@@ -439,7 +491,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span className="hidden sm:inline text-emerald-700">Default View:</span>
                 <span className="font-bold">
-                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : 'Table'}
+                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
                 </span>
               </div>
             ) : (
@@ -448,12 +500,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 id="make-default-view-btn"
                 onClick={handleSetAsDefault}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-blue-300/90 bg-blue-50/90 hover:bg-blue-100 text-blue-700 active:scale-95 shadow-2xs group"
-                title={`Make ${viewMode === 'grid' ? 'Grid Cards' : viewMode === 'board' ? 'Kanban' : 'Table'} your permanent default view for ${currentStaff.name} when logged in`}
+                title={`Make ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} your permanent default view for ${currentStaff.name} when logged in`}
               >
                 <Pin className="w-3.5 h-3.5 text-blue-600 group-hover:rotate-45 transition-transform shrink-0" />
                 <span>Make Default</span>
                 <span className="text-[10px] bg-blue-200/80 text-blue-800 font-bold px-1.5 py-0.5 rounded font-mono">
-                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : 'Table'}
+                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
                 </span>
               </button>
             )}
@@ -1728,22 +1780,299 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
       )}
 
+      {/* VIEW MODE: STREAMLINED LISTS VIEW */}
+      {viewMode === 'list' && (
+        <div className="space-y-3">
+          {filteredJobs.map((job) => {
+            const isRunning = Boolean(job.active_timer_start);
+            const totalSecs = calculateJobTotalSeconds(job, nowTimestamp);
+            const billable = calculateJobBillableAmount(job, nowTimestamp);
+            const delegatedTasks = job.delegated_tasks || [];
+
+            return (
+              <div
+                key={`list-${job.id}`}
+                className={`bg-white rounded-2xl border p-4 sm:p-5 transition-all shadow-xs hover:shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                  isRunning
+                    ? 'border-emerald-400 ring-2 ring-emerald-300/40 bg-gradient-to-r from-emerald-50/30 via-white to-white'
+                    : job.roadblock
+                    ? 'border-red-300 ring-1 ring-red-200/50 bg-gradient-to-r from-red-50/20 via-white to-white'
+                    : 'border-slate-200/90 hover:border-blue-300'
+                }`}
+              >
+                {/* Left Section: Identifiers, Project Name, Customer & Location */}
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs sm:text-sm font-mono font-black bg-black text-white px-2.5 py-1 rounded-md border border-black shadow-xs tracking-wide">
+                      #{job.job_number.replace(/^#/, '')}
+                    </span>
+
+                    {job.owner && (
+                      <span className="text-[10px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                        <Building className="w-3 h-3 text-purple-600" />
+                        <span>{job.owner}</span>
+                      </span>
+                    )}
+
+                    {isJobArchived(job) && (
+                      <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1">
+                        <Archive className="w-3 h-3 text-emerald-600" />
+                        <span>Archived</span>
+                      </span>
+                    )}
+
+                    {isRunning ? (
+                      <span className="text-[11px] bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <Clock className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                        <span>TIMER ACTIVE</span>
+                      </span>
+                    ) : job.roadblock ? (
+                      <span className="text-[11px] bg-red-100 text-red-900 border border-red-300 font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                        <span>ROADBLOCK</span>
+                      </span>
+                    ) : null}
+
+                    {job.builder && (
+                      <span className="text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                        <Hammer className="w-3 h-3 text-amber-600" />
+                        <span>{job.builder}</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <h4 
+                      onClick={() => onSelectJob(job)}
+                      className="text-base font-bold text-slate-900 hover:text-blue-600 cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <span>{job.project_name || job.customer_name}</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                    </h4>
+                    {job.project_name && job.customer_name && job.project_name.toLowerCase() !== job.customer_name.toLowerCase() && (
+                      <p className="text-xs text-slate-500">Customer: <span className="font-semibold text-slate-700">{job.customer_name}</span></p>
+                    )}
+                  </div>
+
+                  {/* Project Meta Chips */}
+                  <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600">
+                    {job.project_address && (
+                      <span className="flex items-center gap-1 text-slate-500 truncate max-w-xs" title={job.project_address}>
+                        <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span className="truncate">{job.project_address}</span>
+                      </span>
+                    )}
+
+                    {job.sq_ft_goal ? (
+                      <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                        Goal: {job.sq_ft_goal} sq ft
+                      </span>
+                    ) : job.sq_ft > 0 ? (
+                      <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                        {job.sq_ft} sq ft
+                      </span>
+                    ) : null}
+
+                    {job.style && (
+                      <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                        {job.style}
+                      </span>
+                    )}
+
+                    {job.sheet_status && (
+                      <span className="font-semibold text-slate-700 bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded">
+                        {job.sheet_status}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Contact Shortcuts */}
+                  <div className="flex items-center gap-3 pt-1 text-xs text-slate-600 flex-wrap">
+                    {job.customer_email && (
+                      <a 
+                        href={`mailto:${job.customer_email.split(';')[0].trim()}`} 
+                        className="text-blue-600 hover:underline flex items-center gap-1 truncate max-w-[180px]"
+                        title={job.customer_email}
+                      >
+                        <Mail className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{job.customer_email.split(';')[0].trim()}</span>
+                      </a>
+                    )}
+                    {job.customer_phone && (
+                      <a 
+                        href={`tel:${job.customer_phone}`} 
+                        className="text-slate-700 hover:underline font-mono flex items-center gap-1"
+                        title={job.customer_phone}
+                      >
+                        <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{job.customer_phone}</span>
+                      </a>
+                    )}
+                    {onUpdateCustomerContact && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedJobForContactEdit(job)}
+                        className="text-slate-400 hover:text-blue-600 flex items-center gap-1 transition cursor-pointer text-[11px]"
+                        title="Edit Customer Contact Info"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit Contact</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Middle Section: Workflow Phase, Drafter, Delegated & Logged Time */}
+                <div className="flex flex-wrap lg:flex-nowrap items-center gap-4 border-t lg:border-t-0 lg:border-l border-slate-200/80 pt-3 lg:pt-0 lg:pl-5">
+                  
+                  {/* Phase Selector */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">Workflow Phase</span>
+                    <select
+                      value={job.current_status}
+                      onChange={(e) => {
+                        const newPhase = e.target.value as JobPhase;
+                        if (newPhase === 'Completed' && !canMarkProjectCompleted) {
+                          alert('Permission Restricted: Only Kyle or Jason have the authority to mark a project as Completed.');
+                          return;
+                        }
+                        onUpdateStatus(job.id, newPhase);
+                      }}
+                      className="bg-slate-50 border border-slate-300 text-slate-800 font-bold rounded-xl px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                    >
+                      {PHASES.map((p) => (
+                        <option key={`list-phase-${job.id}-${p}`} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Assigned Drafter & Delegated */}
+                  <div className="space-y-1 min-w-[130px]">
+                    <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">Assigned Drafter</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">
+                        {job.assigned_drafter.charAt(0)}
+                      </div>
+                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[110px]" title={job.assigned_drafter}>
+                        {job.assigned_drafter}
+                      </span>
+                    </div>
+                    {delegatedTasks.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                        <ListTodo className="w-3 h-3" />
+                        <span>{delegatedTasks.length} Delegated</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Logged Time */}
+                  <div className="space-y-1 min-w-[110px]">
+                    <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">CAD Time</span>
+                    <div className="flex items-center gap-1 text-sm font-bold font-mono text-slate-900">
+                      <Clock className={`w-3.5 h-3.5 ${isRunning ? 'text-emerald-600 animate-spin' : 'text-slate-400'}`} />
+                      <span className={isRunning ? 'text-emerald-700' : ''}>{formatSecondsToReadable(totalSecs)}</span>
+                    </div>
+                    {canAccessFinancials ? (
+                      <span className="text-[10px] font-mono font-semibold text-emerald-700 block">
+                        ${billable.toFixed(2)} billable
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 block">
+                        {(job.time_logs || []).length} session{(job.time_logs || []).length === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Right Actions: Timer, Roadblock, Delegate & Open */}
+                  <div className="flex items-center gap-2 pt-2 lg:pt-0">
+                    {/* Timer Start / Stop */}
+                    {isRunning ? (
+                      <button
+                        onClick={() => onStopTimer(job.id)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+                        title="Stop live drafting timer"
+                      >
+                        <Square className="w-3.5 h-3.5 fill-white" />
+                        <span>Stop</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onStartTimer(job.id)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+                        title="Start live drafting timer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>Start</span>
+                      </button>
+                    )}
+
+                    {/* Roadblock Toggle */}
+                    <button
+                      onClick={() => onToggleRoadblock(job.id)}
+                      className={`p-2 rounded-xl border transition cursor-pointer ${
+                        job.roadblock
+                          ? 'bg-red-50 hover:bg-red-100 text-red-600 border-red-300'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-400 border-slate-200'
+                      }`}
+                      title={job.roadblock ? 'Resolve Roadblock' : 'Flag Roadblock'}
+                    >
+                      <AlertTriangle className="w-4 h-4" />
+                    </button>
+
+                    {/* Delegate Work Button */}
+                    {canDelegate && onOpenDelegateModal && (
+                      <button
+                        onClick={() => onOpenDelegateModal(job)}
+                        className="p-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition cursor-pointer"
+                        title="Delegate work component to another drafter"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Open Plan Modal */}
+                    <button
+                      onClick={() => onSelectJob(job)}
+                      className="flex items-center gap-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer whitespace-nowrap"
+                    >
+                      <span>Open Plan</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                </div>
+
+              </div>
+            );
+          })}
+
+          {filteredJobs.length === 0 && (
+            <div className="bg-white p-12 rounded-2xl border border-dashed border-slate-300 text-center">
+              <Search className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+              <h4 className="text-sm font-bold text-slate-700">No project plans match your current criteria</h4>
+              <p className="text-xs text-slate-500 mt-1">Try adjusting your drafter filter, roadblock toggle, or search query.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* VIEW MODE 3: DETAILED TABLE VIEW */}
       {viewMode === 'table' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto pb-2">
-            <table className="w-full min-w-[1300px] text-left text-xs text-slate-700">
+            <table className="w-full min-w-[1100px] text-left text-xs text-slate-700">
               <thead className="bg-slate-50 border-b border-slate-200 uppercase font-mono text-[10px] text-slate-500 tracking-wider">
                 <tr>
                   <th className="p-3.5 pl-4">Job # / Owner</th>
                   <th className="p-3.5">Project & Customer</th>
-                  <th className="p-3.5">Builder</th>
-                  <th className="p-3.5">Goal & Style</th>
                   <th className="p-3.5">Drafter</th>
                   <th className="p-3.5">Phase & Status</th>
                   <th className="p-3.5">Time Logged</th>
                   {canAccessFinancials && <th className="p-3.5">Invoicing ($)</th>}
-                  <th className="p-3.5">Delegated</th>
+                  <th className="p-3.5 whitespace-nowrap">Job Notes</th>
                   <th className="p-3.5">Timer Controls</th>
                   <th className="p-3.5 pr-8 text-right min-w-[240px] whitespace-nowrap">Actions</th>
                 </tr>
@@ -1754,6 +2083,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   const totalSecs = calculateJobTotalSeconds(job, nowTimestamp);
                   const billable = calculateJobBillableAmount(job, nowTimestamp);
                   const delegatedTasks = job.delegated_tasks || [];
+                  const delegatedAssignees = Array.from(
+                    new Set(delegatedTasks.map(t => t.assignedTo?.trim()).filter(Boolean))
+                  );
 
                   return (
                     <tr key={job.id} className={`transition ${isRunning ? 'bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
@@ -1815,27 +2147,24 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           </div>
                         </div>
                       </td>
+                      {/* Drafter Column: only display names of those to whom a task has been delegated to and only if it exists */}
                       <td className="p-3.5">
-                        {job.builder ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded">
-                            <Hammer className="w-3 h-3 text-amber-600" />
-                            <span>{job.builder}</span>
-                          </span>
+                        {delegatedAssignees.length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            {delegatedAssignees.map(name => (
+                              <span
+                                key={`del-${job.id}-${name}`}
+                                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md w-fit"
+                              >
+                                <User className="w-3 h-3 text-indigo-500" />
+                                <span>{name}</span>
+                              </span>
+                            ))}
+                          </div>
                         ) : (
                           <span className="text-slate-400 text-xs">—</span>
                         )}
                       </td>
-                      <td className="p-3.5">
-                        <div className="space-y-0.5 text-xs">
-                          {job.sq_ft_goal ? (
-                            <div className="font-mono font-semibold text-slate-800">Goal: {job.sq_ft_goal}</div>
-                          ) : job.sq_ft > 0 ? (
-                            <div className="font-mono text-slate-700">{job.sq_ft} sq ft</div>
-                          ) : null}
-                          {job.style && <div className="text-slate-500 text-[11px]">{job.style}</div>}
-                        </div>
-                      </td>
-                      <td className="p-3.5 text-slate-700 font-medium">{job.assigned_drafter}</td>
                       <td className="p-3.5">
                         <div className="space-y-1">
                           <select
@@ -1874,14 +2203,17 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           ${billable.toFixed(2)}
                         </td>
                       )}
-                      <td className="p-3.5">
-                        {delegatedTasks.length > 0 ? (
-                          <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
-                            {delegatedTasks.length} Sub-Tasks
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-slate-400">None</span>
-                        )}
+                      {/* Job Notes Column with Add Job Note button on each line */}
+                      <td className="p-3.5 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAddJobNoteModal(job)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 hover:border-indigo-300 transition cursor-pointer shadow-2xs group active:scale-95"
+                          title={`Add job note to Plan #${job.job_number} (saved to Messages & Notes)`}
+                        >
+                          <Plus className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-90 transition-transform" />
+                          <span>Add Job Note</span>
+                        </button>
                       </td>
                       <td className="p-3.5">
                         {isRunning ? (
@@ -1961,6 +2293,133 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           }}
           performedByRole="staff"
         />
+      )}
+
+      {/* MODAL: Add Job Note Popup Modal */}
+      {addJobNoteModalJob && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-scaleIn">
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-indigo-50/50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shadow-2xs shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">Add Job Note</h3>
+                    <span className="text-xs font-mono font-bold bg-black text-white px-2 py-0.5 rounded">
+                      #{addJobNoteModalJob.job_number.replace(/^#/, '')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Customer: <span className="font-semibold text-slate-700">{addJobNoteModalJob.customer_name}</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAddJobNoteModalJob(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSaveJobNoteSubmit} className="p-5 space-y-4">
+              {/* Permanent Locked Timestamp Field */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Timestamp (Permanent / Non-Editable)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono font-normal">Locked</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={noteModalTimestamp}
+                    className="w-full bg-slate-100/90 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-700 select-none cursor-not-allowed"
+                  />
+                  <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  This timestamp is automatically captured and cannot be changed or backdated.
+                </p>
+              </div>
+
+              {/* Drafter / Author Display */}
+              <div className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
+                <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span>
+                  Author: <strong className="text-slate-800">{currentStaff.name}</strong> ({currentStaff.title})
+                </span>
+              </div>
+
+              {/* Note Details Textarea */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Type Note</span>
+                </label>
+                <textarea
+                  rows={4}
+                  autoFocus
+                  required
+                  value={noteModalText}
+                  onChange={(e) => setNoteModalText(e.target.value)}
+                  placeholder="Type specific job note, project updates, client requirements, or milestone details..."
+                  className="w-full bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 rounded-xl p-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition resize-none leading-relaxed"
+                />
+                <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                  <BookmarkCheck className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>
+                    Note will be saved into the <strong>Messages & Notes</strong> tab of #{addJobNoteModalJob.job_number}.
+                  </span>
+                </p>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAddJobNoteModalJob(null)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={!noteModalText.trim() || noteSavedFeedback}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                    noteSavedFeedback
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {noteSavedFeedback ? (
+                    <>
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Saved to Messages & Notes!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      <span>Save Job Note</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Lightbox File / Attachment Preview Modal in Drafter Dashboard */}

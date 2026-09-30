@@ -463,3 +463,26 @@ export function exportGregDevTimeEntriesCSV(
   link.click();
   document.body.removeChild(link);
 }
+
+export type GregDevLayoutMode = 'grid' | 'kanban' | 'list';
+export const GREG_DEV_LAYOUT_STORAGE_KEY = 'mps_greg_dev_layout_preference';
+
+export function getStoredGregDevLayout(): GregDevLayoutMode {
+  try {
+    const saved = localStorage.getItem(GREG_DEV_LAYOUT_STORAGE_KEY);
+    if (saved === 'grid' || saved === 'kanban' || saved === 'list') {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'grid';
+}
+
+export function saveStoredGregDevLayout(layout: GregDevLayoutMode): void {
+  try {
+    localStorage.setItem(GREG_DEV_LAYOUT_STORAGE_KEY, layout);
+  } catch {
+    // ignore
+  }
+}

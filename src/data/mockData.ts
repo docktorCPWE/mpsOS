@@ -956,17 +956,17 @@ export function saveStoredActiveStaffId(staffId: string): void {
   }
 }
 
-export function getStoredPreferredLayout(staffIdOrEmail?: string): 'grid' | 'board' | 'table' {
+export function getStoredPreferredLayout(staffIdOrEmail?: string): 'grid' | 'board' | 'list' | 'table' {
   try {
     if (staffIdOrEmail) {
       const cleanKey = staffIdOrEmail.toLowerCase().trim();
       const specific = localStorage.getItem(`mps_preferred_layout_${cleanKey}`);
-      if (specific === 'grid' || specific === 'board' || specific === 'table') {
+      if (specific === 'grid' || specific === 'board' || specific === 'list' || specific === 'table') {
         return specific;
       }
     }
     const globalPref = localStorage.getItem('mps_global_preferred_layout');
-    if (globalPref === 'grid' || globalPref === 'board' || globalPref === 'table') {
+    if (globalPref === 'grid' || globalPref === 'board' || globalPref === 'list' || globalPref === 'table') {
       return globalPref;
     }
   } catch {
@@ -975,7 +975,7 @@ export function getStoredPreferredLayout(staffIdOrEmail?: string): 'grid' | 'boa
   return 'grid';
 }
 
-export function saveStoredPreferredLayout(staffId: string, layout: 'grid' | 'board' | 'table', email?: string): void {
+export function saveStoredPreferredLayout(staffId: string, layout: 'grid' | 'board' | 'list' | 'table', email?: string): void {
   try {
     if (staffId) {
       localStorage.setItem(`mps_preferred_layout_${staffId.toLowerCase().trim()}`, layout);

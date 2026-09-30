@@ -27,6 +27,7 @@ export interface JobComment {
   replyToCommentId?: string;
   replyToAuthor?: string;
   replyToText?: string;
+  isJobNote?: boolean;
 }
 
 export interface DeliverableFile {
@@ -234,7 +235,7 @@ export interface StaffUser {
   canEditJobPhases?: boolean;    // Advance or rewind job workflow phases
   canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
   canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
-  preferredLayout?: 'grid' | 'board' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Table)
+  preferredLayout?: 'grid' | 'board' | 'list' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Lists, Table)
 }
 
 export interface PayrollEntry {
