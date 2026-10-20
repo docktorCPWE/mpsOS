@@ -316,12 +316,19 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
                     ? `Submit Revised Deliverable (Rev #${task.revisionCount || 1})` 
                     : 'Mark Task Completed & Submit for Review'}
                 </h3>
-                <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-slate-700 px-2.5 py-0.5 rounded shadow-xs tracking-wide">
-                  #{task.jobNumber.replace(/^#/, '')}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-slate-700 px-2.5 py-0.5 rounded shadow-xs tracking-wide">
+                    #{task.jobNumber.replace(/^#/, '')}
+                  </span>
+                  {task.customerName && (
+                    <span className="text-xs sm:text-sm font-bold text-amber-200">
+                      {task.customerName}
+                    </span>
+                  )}
+                </div>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                {task.customerName} • Delegated by <strong className="text-amber-300 font-semibold">{delegator}</strong>
+                Delegated by <strong className="text-amber-300 font-semibold">{delegator}</strong>
               </p>
             </div>
           </div>

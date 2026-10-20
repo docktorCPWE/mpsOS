@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
@@ -179,8 +179,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     jobNumber?: string;
   } | null>(null);
 
+  // For individual drafters: allow toggling between 'touched' (worked on / assigned / tagged) and 'all' (all company plans)
+  const [drafterScopeFilter, setDrafterScopeFilter] = useState<'touched' | 'all'>('touched');
+
   // Whenever the active staff user is switched, update the board scope
   useEffect(() => {
+    setDrafterScopeFilter('touched');
     if (!isAllCardsAuthorized) {
       setSelectedDrafter(currentStaff.name);
     } else if (selectedDrafter !== 'all') {
@@ -229,7 +233,67 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     return lower !== 'aaron' && lower !== 'james';
   });
 
-  // Helper function to check if a job belongs to a specific drafter
+  // Helper function to get all drafters who have touched, worked on, been assigned, or been tagged in a job
+  const getJobInvolvedDrafters = (job: Job): string[] => {
+    const namesSet = new Set<string>();
+
+    // 1. Assigned drafter(s) / Lead
+    if (job.assigned_drafter) {
+      job.assigned_drafter.split(',').forEach(d => {
+        const c = canonicalizeDrafterName(d);
+        if (c) namesSet.add(c);
+      });
+    }
+
+    // 2. Delegated tasks: assignees, completedBy, and delegators
+    (job.delegated_tasks || []).forEach(t => {
+      if (t.assignedTo) {
+        const c = canonicalizeDrafterName(t.assignedTo);
+        if (c) namesSet.add(c);
+      }
+      if (t.completedBy) {
+        const c = canonicalizeDrafterName(t.completedBy);
+        if (c) namesSet.add(c);
+      }
+      if (t.delegatedBy) {
+        const c = canonicalizeDrafterName(t.delegatedBy);
+        if (c) namesSet.add(c);
+      }
+    });
+
+    // 3. Time loggers (anyone who worked on / logged CAD time on the job)
+    (job.time_logs || []).forEach(tl => {
+      if (tl.drafterName) {
+        const c = canonicalizeDrafterName(tl.drafterName);
+        if (c) namesSet.add(c);
+      }
+    });
+
+    // 4. Deliverables authors
+    (job.deliverables || []).forEach(d => {
+      if (d.authorDrafter) {
+        const c = canonicalizeDrafterName(d.authorDrafter);
+        if (c) namesSet.add(c);
+      }
+    });
+
+    // 5. Comments & job notes (authors and tagged staff)
+    (job.comments || []).forEach(c => {
+      if (c.author && (c.role === 'drafter' || c.isJobNote)) {
+        const cAuthor = canonicalizeDrafterName(c.author);
+        if (cAuthor) namesSet.add(cAuthor);
+      }
+      (c.taggedStaff || []).forEach(ts => {
+        const cTagged = canonicalizeDrafterName(ts);
+        if (cTagged) namesSet.add(cTagged);
+      });
+    });
+
+    return Array.from(namesSet).filter(Boolean);
+  };
+
+  // Helper function to check if a job belongs to or was touched by a specific drafter
+  // (worked on, been assigned, been tagged in, delegated tasks, logged CAD time, etc.)
   const isJobAssignedToDrafter = (job: Job, drafterName: string) => {
     const drafterLower = drafterName.toLowerCase().trim();
     const drafterFirst = drafterLower.split(' ')[0];
@@ -239,10 +303,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       return t === drafterLower || t === drafterFirst || t.includes(drafterLower) || drafterLower.includes(t);
     };
 
-    const isLead = matchesDrafter(job.assigned_drafter);
-    const hasDelegated = (job.delegated_tasks || []).some(t => matchesDrafter(t.assignedTo));
-    const hasTimeLogged = (job.time_logs || []).some(tl => matchesDrafter(tl.drafterName));
-    return isLead || hasDelegated || hasTimeLogged;
+    const involved = getJobInvolvedDrafters(job);
+    return involved.some(d => matchesDrafter(d));
   };
 
   // Helper to calculate stats per drafter (only counting active, non-archived/unpaid jobs)
@@ -276,35 +338,54 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // For managers/leads (Kyle, Jason, Drew, Ethan, Greg), target selectedDrafter ('all' or specific drafter)
   const activeDrafterTarget = isAllCardsAuthorized ? selectedDrafter : currentStaff.name;
 
+  // Count of plans touched by the current active staff user
+  const myTouchedJobsCount = activeJobs.filter(j => isJobAssignedToDrafter(j, currentStaff.name)).length;
+
   // Filter logic: Search by MPS / Job Number, Customer Name, House Style, or Drafter
   const filteredJobs = jobs.filter(job => {
     const isArchived = isJobArchived(job);
+    const q = searchQuery.toLowerCase().trim();
+    const hasSearch = q.length > 0;
 
-    // 1. Mandatory Drafter Scope:
-    // For individual drafters, strictly only allow cards specific to their board AND never show paid/archived jobs
-    if (!isAllCardsAuthorized) {
-      if (isArchived) {
-        return false;
-      }
-      if (!isJobAssignedToDrafter(job, currentStaff.name)) {
-        return false;
+    // 1. Mandatory Drafter Scope & Universal Global Search:
+    // If a search query is typed: Drafters can search ANY job across all plans (not just those assigned to them directly)!
+    if (hasSearch) {
+      // In search mode, allow searching all plans.
+      // If job is archived, exclude unless explicitly searching for that job number or customer
+      if (isArchived && !showArchived) {
+        const cleanQuery = q.replace(/[^a-z0-9]/gi, '');
+        const cleanJobNum = job.job_number.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        const matchesDirectly = 
+          job.job_number.toLowerCase().includes(q) ||
+          (cleanQuery.length > 0 && cleanJobNum.includes(cleanQuery)) ||
+          job.customer_name.toLowerCase().includes(q);
+        if (!matchesDirectly) return false;
       }
     } else {
-      // For managers/leads (Kyle, Jason, Drew, Ethan, Greg):
-      if (activeDrafterTarget !== 'all') {
-        if (!isJobAssignedToDrafter(job, activeDrafterTarget)) {
+      // When NO search query is active:
+      if (!isAllCardsAuthorized) {
+        if (isArchived && !showArchived) {
+          return false;
+        }
+        // If drafterScopeFilter is 'touched' (default), show all jobs the drafter worked on, was assigned, or was tagged in
+        if (drafterScopeFilter === 'touched') {
+          if (!isJobAssignedToDrafter(job, currentStaff.name)) {
+            return false;
+          }
+        }
+      } else {
+        // For managers/leads (Kyle, Jason, Drew, Ethan, Greg):
+        if (activeDrafterTarget !== 'all') {
+          if (!isJobAssignedToDrafter(job, activeDrafterTarget)) {
+            return false;
+          }
+        }
+        if (!showArchived && isArchived) {
           return false;
         }
       }
-
-      // If no search query is typed and showArchived is not toggled on, exclude archived/paid jobs
-      const hasSearch = searchQuery.trim().length > 0;
-      if (!hasSearch && !showArchived && isArchived) {
-        return false;
-      }
     }
 
-    const q = searchQuery.toLowerCase().trim();
     let matchesSearch = true;
     if (q) {
       const cleanQuery = q.replace(/[^a-z0-9]/gi, '');
@@ -318,14 +399,19 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         (cleanQuery.length > 0 && cleanJobNum.includes(cleanQuery)) ||
         (cleanQuery.length > 0 && cleanQuery.includes(cleanJobNum));
 
-      const matchesCustomer = job.customer_name.toLowerCase().includes(q);
+      const matchesCustomer = 
+        job.customer_name.toLowerCase().includes(q) || 
+        (job.project_name || '').toLowerCase().includes(q);
       const matchesStyle = job.style.toLowerCase().includes(q);
       const matchesDrafterName = job.assigned_drafter.toLowerCase().includes(q);
+      const matchesInvolvedDrafter = getJobInvolvedDrafters(job).some(d => d.toLowerCase().includes(q));
       const matchesDelegatedTask = (job.delegated_tasks || []).some(t => 
-        t.assignedTo.toLowerCase().includes(q) || t.componentTitle.toLowerCase().includes(q)
+        t.assignedTo.toLowerCase().includes(q) || 
+        t.componentTitle.toLowerCase().includes(q) ||
+        (t.customerName || '').toLowerCase().includes(q)
       );
 
-      matchesSearch = matchesNumber || matchesCustomer || matchesStyle || matchesDrafterName || matchesDelegatedTask;
+      matchesSearch = matchesNumber || matchesCustomer || matchesStyle || matchesDrafterName || matchesInvolvedDrafter || matchesDelegatedTask;
     }
 
     const matchesRoadblock = !roadblockOnly || job.roadblock;
@@ -572,7 +658,13 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {tasksWaitingForKyle.map(task => {
-                  const parentJob = jobs.find(j => j.id === task.jobId || j.job_number === task.jobNumber);
+                  const cleanTaskNum = (task.jobNumber || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+                  const parentJob = jobs.find(j => 
+                    (j.id && task.jobId && j.id === task.jobId) || 
+                    (j.job_number && (j.job_number || '').replace(/^#/, '').trim().toLowerCase() === (task.jobNumber || '').replace(/^#/, '').trim().toLowerCase()) ||
+                    (j.job_number && (j.job_number || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase() === cleanTaskNum)
+                  );
+                  const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
                   return (
                     <div 
                       key={`kyle-rev-${task.id}`}
@@ -580,10 +672,21 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs tracking-wide">
                               #{task.jobNumber.replace(/^#/, '')}
                             </span>
+                            {jobCustomerName && (
+                              <span 
+                                onClick={() => parentJob && onSelectJob(parentJob)}
+                                className={`text-xs sm:text-sm font-bold text-slate-900 ${
+                                  parentJob ? 'hover:text-blue-600 hover:underline cursor-pointer' : ''
+                                }`}
+                                title={parentJob ? `Open Plan for ${jobCustomerName}` : undefined}
+                              >
+                                {jobCustomerName}
+                              </span>
+                            )}
                             <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
                               {task.category}
                             </span>
@@ -592,7 +695,6 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                             </span>
                           </div>
                           <h4 className="font-bold text-xs text-slate-900 mt-1">{task.componentTitle}</h4>
-                          <p className="text-[11px] text-slate-500">{task.customerName}</p>
                         </div>
 
                         <span className="text-[10px] text-slate-400 font-mono">
@@ -918,7 +1020,13 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     return true;
                   })
                   .map((task) => {
-                    const parentJob = jobs.find(j => j.id === task.jobId || j.job_number === task.jobNumber);
+                    const cleanTaskNum = (task.jobNumber || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+                    const parentJob = jobs.find(j => 
+                      (j.id && task.jobId && j.id === task.jobId) || 
+                      (j.job_number && (j.job_number || '').replace(/^#/, '').trim().toLowerCase() === (task.jobNumber || '').replace(/^#/, '').trim().toLowerCase()) ||
+                      (j.job_number && (j.job_number || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase() === cleanTaskNum)
+                    );
+                    const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
                     const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
                     const delegatorName = task.delegatedBy || 'Kyle';
                     const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
@@ -949,10 +1057,21 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs tracking-wide">
                                 #{task.jobNumber.replace(/^#/, '')}
                               </span>
+                              {jobCustomerName && (
+                                <span 
+                                  onClick={() => parentJob && onSelectJob(parentJob)}
+                                  className={`text-xs sm:text-sm font-bold text-slate-900 ${
+                                    parentJob ? 'hover:text-blue-600 hover:underline cursor-pointer' : ''
+                                  }`}
+                                  title={parentJob ? `Open Plan for ${jobCustomerName}` : undefined}
+                                >
+                                  {jobCustomerName}
+                                </span>
+                              )}
                               <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
                                 {task.category}
                               </span>
@@ -1252,7 +1371,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     {currentStaff.name}'s Personal Drafter Board
                   </h3>
                   <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                    Assigned Drafter Scope
+                    {drafterScopeFilter === 'all' ? 'All Company Plans' : 'My Touched Plans'}
                   </span>
                   {runningTimers.length > 0 && (
                     <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
@@ -1262,7 +1381,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-slate-300 mt-1">
-                  Exclusively displaying projects and delegated components assigned to <strong>{currentStaff.name}</strong> ({currentStaff.title}).
+                  {drafterScopeFilter === 'all'
+                    ? `Displaying all company plans. You can search or view any project across the organization.`
+                    : `Displaying projects where you are assigned, delegated work, logged CAD time, or tagged in notes.`}
                 </p>
               </div>
             </div>
@@ -1270,8 +1391,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             {/* Quick stats pills */}
             <div className="flex items-center gap-2.5 flex-wrap">
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">My Active Plans</span>
-                <span className="text-sm font-bold text-white font-mono">{filteredJobs.length} Assigned</span>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">
+                  {drafterScopeFilter === 'all' ? 'Company Plans' : 'My Touched Plans'}
+                </span>
+                <span className="text-sm font-bold text-white font-mono">
+                  {filteredJobs.length} {drafterScopeFilter === 'all' ? 'Total' : 'Active'}
+                </span>
               </div>
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs">
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">My Delegated Tasks</span>
@@ -1415,7 +1540,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder={isIndividualDrafter ? `Search within ${currentStaff.name}'s assigned plans (Job #, customer, style)...` : "Search by Job # (e.g. 195, M26-195), customer name, house style, or drafter..."}
+            placeholder="Search all plans (Job #, customer name, house style, drafter)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
@@ -1454,9 +1579,34 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               </select>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-xl w-full sm:w-auto text-blue-900 font-bold text-[11px]">
-              <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>Board: {currentStaff.name} ({filteredJobs.length} plans)</span>
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs shrink-0">
+              <button
+                type="button"
+                onClick={() => setDrafterScopeFilter('touched')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  drafterScopeFilter === 'touched'
+                    ? 'bg-white text-blue-900 shadow-2xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Display plans you have worked on, been assigned, or been tagged in"
+              >
+                <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                <span>My Plans ({myTouchedJobsCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDrafterScopeFilter('all')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  drafterScopeFilter === 'all'
+                    ? 'bg-white text-blue-900 shadow-2xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Display all active plans across the entire company"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
+                <span>All Plans ({activeJobs.length})</span>
+              </button>
             </div>
           )}
 
@@ -1949,23 +2099,30 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     </select>
                   </div>
 
-                  {/* Assigned Drafter & Delegated */}
+                  {/* Assigned & Involved Drafters */}
                   <div className="space-y-1 min-w-[130px]">
-                    <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">Assigned Drafter</span>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">
-                        {job.assigned_drafter.charAt(0)}
-                      </div>
-                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[110px]" title={job.assigned_drafter}>
-                        {job.assigned_drafter}
-                      </span>
-                    </div>
-                    {delegatedTasks.length > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
-                        <ListTodo className="w-3 h-3" />
-                        <span>{delegatedTasks.length} Delegated</span>
-                      </span>
-                    )}
+                    <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">Drafter(s)</span>
+                    {(() => {
+                      const involved = getJobInvolvedDrafters(job);
+                      if (involved.length === 0) {
+                        return <span className="text-slate-400 text-xs">—</span>;
+                      }
+                      return (
+                        <div className="flex flex-col gap-1 max-w-[180px]">
+                          {involved.slice(0, 3).map(name => (
+                            <span key={`list-dr-${job.id}-${name}`} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 bg-indigo-50/70 border border-indigo-200/60 px-2 py-0.5 rounded-md">
+                              <User className="w-3 h-3 text-indigo-500 shrink-0" />
+                              <span className="truncate">{name}</span>
+                            </span>
+                          ))}
+                          {involved.length > 3 && (
+                            <span className="text-[10px] text-slate-500 font-bold">
+                              +{involved.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Logged Time */}
@@ -2147,23 +2304,52 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           </div>
                         </div>
                       </td>
-                      {/* Drafter Column: only display names of those to whom a task has been delegated to and only if it exists */}
+                      {/* Drafter Column: displays any drafter who has worked on, been assigned, or been tagged in this job */}
                       <td className="p-3.5">
-                        {delegatedAssignees.length > 0 ? (
-                          <div className="flex flex-col gap-1">
-                            {delegatedAssignees.map(name => (
-                              <span
-                                key={`del-${job.id}-${name}`}
-                                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md w-fit"
-                              >
-                                <User className="w-3 h-3 text-indigo-500" />
-                                <span>{name}</span>
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 text-xs">—</span>
-                        )}
+                        {(() => {
+                          const involved = getJobInvolvedDrafters(job);
+                          if (involved.length === 0) {
+                            return <span className="text-slate-400 text-xs">—</span>;
+                          }
+                          return (
+                            <div className="flex flex-col gap-1">
+                              {involved.map(name => {
+                                const isLead = (job.assigned_drafter || '').toLowerCase().includes(name.toLowerCase());
+                                const isDelegated = (job.delegated_tasks || []).some(t => (t.assignedTo || '').toLowerCase().includes(name.toLowerCase()));
+                                const hasTime = (job.time_logs || []).some(tl => (tl.drafterName || '').toLowerCase().includes(name.toLowerCase()));
+                                const isTagged = (job.comments || []).some(c => (c.taggedStaff || []).some(ts => ts.toLowerCase().includes(name.toLowerCase())));
+
+                                let roleLabel = '';
+                                if (isLead && isDelegated) roleLabel = 'Lead & Delegated';
+                                else if (isLead) roleLabel = 'Lead';
+                                else if (isDelegated) roleLabel = 'Delegated';
+                                else if (hasTime) roleLabel = 'CAD Time';
+                                else if (isTagged) roleLabel = 'Tagged';
+
+                                return (
+                                  <span
+                                    key={`involved-dr-${job.id}-${name}`}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md w-fit shadow-2xs"
+                                    title={`${name}: ${[
+                                      isLead ? 'Lead Drafter' : '',
+                                      isDelegated ? 'Delegated Work' : '',
+                                      hasTime ? 'Logged Time' : '',
+                                      isTagged ? 'Tagged in Notes' : ''
+                                    ].filter(Boolean).join(', ') || 'Involved'}`}
+                                  >
+                                    <User className="w-3 h-3 text-indigo-500 shrink-0" />
+                                    <span>{name}</span>
+                                    {roleLabel && (
+                                      <span className="text-[9px] font-mono font-normal text-indigo-600 bg-indigo-100/70 px-1 py-0.2 rounded">
+                                        {roleLabel}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="p-3.5">
                         <div className="space-y-1">

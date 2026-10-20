@@ -79,6 +79,11 @@ export const RequestRevisionModal: React.FC<RequestRevisionModalProps> = ({
                 <span className="font-mono font-black text-xs bg-black text-white border border-slate-700 px-2 py-0.5 rounded shadow-xs tracking-wide">
                   #{task.jobNumber.replace(/^#/, '')}
                 </span>
+                {task.customerName && (
+                  <span className="font-bold text-white">
+                    {task.customerName}
+                  </span>
+                )}
                 <span>• Sending feedback to <strong className="text-white underline">{drafterName}</strong></span>
               </div>
             </div>
