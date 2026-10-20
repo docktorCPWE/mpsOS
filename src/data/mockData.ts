@@ -989,6 +989,41 @@ export function saveStoredPreferredLayout(staffId: string, layout: 'grid' | 'boa
   }
 }
 
+export type DelegatedLayoutMode = 'grid' | 'board' | 'list' | 'table';
+
+export function getStoredDelegatedLayout(staffIdOrEmail?: string): DelegatedLayoutMode {
+  try {
+    if (staffIdOrEmail) {
+      const cleanKey = staffIdOrEmail.toLowerCase().trim();
+      const specific = localStorage.getItem(`mps_delegated_layout_${cleanKey}`);
+      if (specific === 'grid' || specific === 'board' || specific === 'list' || specific === 'table') {
+        return specific;
+      }
+    }
+    const globalPref = localStorage.getItem('mps_global_delegated_layout');
+    if (globalPref === 'grid' || globalPref === 'board' || globalPref === 'list' || globalPref === 'table') {
+      return globalPref;
+    }
+  } catch {
+    // ignore
+  }
+  return 'grid';
+}
+
+export function saveStoredDelegatedLayout(staffId: string | undefined, layout: DelegatedLayoutMode, email?: string): void {
+  try {
+    if (staffId) {
+      localStorage.setItem(`mps_delegated_layout_${staffId.toLowerCase().trim()}`, layout);
+    }
+    if (email) {
+      localStorage.setItem(`mps_delegated_layout_${email.toLowerCase().trim()}`, layout);
+    }
+    localStorage.setItem('mps_global_delegated_layout', layout);
+  } catch {
+    // ignore
+  }
+}
+
 export function getStoredStaff(): StaffUser[] {
   try {
     const raw = localStorage.getItem(STAFF_STORAGE_KEY);

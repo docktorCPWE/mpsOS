@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
@@ -178,6 +178,112 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     taskTitle: string;
     jobNumber?: string;
   } | null>(null);
+
+  // Delegated Work Management Center Layout & Sort preferences
+  const getStaffDefaultDelegatedLayout = (): 'grid' | 'board' | 'list' | 'table' => {
+    try {
+      const saved = localStorage.getItem(`delegated_layout_${currentStaff?.id || currentStaff?.email}`);
+      if (saved === 'grid' || saved === 'board' || saved === 'list' || saved === 'table') {
+        return saved;
+      }
+    } catch {}
+    return 'grid';
+  };
+
+  const [delegatedViewMode, setDelegatedViewMode] = useState<'grid' | 'board' | 'list' | 'table'>(() => getStaffDefaultDelegatedLayout());
+  const [justSavedDelegatedDefault, setJustSavedDelegatedDefault] = useState(false);
+  const [delegatedSortBy, setDelegatedSortBy] = useState<'drafter_asc' | 'drafter_desc' | 'my_assigned_first'>('drafter_asc');
+  const [activeDelegatedTaskId, setActiveDelegatedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDelegatedViewMode(getStaffDefaultDelegatedLayout());
+  }, [currentStaff?.id, currentStaff?.email]);
+
+  const handleSaveDelegatedDefault = () => {
+    try {
+      localStorage.setItem(`delegated_layout_${currentStaff?.id || currentStaff?.email}`, delegatedViewMode);
+    } catch {}
+    setJustSavedDelegatedDefault(true);
+    setTimeout(() => {
+      setJustSavedDelegatedDefault(false);
+    }, 2800);
+  };
+
+  // Helper to find parent job for a delegated task
+  const resolveParentJob = (task: DelegatedWorkItem): Job | undefined => {
+    const cleanTaskNum = (task.jobNumber || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+    return jobs.find(j => 
+      (j.id && task.jobId && j.id === task.jobId) || 
+      (j.job_number && (j.job_number || '').replace(/^#/, '').trim().toLowerCase() === (task.jobNumber || '').replace(/^#/, '').trim().toLowerCase()) ||
+      (j.job_number && (j.job_number || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase() === cleanTaskNum)
+    );
+  };
+
+  // Check if a timer is running for a delegated task
+  const isTaskTimerRunning = (task: DelegatedWorkItem, parentJob?: Job): boolean => {
+    if (activeDelegatedTaskId === task.id) return true;
+    if (parentJob && parentJob.active_timer_start) {
+      const taskTitle = (task.componentTitle || '').toLowerCase();
+      const activeTaskNote = (parentJob.active_timer_task || '').toLowerCase();
+      if (activeTaskNote.includes(taskTitle) || (task.id && activeTaskNote.includes(task.id))) {
+        return true;
+      }
+      if (task.status === 'In Progress' && (parentJob.active_timer_drafter_id === currentStaff.id || (parentJob.active_timer_drafter_name && parentJob.active_timer_drafter_name.toLowerCase().includes(currentStaff.name.toLowerCase())))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Live timer elapsed text for a delegated task
+  const getTaskElapsedTime = (task: DelegatedWorkItem, parentJob?: Job): string | null => {
+    if (!isTaskTimerRunning(task, parentJob) || !parentJob?.active_timer_start) return null;
+    const start = new Date(parentJob.active_timer_start).getTime();
+    const elapsedSeconds = Math.max(0, Math.floor(((nowTimestamp || Date.now()) - start) / 1000));
+    const hrs = Math.floor(elapsedSeconds / 3600);
+    const mins = Math.floor((elapsedSeconds % 3600) / 60);
+    const secs = elapsedSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Start timer for delegated task -> sets status to In Progress
+  const handleStartTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
+    setActiveDelegatedTaskId(task.id);
+    const targetJobId = parentJob?.id || task.jobId;
+    if (targetJobId) {
+      onStartTimer(targetJobId, `${task.category}: ${task.componentTitle}`);
+    }
+    if (onUpdateTaskStatus) {
+      onUpdateTaskStatus(task.jobId, task.id, 'In Progress');
+    }
+  };
+
+  // Stop timer for delegated task -> sets status to Pending
+  const handleStopTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
+    setActiveDelegatedTaskId(null);
+    const targetJobId = parentJob?.id || task.jobId;
+    if (targetJobId) {
+      onStopTimer(targetJobId, `Worked on ${task.componentTitle}`);
+    }
+    if (onUpdateTaskStatus) {
+      onUpdateTaskStatus(task.jobId, task.id, 'Pending');
+    }
+  };
+
+  // Mark task complete -> opens CompleteTaskModal or marks completed
+  const handleMarkTaskComplete = (task: DelegatedWorkItem, parentJob?: Job) => {
+    if (isTaskTimerRunning(task, parentJob)) {
+      handleStopTaskTimer(task, parentJob);
+    }
+    if (onOpenCompleteTaskModal && parentJob) {
+      onOpenCompleteTaskModal(task, parentJob);
+    } else if (onUpdateTaskStatus) {
+      onUpdateTaskStatus(task.jobId, task.id, 'Completed');
+    }
+  };
 
   // For individual drafters: allow toggling between 'touched' (worked on / assigned / tagged) and 'all' (all company plans)
   const [drafterScopeFilter, setDrafterScopeFilter] = useState<'touched' | 'all'>('touched');
@@ -843,13 +949,13 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         <div className="bg-white rounded-2xl border border-indigo-200 shadow-sm overflow-hidden">
           
           {/* Panel Header */}
-          <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white p-4 flex items-center justify-between">
+          <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow shrink-0">
                 <Share2 className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <h3 className="font-bold text-sm text-white flex items-center gap-2 flex-wrap">
                   <span>{canDelegate ? 'Delegated Work Management Center' : 'My Delegated Work Queue'}</span>
                   <span className="text-[10px] bg-indigo-800 text-indigo-200 px-2 py-0.5 rounded font-mono">
                     {canDelegate ? `${allDelegatedTasks.length} Total Delegated` : `${myAssignedTasks.length} Assigned`}
@@ -863,10 +969,107 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Layout Controls Bar (Grid / Kanban / Lists / Table) + Make Default + Sort by Drafter Name */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* View Switchers */}
+              <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-indigo-700/60 shadow-inner">
+                <button
+                  type="button"
+                  id="delegated-view-grid-btn"
+                  onClick={() => setDelegatedViewMode('grid')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    delegatedViewMode === 'grid' ? 'bg-indigo-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Grid view of delegated task cards"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>Grid</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="delegated-view-kanban-btn"
+                  onClick={() => setDelegatedViewMode('board')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    delegatedViewMode === 'board' ? 'bg-indigo-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Kanban columns by status"
+                >
+                  <Kanban className="w-3.5 h-3.5" />
+                  <span>Kanban</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="delegated-view-lists-btn"
+                  onClick={() => setDelegatedViewMode('list')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    delegatedViewMode === 'list' ? 'bg-indigo-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Streamlined list view of delegated cards"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span>Lists</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="delegated-view-table-btn"
+                  onClick={() => setDelegatedViewMode('table')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                    delegatedViewMode === 'table' ? 'bg-indigo-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Detailed data table sheet view"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Table</span>
+                </button>
+              </div>
+
+              {/* Make Default Button */}
+              {justSavedDelegatedDefault ? (
+                <div 
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Saved!</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSaveDelegatedDefault}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-indigo-400/50 bg-indigo-800/80 hover:bg-indigo-700 text-indigo-100 active:scale-95 shadow-2xs group"
+                  title={`Make ${delegatedViewMode === 'grid' ? 'Grid' : delegatedViewMode === 'board' ? 'Kanban' : delegatedViewMode === 'list' ? 'Lists' : 'Table'} your permanent default view for delegated work`}
+                >
+                  <Pin className="w-3.5 h-3.5 text-indigo-300 group-hover:rotate-45 transition-transform shrink-0" />
+                  <span>Make Default</span>
+                  <span className="text-[10px] bg-indigo-950 text-indigo-200 font-bold px-1.5 py-0.5 rounded font-mono">
+                    {delegatedViewMode === 'grid' ? 'Grid' : delegatedViewMode === 'board' ? 'Kanban' : delegatedViewMode === 'list' ? 'Lists' : 'Table'}
+                  </span>
+                </button>
+              )}
+
+              {/* Sort Dropdown: ONLY by Drafter Name */}
+              <div className="flex items-center gap-1.5 bg-slate-800/90 border border-indigo-700/60 px-3 py-1.5 rounded-xl text-xs text-white">
+                <ArrowUpDown className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                <span className="text-[11px] font-bold text-indigo-200">Sort:</span>
+                <select
+                  value={delegatedSortBy}
+                  onChange={(e) => setDelegatedSortBy(e.target.value as any)}
+                  className="bg-transparent text-white font-bold focus:outline-none cursor-pointer text-xs pr-1"
+                  title="Sort delegated tasks by drafter name only"
+                >
+                  <option value="drafter_asc" className="bg-slate-900 text-white">Drafter Name (A → Z)</option>
+                  <option value="drafter_desc" className="bg-slate-900 text-white">Drafter Name (Z → A)</option>
+                  <option value="my_assigned_first" className="bg-slate-900 text-white">My Assigned First</option>
+                </select>
+              </div>
+
+              {/* Collapse/Expand Toggle */}
               <button
                 onClick={() => setShowDelegationHub(!showDelegationHub)}
-                className="text-indigo-300 hover:text-white p-1 rounded-lg transition"
+                className="text-indigo-300 hover:text-white p-1 rounded-lg transition cursor-pointer"
+                title={showDelegationHub ? "Collapse panel" : "Expand panel"}
               >
                 {showDelegationHub ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
               </button>
@@ -874,485 +1077,807 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           </div>
 
           {/* Panel Content */}
-          {showDelegationHub && (
-            <div className="p-4 space-y-3 bg-indigo-50/30">
-              
-              {/* Filter Tabs & Drafter Dropdown */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 pb-3 text-xs">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={() => setDelegationFilter('all')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                      delegationFilter === 'all' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-indigo-100/70'
-                    }`}
-                  >
-                    All Delegations ({allDelegatedTasks.length})
-                  </button>
+          {showDelegationHub && (() => {
+            // 1. Filter Tasks
+            const filteredTasks = allDelegatedTasks.filter(task => {
+              if (delegationFilter === 'waiting_kyle') {
+                if (currentStaff.name.toLowerCase().includes('kyle')) {
+                  return (task.delegatedBy || '').toLowerCase().includes('kyle') && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+                } else if (isIndividualDrafter) {
+                  return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+                } else {
+                  return (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+                }
+              }
+              if (delegationFilter === 'revisions_requested') {
+                return task.status === 'Revision Requested' || Boolean(task.revisionRequested);
+              }
+              if (delegationFilter === 'approved') {
+                return task.status === 'Completed' && Boolean(task.isReviewed);
+              }
 
-                  <button
-                    onClick={() => setDelegationFilter('all')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
-                      delegationFilter === 'all' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-indigo-100/70'
-                    }`}
-                  >
-                    All ({allDelegatedTasks.length})
-                  </button>
+              // If a specific drafter is selected or active, filter by that drafter
+              if (activeDrafterTarget !== 'all') {
+                const drafterLower = activeDrafterTarget.toLowerCase();
+                if (!task.assignedTo.toLowerCase().includes(drafterLower) && !task.delegatedBy.toLowerCase().includes(drafterLower)) {
+                  return false;
+                }
+              }
 
-                  <button
-                    onClick={() => setDelegationFilter('my_assigned')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
-                      delegationFilter === 'my_assigned' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-indigo-100/70'
-                    }`}
-                  >
-                    Assigned to {currentStaff.name.split(' ')[0]} ({myAssignedTasks.length})
-                  </button>
+              if (delegationFilter === 'my_assigned') {
+                return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) ||
+                       currentStaff.name.toLowerCase().includes(task.assignedTo.toLowerCase());
+              }
+              if (delegationFilter === 'pending') {
+                return task.status !== 'Completed' || !task.isReviewed;
+              }
+              if (delegationFilter === 'completed') return task.status === 'Completed';
+              return true;
+            });
 
-                  <button
-                    onClick={() => setDelegationFilter('pending')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
-                      delegationFilter === 'pending' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-indigo-100/70'
-                    }`}
-                  >
-                    Active / In Progress ({allDelegatedTasks.filter(t => t.status !== 'Completed' || !t.isReviewed).length})
-                  </button>
+            // 2. Sort strictly by Drafter Name only
+            const sortedTasks = [...filteredTasks].sort((a, b) => {
+              const drafterA = (a.assignedTo || '').trim().toLowerCase();
+              const drafterB = (b.assignedTo || '').trim().toLowerCase();
+              const myName = currentStaff.name.trim().toLowerCase();
 
-                  <button
-                    onClick={() => setDelegationFilter('waiting_kyle')}
-                    className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer text-xs flex items-center gap-1.5 ${
-                      delegationFilter === 'waiting_kyle' 
-                        ? 'bg-amber-500 text-slate-950 shadow-2xs' 
-                        : 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                    {currentStaff.name.toLowerCase().includes('kyle') ? (
-                      <span>Waiting for My Review ({waitingForKyleCount})</span>
+              if (delegatedSortBy === 'my_assigned_first') {
+                const aIsMine = drafterA.includes(myName) ? 0 : 1;
+                const bIsMine = drafterB.includes(myName) ? 0 : 1;
+                if (aIsMine !== bIsMine) return aIsMine - bIsMine;
+                return drafterA.localeCompare(drafterB);
+              }
+              if (delegatedSortBy === 'drafter_desc') {
+                return drafterB.localeCompare(drafterA);
+              }
+              // Default: drafter_asc (A to Z)
+              return drafterA.localeCompare(drafterB);
+            });
+
+            // Card Renderer Helper
+            const renderDelegatedCard = (task: DelegatedWorkItem) => {
+              const parentJob = resolveParentJob(task);
+              const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
+              const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
+              const delegatorName = task.delegatedBy || 'Kyle';
+              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+              const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
+              const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+              const isTimerActive = isTaskTimerRunning(task, parentJob);
+              const timeDisplay = getTaskElapsedTime(task, parentJob);
+              const isAuthorizedReviewer = Boolean(
+                currentStaff && (
+                  currentStaff.name.toLowerCase().includes('kyle') ||
+                  currentStaff.name.toLowerCase().includes('jason') ||
+                  (task.delegatedBy && currentStaff.name.toLowerCase().includes(task.delegatedBy.toLowerCase()))
+                )
+              );
+
+              return (
+                <div
+                  key={task.id}
+                  className={`bg-white rounded-xl p-4 border transition-all shadow-xs space-y-3 ${
+                    isRevisionReq
+                      ? 'border-orange-400 ring-2 ring-orange-300/40 bg-gradient-to-b from-orange-50/30 to-white'
+                      : isWaitingReview 
+                      ? 'border-amber-400 ring-2 ring-amber-300/40 bg-gradient-to-b from-amber-50/20 to-white' 
+                      : isApproved
+                      ? 'border-emerald-300 bg-gradient-to-b from-emerald-50/20 to-white'
+                      : isTimerActive
+                      ? 'border-emerald-400 ring-2 ring-emerald-300/40 bg-gradient-to-b from-emerald-50/30 to-white'
+                      : isAssignedToMe 
+                      ? 'border-indigo-300 ring-1 ring-indigo-200' 
+                      : 'border-slate-200'
+                  }`}
+                >
+                  {/* Top Row: Job # & Customer + Dynamic Status Badge */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-0.5 rounded shadow-xs tracking-wide shrink-0">
+                        #{task.jobNumber.replace(/^#/, '')}
+                      </span>
+                      {jobCustomerName && (
+                        <span 
+                          onClick={() => parentJob && onSelectJob(parentJob)}
+                          className={`text-xs sm:text-sm font-bold text-slate-900 truncate max-w-[170px] sm:max-w-xs ${
+                            parentJob ? 'hover:text-blue-600 hover:underline cursor-pointer' : ''
+                          }`}
+                          title={parentJob ? `Open Plan for ${jobCustomerName}` : undefined}
+                        >
+                          {jobCustomerName}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Dynamic Status Badge (Neatly right aligned, never squashed) */}
+                    <div className="shrink-0">
+                      {isTimerActive ? (
+                        <span className="text-[10px] sm:text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs animate-pulse">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                          <span>In Progress</span>
+                        </span>
+                      ) : isApproved ? (
+                        <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                          <CheckCircle className="w-3 h-3 text-emerald-600" />
+                          <span>Approved</span>
+                        </span>
+                      ) : isWaitingReview ? (
+                        <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-1 shadow-2xs">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          <span>Under Review</span>
+                        </span>
+                      ) : isRevisionReq ? (
+                        <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-orange-50 text-orange-800 border border-orange-300 flex items-center gap-1 shadow-2xs">
+                          <RotateCcw className="w-3 h-3 text-orange-600" />
+                          <span>Revision</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Category, Priority & Component Title */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
+                        {task.category}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                        task.priority === 'Urgent'
+                          ? 'bg-red-100 text-red-700 border border-red-200'
+                          : task.priority === 'High'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {task.priority} Priority
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-1 leading-snug break-words">
+                      {task.componentTitle}
+                    </h4>
+                  </div>
+
+                  {/* Dedicated Action Controls Tray: Start/Stop Timer Button + Mark Complete Button */}
+                  <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200 flex items-center gap-2 flex-wrap">
+                    {/* Start / Stop Timer Button */}
+                    {isTimerActive ? (
+                      <button
+                        type="button"
+                        onClick={() => handleStopTaskTimer(task, parentJob)}
+                        className="flex-1 min-w-[120px] justify-center bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer animate-pulse"
+                        title="Stop active drafting timer"
+                      >
+                        <Square className="w-3 h-3 fill-white shrink-0" />
+                        <span>Stop Timer</span>
+                        {timeDisplay && (
+                          <span className="font-mono bg-red-800/90 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                            {timeDisplay}
+                          </span>
+                        )}
+                      </button>
                     ) : (
-                      <span>Under Review ({allDelegatedTasks.filter(t => (t.status === 'Completed' || t.status === 'Under Review') && !t.isReviewed && (isIndividualDrafter ? t.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) : true)).length})</span>
+                      <button
+                        type="button"
+                        onClick={() => handleStartTaskTimer(task, parentJob)}
+                        className="flex-1 min-w-[110px] justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                        title="Start drafting timer for this component"
+                      >
+                        <Play className="w-3 h-3 fill-white shrink-0" />
+                        <span>Start Timer</span>
+                      </button>
                     )}
-                  </button>
 
-                  <button
-                    onClick={() => setDelegationFilter('revisions_requested')}
-                    className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer text-xs flex items-center gap-1.5 ${
-                      delegationFilter === 'revisions_requested'
-                        ? 'bg-orange-600 text-white shadow-2xs'
-                        : 'bg-orange-50 text-orange-900 border border-orange-200 hover:bg-orange-100'
-                    }`}
-                  >
-                    <RotateCcw className="w-3 h-3 text-orange-600" />
-                    <span>Revisions Requested ({tasksRevisionsRequested.length})</span>
-                  </button>
+                    {/* Mark Complete Button */}
+                    {!isApproved && !isWaitingReview ? (
+                      <button
+                        type="button"
+                        onClick={() => handleMarkTaskComplete(task, parentJob)}
+                        className="flex-1 min-w-[110px] justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                        title="Mark this delegated task as complete and submit for review"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Mark Complete</span>
+                      </button>
+                    ) : isWaitingReview ? (
+                      <div className="flex-1 min-w-[100px] text-center text-[11px] font-bold text-amber-800 bg-amber-100/70 py-1.5 rounded-lg border border-amber-200">
+                        Submitted for Review
+                      </div>
+                    ) : (
+                      <div className="flex-1 min-w-[100px] text-center text-[11px] font-bold text-emerald-800 bg-emerald-100/70 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Signed Off</span>
+                      </div>
+                    )}
+                  </div>
 
-                  <button
-                    onClick={() => setDelegationFilter('approved')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
-                      delegationFilter === 'approved' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
-                    }`}
-                  >
-                    ✓ Approved & Signed Off ({tasksApproved.length})
-                  </button>
+                  {/* Description */}
+                  {task.neededWorkDescription && (
+                    <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 leading-relaxed">
+                      {task.neededWorkDescription}
+                    </p>
+                  )}
+
+                  {/* Notes */}
+                  {task.notes && (
+                    <div className="text-[11px] text-slate-500 italic bg-amber-50/60 p-2 rounded border border-amber-100">
+                      <strong>Note from {task.delegatedBy}:</strong> {task.notes}
+                    </div>
+                  )}
+
+                  {/* Revision Request Highlight Callout */}
+                  {isRevisionReq && task.revisionNotes && (
+                    <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 space-y-2 text-xs text-orange-950">
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="flex items-center gap-1.5 text-orange-900">
+                          <RotateCcw className="w-4 h-4 text-orange-600" />
+                          <span>Revision Requested by <strong>{task.revisionRequestedBy || delegatorName}</strong></span>
+                        </span>
+                        {task.revisionRequestedAt && (
+                          <span className="text-[10px] text-orange-800 font-mono">
+                            {new Date(task.revisionRequestedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="bg-white/90 p-2 rounded border border-orange-200 text-orange-900 text-xs italic">
+                        "{task.revisionNotes}"
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Completion Details & Review Submission Banner */}
+                  {(task.status === 'Completed' || task.status === 'Under Review') && (
+                    <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-3 space-y-2 text-xs text-emerald-950">
+                      <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
+                        <span className="flex items-center gap-1.5 text-emerald-800">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>
+                            {isApproved 
+                              ? `Signed Off & Approved by ${task.reviewedBy || delegatorName}`
+                              : `Task Completed & Submitted to ${delegatorName} for Review`
+                            }
+                          </span>
+                        </span>
+                        {task.completedAt && (
+                          <span className="text-[10px] text-emerald-700 font-mono">
+                            {new Date(task.completedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Review Callout Box: ONLY Kyle or Jason or Delegator see action buttons */}
+                      {isWaitingReview && (
+                        <div className="bg-amber-500/15 border border-amber-400 p-2.5 rounded-lg flex items-center justify-between gap-2 flex-wrap text-amber-950">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                            <span className="font-extrabold text-xs">
+                              {isAuthorizedReviewer
+                                ? `Waiting for your review and sign-off`
+                                : `Waiting for ${delegatorName} to review`}
+                            </span>
+                          </div>
+
+                          {isAuthorizedReviewer && (
+                            <div className="flex items-center gap-1.5">
+                              {onRequestTaskRevision && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRevisionModalTask({ task, job: parentJob })}
+                                  className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-amber-700" />
+                                  <span>Request Revisions</span>
+                                </button>
+                              )}
+
+                              {onApproveTaskReview && (
+                                <button
+                                  type="button"
+                                  onClick={() => onApproveTaskReview(task.jobId, task.id, `Signed off & approved by ${currentStaff.name}`)}
+                                  className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                                >
+                                  <CheckCircle className="w-3 h-3" />
+                                  <span>Sign Off & Approve</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {task.completionNotes && (
+                        <p className="text-[11px] text-emerald-900 bg-white/70 p-2 rounded-lg border border-emerald-100 italic">
+                          "{task.completionNotes}"
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Attached Project & CAD Files Tray */}
+                  {task.attachments && task.attachments.length > 0 && (
+                    <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-blue-950 flex items-center gap-1.5">
+                          <Paperclip className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Attached Plan & Reference Files ({task.attachments.length})</span>
+                        </span>
+                        <span className="text-[10px] text-blue-600 font-medium">Click to view or download</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {task.attachments.map((file) => (
+                          <div
+                            key={file.id}
+                            className="flex items-center justify-between p-2 bg-white rounded-lg border border-blue-200/80 hover:border-blue-400 text-xs shadow-2xs transition group"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-7 h-7 rounded bg-blue-100/70 text-blue-700 flex items-center justify-center shrink-0 border border-blue-200">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-900 text-xs truncate max-w-[200px] sm:max-w-xs" title={file.name}>
+                                  {file.name}
+                                </p>
+                                <span className="text-[10px] text-slate-500 font-mono">{file.size}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {file.url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewingAttachment({
+                                    file,
+                                    taskTitle: task.componentTitle,
+                                    jobNumber: parentJob?.job_number || task.jobNumber
+                                  })}
+                                  className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition flex items-center gap-1 cursor-pointer border border-blue-200"
+                                  title="Preview file"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>View</span>
+                                </button>
+                              )}
+                              <a
+                                href={file.url || '#'}
+                                download={file.name}
+                                className="px-2 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition flex items-center gap-1 cursor-pointer border border-slate-200"
+                                title="Download file"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Download</span>
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Bottom Meta & Open Plan Link */}
+                  <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+                    <div className="space-y-0.5">
+                      <span className="text-slate-500 block">
+                        Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong> (by {task.delegatedBy})
+                      </span>
+                      {task.dueDate && (
+                        <span className="text-slate-400 text-[10px] block">
+                          Due: {task.dueDate}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {task.attachments && task.attachments.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewingAttachment({
+                            file: task.attachments![0],
+                            taskTitle: task.componentTitle,
+                            jobNumber: parentJob?.job_number || task.jobNumber
+                          })}
+                          className="flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded font-bold text-[10px] transition cursor-pointer"
+                          title="Open attached file viewer"
+                        >
+                          <Paperclip className="w-3 h-3 text-blue-600" />
+                          <span>{task.attachments.length} {task.attachments.length === 1 ? 'File' : 'Files'}</span>
+                        </button>
+                      )}
+
+                      {parentJob && (
+                        <button
+                          onClick={() => onSelectJob(parentJob)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Open Plan</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            };
+
+            // Table Row Renderer Helper
+            const renderDelegatedTableRow = (task: DelegatedWorkItem) => {
+              const parentJob = resolveParentJob(task);
+              const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
+              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+              const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
+              const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+              const isTimerActive = isTaskTimerRunning(task, parentJob);
+              const timeDisplay = getTaskElapsedTime(task, parentJob);
+
+              return (
+                <tr key={task.id} className="hover:bg-indigo-50/40 border-b border-indigo-100 text-xs transition">
+                  {/* Job # & Customer */}
+                  <td className="p-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-mono font-black bg-black text-white px-2 py-0.5 rounded shadow-2xs">
+                        #{task.jobNumber.replace(/^#/, '')}
+                      </span>
+                      {jobCustomerName && (
+                        <span
+                          onClick={() => parentJob && onSelectJob(parentJob)}
+                          className={`font-bold text-slate-900 ${parentJob ? 'hover:text-blue-600 hover:underline cursor-pointer' : ''}`}
+                        >
+                          {jobCustomerName}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Component & Category */}
+                  <td className="p-3">
+                    <div className="font-bold text-slate-800">{task.componentTitle}</div>
+                    <span className="text-[10px] text-indigo-700 bg-indigo-50 font-semibold px-1.5 py-0.5 rounded">
+                      {task.category}
+                    </span>
+                  </td>
+
+                  {/* Priority */}
+                  <td className="p-3">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      task.priority === 'Urgent'
+                        ? 'bg-red-100 text-red-700'
+                        : task.priority === 'High'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {task.priority}
+                    </span>
+                  </td>
+
+                  {/* Drafter */}
+                  <td className="p-3">
+                    <div className="flex items-center gap-1 font-semibold text-slate-800">
+                      <User className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>{task.assignedTo}</span>
+                    </div>
+                  </td>
+
+                  {/* Delegated By & Due */}
+                  <td className="p-3 text-slate-500 text-[11px]">
+                    <div>by <strong>{task.delegatedBy}</strong></div>
+                    {task.dueDate && <div className="text-[10px] text-slate-400">Due: {task.dueDate}</div>}
+                  </td>
+
+                  {/* Status Badge */}
+                  <td className="p-3">
+                    {isTimerActive ? (
+                      <span className="text-[10px] font-extrabold px-2 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                        <span>In Progress</span>
+                      </span>
+                    ) : isApproved ? (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-emerald-600" />
+                        <span>Approved</span>
+                      </span>
+                    ) : isWaitingReview ? (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        <span>Under Review</span>
+                      </span>
+                    ) : isRevisionReq ? (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-orange-50 text-orange-800 border border-orange-300 flex items-center gap-1">
+                        <RotateCcw className="w-3 h-3 text-orange-600" />
+                        <span>Revision</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-slate-100 text-slate-700 border border-slate-300">
+                        Pending
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Timer Controls */}
+                  <td className="p-3">
+                    {isTimerActive ? (
+                      <button
+                        type="button"
+                        onClick={() => handleStopTaskTimer(task, parentJob)}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer animate-pulse"
+                      >
+                        <Square className="w-3 h-3 fill-white" />
+                        <span>Stop</span>
+                        {timeDisplay && <span className="font-mono text-[10px] bg-red-800 px-1 rounded">{timeDisplay}</span>}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleStartTaskTimer(task, parentJob)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                      >
+                        <Play className="w-3 h-3 fill-white" />
+                        <span>Start</span>
+                      </button>
+                    )}
+                  </td>
+
+                  {/* Mark Complete */}
+                  <td className="p-3">
+                    {!isApproved && !isWaitingReview ? (
+                      <button
+                        type="button"
+                        onClick={() => handleMarkTaskComplete(task, parentJob)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1 rounded text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Complete</span>
+                      </button>
+                    ) : isWaitingReview ? (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        Submitted
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        Done
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="p-3">
+                    <div className="flex items-center gap-1.5">
+                      {task.attachments && task.attachments.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewingAttachment({
+                            file: task.attachments![0],
+                            taskTitle: task.componentTitle,
+                            jobNumber: parentJob?.job_number || task.jobNumber
+                          })}
+                          className="p-1 text-blue-600 hover:bg-blue-100 rounded transition cursor-pointer"
+                          title="Preview attached file"
+                        >
+                          <Paperclip className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {parentJob && (
+                        <button
+                          onClick={() => onSelectJob(parentJob)}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded transition cursor-pointer"
+                        >
+                          Open Plan
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            };
+
+            // Kanban Board Renderer Helper
+            const renderDelegatedKanban = (tasks: DelegatedWorkItem[]) => {
+              const pendingTasks = tasks.filter(t => {
+                const parentJob = resolveParentJob(t);
+                const isRunning = isTaskTimerRunning(t, parentJob);
+                return !isRunning && t.status !== 'Completed' && t.status !== 'Under Review' && t.status !== 'Revision Requested' && !t.revisionRequested && !t.isReviewed;
+              });
+
+              const inProgressTasks = tasks.filter(t => {
+                const parentJob = resolveParentJob(t);
+                const isRunning = isTaskTimerRunning(t, parentJob);
+                return (isRunning || t.status === 'In Progress') && t.status !== 'Completed' && t.status !== 'Under Review';
+              });
+
+              const underReviewTasks = tasks.filter(t => 
+                (t.status === 'Completed' || t.status === 'Under Review') && !t.isReviewed && !t.revisionRequested
+              );
+
+              const revisionTasks = tasks.filter(t => 
+                t.status === 'Revision Requested' || Boolean(t.revisionRequested)
+              );
+
+              const approvedTasks = tasks.filter(t => 
+                t.status === 'Completed' && Boolean(t.isReviewed)
+              );
+
+              const kanbanColumns = [
+                { id: 'pending', title: 'Pending', count: pendingTasks.length, items: pendingTasks, color: 'border-slate-300 bg-slate-50/70', badgeColor: 'bg-slate-200 text-slate-800' },
+                { id: 'in_progress', title: 'In Progress', count: inProgressTasks.length, items: inProgressTasks, color: 'border-blue-300 bg-blue-50/40', badgeColor: 'bg-blue-200 text-blue-900', hasPulse: inProgressTasks.some(t => isTaskTimerRunning(t, resolveParentJob(t))) },
+                { id: 'under_review', title: 'Under Review', count: underReviewTasks.length, items: underReviewTasks, color: 'border-amber-300 bg-amber-50/40', badgeColor: 'bg-amber-200 text-amber-900' },
+                { id: 'revisions', title: 'Revisions', count: revisionTasks.length, items: revisionTasks, color: 'border-orange-300 bg-orange-50/40', badgeColor: 'bg-orange-200 text-orange-900' },
+                { id: 'approved', title: 'Approved & Signed Off', count: approvedTasks.length, items: approvedTasks, color: 'border-emerald-300 bg-emerald-50/40', badgeColor: 'bg-emerald-200 text-emerald-900' },
+              ];
+
+              return (
+                <div className="flex gap-4 overflow-x-auto pb-5 pt-1 items-start scrollbar-thin">
+                  {kanbanColumns.map(col => (
+                    <div key={col.id} className={`w-80 shrink-0 rounded-2xl border ${col.color} p-3.5 space-y-3 min-h-[220px] bg-white/60 shadow-2xs flex flex-col`}>
+                      <div className="flex items-center justify-between pb-2 border-b border-indigo-100/60">
+                        <h4 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                          {col.hasPulse && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>}
+                          <span>{col.title}</span>
+                        </h4>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${col.badgeColor}`}>
+                          {col.count}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3 flex-1">
+                        {col.items.length === 0 ? (
+                          <div className="p-6 text-center text-xs text-slate-400 italic bg-white/70 rounded-xl border border-dashed border-slate-200">
+                            No tasks
+                          </div>
+                        ) : (
+                          col.items.map(t => renderDelegatedCard(t))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            };
+
+            return (
+              <div className="p-4 space-y-3.5 bg-indigo-50/30">
+                {/* Filter Tabs & Quick Drafter Dropdown */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 pb-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setDelegationFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                        delegationFilter === 'all' ? 'bg-indigo-600 text-white shadow-2xs font-bold' : 'text-slate-600 hover:bg-indigo-100/70'
+                      }`}
+                    >
+                      All Delegations ({allDelegatedTasks.length})
+                    </button>
+
+                    <button
+                      onClick={() => setDelegationFilter('my_assigned')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
+                        delegationFilter === 'my_assigned' ? 'bg-indigo-600 text-white shadow-2xs font-bold' : 'text-slate-600 hover:bg-indigo-100/70'
+                      }`}
+                    >
+                      Assigned to {currentStaff.name.split(' ')[0]} ({myAssignedTasks.length})
+                    </button>
+
+                    <button
+                      onClick={() => setDelegationFilter('pending')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
+                        delegationFilter === 'pending' ? 'bg-indigo-600 text-white shadow-2xs font-bold' : 'text-slate-600 hover:bg-indigo-100/70'
+                      }`}
+                    >
+                      Active / In Progress ({allDelegatedTasks.filter(t => t.status !== 'Completed' || !t.isReviewed).length})
+                    </button>
+
+                    <button
+                      onClick={() => setDelegationFilter('waiting_kyle')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer text-xs flex items-center gap-1.5 ${
+                        delegationFilter === 'waiting_kyle' 
+                          ? 'bg-amber-500 text-slate-950 shadow-2xs' 
+                          : 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      {currentStaff.name.toLowerCase().includes('kyle') ? (
+                        <span>Waiting for My Review ({waitingForKyleCount})</span>
+                      ) : (
+                        <span>Under Review ({allDelegatedTasks.filter(t => (t.status === 'Completed' || t.status === 'Under Review') && !t.isReviewed && (isIndividualDrafter ? t.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) : true)).length})</span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setDelegationFilter('revisions_requested')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer text-xs flex items-center gap-1.5 ${
+                        delegationFilter === 'revisions_requested'
+                          ? 'bg-orange-600 text-white shadow-2xs'
+                          : 'bg-orange-50 text-orange-900 border border-orange-200 hover:bg-orange-100'
+                      }`}
+                    >
+                      <RotateCcw className="w-3 h-3 text-orange-600" />
+                      <span>Revisions Requested ({tasksRevisionsRequested.length})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setDelegationFilter('approved')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer text-xs ${
+                        delegationFilter === 'approved' ? 'bg-emerald-600 text-white shadow-2xs font-bold' : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                      }`}
+                    >
+                      ✓ Approved & Signed Off ({tasksApproved.length})
+                    </button>
+                  </div>
+
+                  {/* Quick Drafter Dropdown in Delegated Hub */}
+                  {!isIndividualDrafter && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Drafter Filter:</span>
+                      </span>
+                      <select
+                        value={selectedDrafter}
+                        onChange={(e) => setSelectedDrafter(e.target.value)}
+                        className="bg-white border border-indigo-200 text-indigo-900 font-bold rounded-lg px-2.5 py-1 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer shadow-2xs"
+                      >
+                        <option value="all">All Drafters ({allDelegatedTasks.length} tasks)</option>
+                        {draftersList.map((d) => {
+                          const stats = getDrafterStats(d);
+                          return (
+                            <option key={`hub-${d}`} value={d}>
+                              {d} ({stats.delegatedCount} tasks, {stats.projectCount} plans)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
-                {/* Quick Drafter Dropdown in Delegated Hub */}
-                {!isIndividualDrafter && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Drafter Filter:</span>
-                    </span>
-                    <select
-                      value={selectedDrafter}
-                      onChange={(e) => setSelectedDrafter(e.target.value)}
-                      className="bg-white border border-indigo-200 text-indigo-900 font-bold rounded-lg px-2.5 py-1 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer shadow-2xs"
-                    >
-                      <option value="all">All Drafters ({allDelegatedTasks.length} tasks)</option>
-                      {draftersList.map((d) => {
-                        const stats = getDrafterStats(d);
-                        return (
-                          <option key={`hub-${d}`} value={d}>
-                            {d} ({stats.delegatedCount} tasks, {stats.projectCount} plans)
-                          </option>
-                        );
-                      })}
-                    </select>
+                {/* Main Views Container according to delegatedViewMode */}
+                {sortedTasks.length === 0 ? (
+                  <div className="bg-white rounded-xl p-8 text-center border border-indigo-100 shadow-xs space-y-2">
+                    <ListTodo className="w-8 h-8 text-indigo-300 mx-auto" />
+                    <p className="text-sm font-bold text-slate-700">No delegated work items match the current filter</p>
+                    <p className="text-xs text-slate-400">Try selecting another filter tab or drafter above.</p>
+                  </div>
+                ) : delegatedViewMode === 'table' ? (
+                  /* TABLE VIEW */
+                  <div className="bg-white rounded-xl border border-indigo-200 shadow-xs overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-indigo-950 text-white text-[11px] font-mono uppercase tracking-wider">
+                            <th className="p-3">Job # & Customer</th>
+                            <th className="p-3">Component / Task</th>
+                            <th className="p-3">Priority</th>
+                            <th className="p-3">Assigned Drafter</th>
+                            <th className="p-3">Delegated By</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3">Timer Controls</th>
+                            <th className="p-3">Mark Complete</th>
+                            <th className="p-3">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedTasks.map(t => renderDelegatedTableRow(t))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : delegatedViewMode === 'board' ? (
+                  /* KANBAN BOARD VIEW */
+                  renderDelegatedKanban(sortedTasks)
+                ) : delegatedViewMode === 'list' ? (
+                  /* LISTS VIEW (Single column stacked full-width cards) */
+                  <div className="grid grid-cols-1 gap-3.5">
+                    {sortedTasks.map(t => renderDelegatedCard(t))}
+                  </div>
+                ) : (
+                  /* GRID VIEW (Default 2/3 Column Grid) */
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    {sortedTasks.map(t => renderDelegatedCard(t))}
                   </div>
                 )}
               </div>
-
-              {/* Delegated Items Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {allDelegatedTasks
-                  .filter(task => {
-                    // If waiting for Kyle / Under Review filter is active
-                    if (delegationFilter === 'waiting_kyle') {
-                      if (currentStaff.name.toLowerCase().includes('kyle')) {
-                        return (task.delegatedBy || '').toLowerCase().includes('kyle') && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                      } else if (isIndividualDrafter) {
-                        return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                      } else {
-                        return (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                      }
-                    }
-                    if (delegationFilter === 'revisions_requested') {
-                      return task.status === 'Revision Requested' || Boolean(task.revisionRequested);
-                    }
-                    if (delegationFilter === 'approved') {
-                      return task.status === 'Completed' && Boolean(task.isReviewed);
-                    }
-
-                    // If a specific drafter is selected or active, filter by that drafter
-                    if (activeDrafterTarget !== 'all') {
-                      const drafterLower = activeDrafterTarget.toLowerCase();
-                      if (!task.assignedTo.toLowerCase().includes(drafterLower) && !task.delegatedBy.toLowerCase().includes(drafterLower)) {
-                        return false;
-                      }
-                    }
-
-                    if (delegationFilter === 'my_assigned') {
-                      return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) ||
-                             currentStaff.name.toLowerCase().includes(task.assignedTo.toLowerCase());
-                    }
-                    if (delegationFilter === 'pending') {
-                      return task.status !== 'Completed' || !task.isReviewed;
-                    }
-                    if (delegationFilter === 'completed') return task.status === 'Completed';
-                    return true;
-                  })
-                  .map((task) => {
-                    const cleanTaskNum = (task.jobNumber || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
-                    const parentJob = jobs.find(j => 
-                      (j.id && task.jobId && j.id === task.jobId) || 
-                      (j.job_number && (j.job_number || '').replace(/^#/, '').trim().toLowerCase() === (task.jobNumber || '').replace(/^#/, '').trim().toLowerCase()) ||
-                      (j.job_number && (j.job_number || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase() === cleanTaskNum)
-                    );
-                    const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
-                    const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
-                    const delegatorName = task.delegatedBy || 'Kyle';
-                    const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                    const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
-                    const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
-                    const isAuthorizedReviewer = Boolean(
-                      currentStaff && (
-                        currentStaff.name.toLowerCase().includes('kyle') ||
-                        currentStaff.name.toLowerCase().includes('jason') ||
-                        (task.delegatedBy && currentStaff.name.toLowerCase().includes(task.delegatedBy.toLowerCase()))
-                      )
-                    );
-
-                    return (
-                      <div
-                        key={task.id}
-                        className={`bg-white rounded-xl p-4 border transition-all shadow-xs space-y-2.5 ${
-                          isRevisionReq
-                            ? 'border-orange-400 ring-2 ring-orange-300/40 bg-gradient-to-b from-orange-50/30 to-white'
-                            : isWaitingReview 
-                            ? 'border-amber-400 ring-2 ring-amber-300/40 bg-gradient-to-b from-amber-50/20 to-white' 
-                            : isApproved
-                            ? 'border-emerald-300 bg-gradient-to-b from-emerald-50/20 to-white'
-                            : isAssignedToMe 
-                            ? 'border-indigo-300 ring-1 ring-indigo-200' 
-                            : 'border-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs sm:text-sm font-mono font-black bg-black text-white border border-black px-2.5 py-1 rounded-md shadow-xs tracking-wide">
-                                #{task.jobNumber.replace(/^#/, '')}
-                              </span>
-                              {jobCustomerName && (
-                                <span 
-                                  onClick={() => parentJob && onSelectJob(parentJob)}
-                                  className={`text-xs sm:text-sm font-bold text-slate-900 ${
-                                    parentJob ? 'hover:text-blue-600 hover:underline cursor-pointer' : ''
-                                  }`}
-                                  title={parentJob ? `Open Plan for ${jobCustomerName}` : undefined}
-                                >
-                                  {jobCustomerName}
-                                </span>
-                              )}
-                              <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
-                                {task.category}
-                              </span>
-                              {isRevisionReq && (
-                                <span className="text-[10px] font-extrabold bg-orange-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
-                                  <RotateCcw className="w-3 h-3" />
-                                  <span>Revision Requested {task.revisionCount ? `(Rev #${task.revisionCount})` : ''}</span>
-                                </span>
-                              )}
-                              {isWaitingReview && (
-                                <span className="text-[10px] font-extrabold bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1">
-                                  <span>Waiting for {delegatorName} to review</span>
-                                </span>
-                              )}
-                              {isApproved && (
-                                <span className="text-[10px] font-extrabold bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" />
-                                  <span>Approved & Signed Off</span>
-                                </span>
-                              )}
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                task.priority === 'Urgent'
-                                  ? 'bg-red-100 text-red-700 border border-red-200'
-                                  : task.priority === 'High'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}>
-                                {task.priority} Priority
-                              </span>
-                            </div>
-                            <h4 className="font-bold text-slate-900 text-xs mt-1">{task.componentTitle}</h4>
-                          </div>
-
-                          {/* Status Badge & Actions */}
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={task.status === 'Under Review' ? 'Completed' : task.status}
-                              onChange={(e) => {
-                                const newStat = e.target.value as DelegatedWorkItem['status'];
-                                if (newStat === 'Completed' && parentJob && onOpenCompleteTaskModal) {
-                                  onOpenCompleteTaskModal(task, parentJob);
-                                } else if (onUpdateTaskStatus) {
-                                  onUpdateTaskStatus(task.jobId, task.id, newStat);
-                                }
-                              }}
-                              className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none transition shadow-2xs ${
-                                task.status === 'Completed' || task.status === 'Under Review'
-                                  ? isApproved
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                    : 'bg-amber-50 text-amber-800 border-amber-300'
-                                  : task.status === 'Revision Requested'
-                                  ? 'bg-orange-50 text-orange-800 border-orange-300'
-                                  : task.status === 'In Progress'
-                                  ? 'bg-blue-50 text-blue-700 border-blue-300'
-                                  : 'bg-slate-50 text-slate-700 border-slate-300'
-                              }`}
-                            >
-                              <option value="Pending">Pending</option>
-                              <option value="In Progress">In Progress</option>
-                              <option value="Revision Requested">Revision Requested</option>
-                              <option value="Completed">
-                                {isApproved
-                                  ? `✓ Approved by ${task.reviewedBy || delegatorName}`
-                                  : `Sent back to ${delegatorName} for Review`}
-                              </option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Description */}
-                        {task.neededWorkDescription && (
-                          <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 leading-relaxed">
-                            {task.neededWorkDescription}
-                          </p>
-                        )}
-
-                        {/* Notes */}
-                        {task.notes && (
-                          <div className="text-[11px] text-slate-500 italic bg-amber-50/60 p-2 rounded border border-amber-100">
-                            <strong>Note from {task.delegatedBy}:</strong> {task.notes}
-                          </div>
-                        )}
-
-                        {/* Revision Request Highlight Callout */}
-                        {isRevisionReq && task.revisionNotes && (
-                          <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 space-y-2 text-xs text-orange-950">
-                            <div className="flex items-center justify-between font-bold">
-                              <span className="flex items-center gap-1.5 text-orange-900">
-                                <RotateCcw className="w-4 h-4 text-orange-600" />
-                                <span>Revision Requested by <strong>{task.revisionRequestedBy || delegatorName}</strong></span>
-                              </span>
-                              {task.revisionRequestedAt && (
-                                <span className="text-[10px] text-orange-800 font-mono">
-                                  {new Date(task.revisionRequestedAt).toLocaleDateString()}
-                                </span>
-                              )}
-                            </div>
-                            <div className="bg-white/90 p-2 rounded border border-orange-200 text-orange-900 text-xs italic">
-                              "{task.revisionNotes}"
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Completion Details & Review Submission Banner */}
-                        {(task.status === 'Completed' || task.status === 'Under Review') && (
-                          <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-3 space-y-2 text-xs text-emerald-950">
-                            <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
-                              <span className="flex items-center gap-1.5 text-emerald-800">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                                <span>
-                                  {isApproved 
-                                    ? `Signed Off & Approved by ${task.reviewedBy || delegatorName}`
-                                    : `Task Completed & Submitted to ${delegatorName} for Review`
-                                  }
-                                </span>
-                              </span>
-                              {task.completedAt && (
-                                <span className="text-[10px] text-emerald-700 font-mono">
-                                  {new Date(task.completedAt).toLocaleDateString()}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Review Callout Box: ONLY Kyle or Jason or Delegator see action buttons */}
-                            {isWaitingReview && (
-                              <div className="bg-amber-500/15 border border-amber-400 p-2.5 rounded-lg flex items-center justify-between gap-2 flex-wrap text-amber-950">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                  <span className="font-extrabold text-xs">
-                                    {isAuthorizedReviewer
-                                      ? `Waiting for your review and sign-off`
-                                      : `Waiting for ${delegatorName} to review`}
-                                  </span>
-                                </div>
-
-                                {isAuthorizedReviewer && (
-                                  <div className="flex items-center gap-1.5">
-                                    {onRequestTaskRevision && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setRevisionModalTask({ task, job: parentJob })}
-                                        className="text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer"
-                                      >
-                                        <RotateCcw className="w-3 h-3 text-amber-700" />
-                                        <span>Request Revisions</span>
-                                      </button>
-                                    )}
-
-                                    {onApproveTaskReview && (
-                                      <button
-                                        type="button"
-                                        onClick={() => onApproveTaskReview(task.jobId, task.id, `Signed off & approved by ${currentStaff.name}`)}
-                                        className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded transition flex items-center gap-1 shadow-2xs cursor-pointer"
-                                      >
-                                        <CheckCircle className="w-3 h-3" />
-                                        <span>Sign Off & Approve</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {task.completionNotes && (
-                              <p className="text-[11px] text-emerald-900 bg-white/70 p-2 rounded-lg border border-emerald-100 italic">
-                                "{task.completionNotes}"
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Attached Project & CAD Files Tray (Always visible for all task statuses) */}
-                        {task.attachments && task.attachments.length > 0 && (
-                          <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-2.5 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-bold text-blue-950 flex items-center gap-1.5">
-                                <Paperclip className="w-3.5 h-3.5 text-blue-600" />
-                                <span>Attached Plan & Reference Files ({task.attachments.length})</span>
-                              </span>
-                              <span className="text-[10px] text-blue-600 font-medium">Click to view or download</span>
-                            </div>
-
-                            <div className="space-y-1.5">
-                              {task.attachments.map((file) => (
-                                <div
-                                  key={file.id}
-                                  className="flex items-center justify-between p-2 bg-white rounded-lg border border-blue-200/80 hover:border-blue-400 text-xs shadow-2xs transition group"
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="w-7 h-7 rounded bg-blue-100/70 text-blue-700 flex items-center justify-center shrink-0 border border-blue-200">
-                                      <FileText className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="font-bold text-slate-900 text-xs truncate max-w-[200px] sm:max-w-xs" title={file.name}>
-                                        {file.name}
-                                      </p>
-                                      <span className="text-[10px] text-slate-500 font-mono">{file.size}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    {file.url && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPreviewingAttachment({
-                                          file,
-                                          taskTitle: task.componentTitle,
-                                          jobNumber: parentJob?.job_number || task.jobNumber
-                                        })}
-                                        className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition flex items-center gap-1 cursor-pointer border border-blue-200"
-                                        title="Preview file"
-                                      >
-                                        <Eye className="w-3 h-3" />
-                                        <span>View</span>
-                                      </button>
-                                    )}
-                                    <a
-                                      href={file.url || '#'}
-                                      download={file.name}
-                                      className="px-2 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition flex items-center gap-1 cursor-pointer border border-slate-200"
-                                      title="Download file"
-                                    >
-                                      <Download className="w-3 h-3" />
-                                      <span>Download</span>
-                                    </a>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Attachments & Meta Info */}
-                        <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
-                          <div className="space-y-0.5">
-                            <span className="text-slate-500 block">
-                              Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong> (by {task.delegatedBy})
-                            </span>
-                            {task.dueDate && (
-                              <span className="text-slate-400 text-[10px] block">
-                                Due: {task.dueDate}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {task.attachments && task.attachments.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewingAttachment({
-                                  file: task.attachments![0],
-                                  taskTitle: task.componentTitle,
-                                  jobNumber: parentJob?.job_number || task.jobNumber
-                                })}
-                                className="flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded font-bold text-[10px] transition cursor-pointer"
-                                title="Open attached file viewer"
-                              >
-                                <Paperclip className="w-3 h-3 text-blue-600" />
-                                <span>{task.attachments.length} {task.attachments.length === 1 ? 'File' : 'Files'}</span>
-                              </button>
-                            )}
-
-                            {parentJob && (
-                              <button
-                                onClick={() => onSelectJob(parentJob)}
-                                className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
-                              >
-                                <span>Open Plan</span>
-                                <ArrowRight className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                      </div>
-                    );
-                  })}
-              </div>
-
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -1411,14 +1936,16 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
       ) : (
         /* MANAGER & OPERATIONS DRAFTER SELECTOR CHIPS BAR (Jason, Greg, Kyle) */
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+        <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white p-4.5 rounded-2xl border border-indigo-800/80 shadow-md space-y-3.5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-blue-600" />
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-xs shrink-0">
+                <Users className="w-4 h-4 text-white" />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-white">
                 Filter by Specific Drafter's Board
               </span>
-              <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+              <span className="text-[11px] text-indigo-200/90 font-medium hidden sm:inline">
                 (Click a drafter to view only their assigned projects & delegated tasks)
               </span>
             </div>
@@ -1426,7 +1953,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             {selectedDrafter !== 'all' && (
               <button
                 onClick={() => setSelectedDrafter('all')}
-                className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+                className="text-xs text-indigo-200 hover:text-white font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto bg-indigo-800/60 hover:bg-indigo-700/80 px-2.5 py-1 rounded-lg border border-indigo-600/50 transition"
               >
                 <X className="w-3.5 h-3.5" />
                 <span>Reset to All Drafters</span>
@@ -1435,18 +1962,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           </div>
 
           {/* Drafter Pill Buttons */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
             <button
               onClick={() => setSelectedDrafter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 cursor-pointer border ${
                 selectedDrafter === 'all'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  ? 'bg-blue-600 text-white border-blue-400 shadow-xs ring-2 ring-blue-400/50'
+                  : 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 hover:text-white border-indigo-700/70 shadow-2xs'
               }`}
             >
               <span>All Drafters</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                selectedDrafter === 'all' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-600'
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
+                selectedDrafter === 'all' ? 'bg-blue-800 text-white' : 'bg-slate-900/90 text-indigo-200 border border-indigo-800/80'
               }`}>
                 {jobs.length}
               </span>
@@ -1455,7 +1982,6 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             {draftersList.map((drafter) => {
               const stats = getDrafterStats(drafter);
               const isSelected = selectedDrafter.toLowerCase() === drafter.toLowerCase();
-              const staffObj = effectiveStaff.find(s => s.name.toLowerCase() === drafter.toLowerCase());
 
               return (
                 <button
@@ -1463,12 +1989,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   onClick={() => setSelectedDrafter(isSelected ? 'all' : drafter)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-2 cursor-pointer border ${
                     isSelected
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-300'
-                      : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-2xs'
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-md ring-2 ring-blue-400/50'
+                      : 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 hover:text-white border-indigo-700/70 shadow-2xs'
                   }`}
                 >
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'
+                    isSelected ? 'bg-blue-800 text-white' : 'bg-indigo-900 text-indigo-200 border border-indigo-700/60'
                   }`}>
                     {drafter.charAt(0)}
                   </div>
@@ -1479,8 +2005,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" title="Active timer currently running!" />
                   )}
 
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
+                    isSelected ? 'bg-blue-800 text-white' : 'bg-slate-900/90 text-indigo-200 border border-indigo-800/80'
                   }`}>
                     {stats.projectCount} {stats.projectCount === 1 ? 'plan' : 'plans'}
                   </span>
@@ -1491,37 +2017,37 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
           {/* ACTIVE DRAFTER SPOTLIGHT BANNER */}
           {selectedDrafter !== 'all' && activeDrafterStats && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="bg-slate-900/85 border border-indigo-700/80 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-white shadow-inner">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
                   {selectedDrafter.charAt(0)}
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-bold text-slate-900 text-sm">{selectedDrafter}'s Board</h4>
-                    <span className="text-[10px] bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full font-semibold">
+                    <h4 className="font-bold text-white text-sm">{selectedDrafter}'s Board</h4>
+                    <span className="text-[10px] bg-blue-900/80 text-blue-200 border border-blue-700/60 px-2 py-0.5 rounded-full font-semibold">
                       {activeDrafterStaff?.title || 'Drafter'}
                     </span>
                     {activeDrafterStats.hasActiveTimer && (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-emerald-600 animate-spin" />
+                      <span className="text-[10px] bg-emerald-900/70 text-emerald-300 border border-emerald-600/60 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-emerald-400 animate-spin" />
                         Live Timer Running
                       </span>
                     )}
                   </div>
-                  <p className="text-slate-600 text-[11px] mt-0.5">
-                    Currently assigned to <strong>{activeDrafterStats.projectCount} project(s)</strong> and <strong>{activeDrafterStats.delegatedCount} delegated work component(s)</strong>.
+                  <p className="text-indigo-200/90 text-[11px] mt-0.5">
+                    Currently assigned to <strong className="text-white">{activeDrafterStats.projectCount} project(s)</strong> and <strong className="text-white">{activeDrafterStats.delegatedCount} delegated work component(s)</strong>.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-bold text-blue-900 bg-white border border-blue-200 px-3 py-1.5 rounded-lg shadow-2xs">
+                <span className="text-xs font-bold text-indigo-200 bg-slate-950/80 border border-indigo-700/80 px-3 py-1.5 rounded-lg shadow-2xs">
                   Showing {filteredJobs.length} of {jobs.length} Total Projects
                 </span>
                 <button
                   onClick={() => setSelectedDrafter('all')}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer border border-slate-700"
                   title="Show all projects"
                 >
                   <X className="w-4 h-4" />
