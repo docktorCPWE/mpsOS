@@ -302,49 +302,73 @@ export default function App() {
     setIsDemoModeBypassed(false);
   };
 
+  // Flexible matcher to find a job by id, job_number, or sanitized number
+  const isTargetJob = (j: Job, targetId: string): boolean => {
+    if (!targetId || !j) return false;
+    if (j.id === targetId || j.job_number === targetId) return true;
+    const cleanTarget = targetId.replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+    const cleanJobNum = (j.job_number || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+    const cleanJobId = (j.id || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
+    return (
+      (cleanJobNum.length > 0 && cleanJobNum === cleanTarget) ||
+      (cleanJobId.length > 0 && cleanJobId === cleanTarget) ||
+      (j.job_number && j.job_number.replace(/^#/, '').toLowerCase() === targetId.replace(/^#/, '').toLowerCase())
+    );
+  };
+
   // Sync jobs state to localStorage and Firestore whenever modified
-  const updateJobsState = (newJobs: Job[], specificJobId?: string) => {
-    setJobs(newJobs);
-    saveStoredJobs(newJobs);
+  const updateJobsState = (
+    newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
+    specificJobId?: string
+  ) => {
+    setJobs(prevJobs => {
+      const nextJobs = typeof newJobsOrUpdater === 'function'
+        ? newJobsOrUpdater(prevJobs)
+        : newJobsOrUpdater;
 
-    // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
-    const jobsToSync = specificJobId
-      ? newJobs.filter(j => j.id === specificJobId)
-      : newJobs.filter(newJob => {
-          const oldJob = jobs.find(j => j.id === newJob.id);
-          if (!oldJob) return true;
-          return JSON.stringify(newJob) !== JSON.stringify(oldJob);
+      saveStoredJobs(nextJobs);
+
+      // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
+      const jobsToSync = specificJobId
+        ? nextJobs.filter(j => isTargetJob(j, specificJobId))
+        : nextJobs.filter(newJob => {
+            const oldJob = prevJobs.find(j => j.id === newJob.id);
+            if (!oldJob) return true;
+            return JSON.stringify(newJob) !== JSON.stringify(oldJob);
+          });
+
+      jobsToSync.forEach(job => {
+        saveJobToFirestore(job).catch(err => {
+          console.warn('[Firestore] Sync warning for job:', job.job_number, err);
         });
-
-    jobsToSync.forEach(job => {
-      saveJobToFirestore(job).catch(err => {
-        console.warn('[Firestore] Sync warning for job:', job.job_number, err);
       });
+      
+      // Update selected detail job reference if open
+      if (selectedJobForDetail) {
+        const match = nextJobs.find(j => j.id === selectedJobForDetail.id);
+        if (match) setSelectedJobForDetail(match);
+      }
+
+      // Update jobToDelegate if open
+      if (jobToDelegate) {
+        const match = nextJobs.find(j => j.id === jobToDelegate.id);
+        if (match) setJobToDelegate(match);
+      }
+
+      // Update timerPromptJob if open
+      if (timerPromptJob) {
+        const match = nextJobs.find(j => j.id === timerPromptJob.job.id);
+        if (match) setTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
+      }
+
+      // Update stopTimerPromptJob if open
+      if (stopTimerPromptJob) {
+        const match = nextJobs.find(j => j.id === stopTimerPromptJob.job.id);
+        if (match) setStopTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
+      }
+
+      return nextJobs;
     });
-    
-    // Update selected detail job reference if open
-    if (selectedJobForDetail) {
-      const match = newJobs.find(j => j.id === selectedJobForDetail.id);
-      if (match) setSelectedJobForDetail(match);
-    }
-
-    // Update jobToDelegate if open
-    if (jobToDelegate) {
-      const match = newJobs.find(j => j.id === jobToDelegate.id);
-      if (match) setJobToDelegate(match);
-    }
-
-    // Update timerPromptJob if open
-    if (timerPromptJob) {
-      const match = newJobs.find(j => j.id === timerPromptJob.job.id);
-      if (match) setTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
-    }
-
-    // Update stopTimerPromptJob if open
-    if (stopTimerPromptJob) {
-      const match = newJobs.find(j => j.id === stopTimerPromptJob.job.id);
-      if (match) setStopTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
-    }
   };
 
   // Helper to update and persist notifications across page loads and sessions
@@ -427,134 +451,159 @@ export default function App() {
   };
 
   // Timer Start Handler (prompts for required note if not provided)
-  const handleStartTimer = (jobId: string, taskNote?: string) => {
+  const handleStartTimer = (jobId: string, taskNote?: string, delegatedTaskId?: string) => {
     const trimmed = taskNote ? taskNote.trim() : '';
 
     // If no note provided, open the StartTimerModal prompt
     if (!trimmed) {
-      const target = jobs.find(j => j.id === jobId);
+      const target = jobs.find(j => isTargetJob(j, jobId));
       if (target) {
         setTimerPromptJob({ job: target, initialNote: '' });
       }
       return;
     }
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        return {
-          ...j,
-          active_timer_start: new Date().toISOString(),
-          active_timer_task: trimmed,
-          active_timer_drafter_id: currentStaff.id,
-          active_timer_drafter_name: currentStaff.name,
-          paused_by_break: false,
-          paused_timer_task: undefined,
-          paused_timer_drafter_id: undefined,
-          paused_timer_drafter_name: undefined,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Timer Started',
-              performedBy: currentStaff.name || j.assigned_drafter.split(',')[0],
-              timestamp: new Date().toISOString(),
-              details: `Started drafting timer for: ${trimmed}`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
+    const startTimestamp = new Date().toISOString();
 
-    updateJobsState(updatedJobs);
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (isTargetJob(j, jobId)) {
+          // If a delegated task was selected or matches the taskNote, set its status to In Progress
+          const updatedTasks = (j.delegated_tasks || []).map(t => {
+            if ((delegatedTaskId && t.id === delegatedTaskId) || (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase()))) {
+              return { ...t, status: 'In Progress' as const };
+            }
+            return t;
+          });
+
+          return {
+            ...j,
+            active_timer_start: startTimestamp,
+            active_timer_task: trimmed,
+            active_timer_drafter_id: currentStaff.id,
+            active_timer_drafter_name: currentStaff.name,
+            paused_by_break: false,
+            paused_timer_task: undefined,
+            paused_timer_drafter_id: undefined,
+            paused_timer_drafter_name: undefined,
+            paused_elapsed_seconds: undefined,
+            delegated_tasks: updatedTasks,
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Timer Started',
+                performedBy: currentStaff.name || j.assigned_drafter.split(',')[0],
+                timestamp: startTimestamp,
+                details: `Started drafting timer for: ${trimmed}`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }
+        return j;
+      })
+    );
+
     setTimerPromptJob(null);
   };
 
   // Confirm and execute stopping of the timer with a required work completed note
-  const handleConfirmStopTimer = (jobId: string, completedWorkNote: string) => {
+  const handleConfirmStopTimer = (jobId: string, completedWorkNote: string, delegatedTaskId?: string) => {
     const trimmed = completedWorkNote.trim();
     if (!trimmed) return;
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId && (j.active_timer_start || j.paused_by_break)) {
-        const startMs = j.active_timer_start ? new Date(j.active_timer_start).getTime() : Date.now();
-        const endMs = Date.now();
-        const durationSeconds = j.active_timer_start 
-          ? Math.max(1, Math.floor((endMs - startMs) / 1000))
-          : (j.paused_elapsed_seconds || 0);
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (isTargetJob(j, jobId)) {
+          const hasRunningTimer = Boolean(j.active_timer_start || j.paused_by_break);
+          const startMs = j.active_timer_start ? new Date(j.active_timer_start).getTime() : Date.now();
+          const endMs = Date.now();
+          const durationSeconds = j.active_timer_start 
+            ? Math.max(1, Math.floor((endMs - startMs) / 1000))
+            : (j.paused_elapsed_seconds || 0);
 
-        const drafterDisplayName = j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0];
-        const durationFormatted = formatSecondsToReadable(durationSeconds);
+          const drafterDisplayName = j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0];
+          const durationFormatted = formatSecondsToReadable(durationSeconds);
 
-        const newLog: TimeLog | null = durationSeconds > 0 ? {
-          id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          drafterName: drafterDisplayName,
-          startTime: j.active_timer_start || new Date().toISOString(),
-          endTime: new Date(endMs).toISOString(),
-          durationSeconds,
-          taskDescription: trimmed,
-          hourlyRate: j.hourly_rate || 85
-        } : null;
+          // Only add a new time log if there was an active timer session
+          const newLog: TimeLog | null = hasRunningTimer && durationSeconds > 0 ? {
+            id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            drafterName: drafterDisplayName,
+            startTime: j.active_timer_start || new Date().toISOString(),
+            endTime: new Date(endMs).toISOString(),
+            durationSeconds,
+            taskDescription: trimmed,
+            hourlyRate: j.hourly_rate || 85
+          } : null;
 
-        // Post work completed note as an item in the Messages & Notes area inside the project card
-        const timerComment: JobComment = {
-          id: `c-timer-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          author: drafterDisplayName,
-          authorId: currentStaff.id,
-          role: 'drafter',
-          text: `⏱️ Drafting Session Completed (${durationFormatted}):\n"${trimmed}"`,
-          timestamp: new Date().toISOString()
-        };
+          // Post work completed note as an item in the Messages & Notes area inside the project card
+          const timerComment: JobComment = {
+            id: `c-timer-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            author: drafterDisplayName,
+            authorId: currentStaff.id,
+            role: 'drafter',
+            text: `⏱️ Drafting Session Completed (${durationFormatted}):\n"${trimmed}"`,
+            timestamp: new Date().toISOString()
+          };
 
-        const updatedLogs = newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []);
-        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
-        const totalMins = Math.round(totalSec / 60);
-        const totalHours = Number((totalSec / 3600).toFixed(2));
+          const updatedLogs = newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []);
+          const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+          const totalMins = Math.round(totalSec / 60);
+          const totalHours = Number((totalSec / 3600).toFixed(2));
 
-        return {
-          ...j,
-          active_timer_start: undefined,
-          active_timer_task: undefined,
-          active_timer_drafter_id: undefined,
-          active_timer_drafter_name: undefined,
-          paused_by_break: false,
-          paused_timer_task: undefined,
-          paused_timer_drafter_id: undefined,
-          paused_timer_drafter_name: undefined,
-          paused_elapsed_seconds: undefined,
-          time_logs: updatedLogs,
-          total_time_entries: updatedLogs.length,
-          total_duration_minutes: totalMins,
-          total_duration_hours: totalHours,
-          comments: [...(j.comments || []), timerComment],
-          audit_logs: [
-            {
-              id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              action: 'Timer Stopped & Work Logged',
-              performedBy: drafterDisplayName,
-              timestamp: new Date().toISOString(),
-              details: durationSeconds > 0 
-                ? `Logged ${durationFormatted} for: "${trimmed}" (posted to Messages & Notes)`
-                : `Session stopped for: "${trimmed}"`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
+          // Reset any delegated tasks that were In Progress back to Pending
+          const updatedTasks = (j.delegated_tasks || []).map(t => {
+            if ((delegatedTaskId && t.id === delegatedTaskId) || t.status === 'In Progress') {
+              return { ...t, status: 'Pending' as const };
+            }
+            return t;
+          });
 
-    updateJobsState(updatedJobs);
+          return {
+            ...j,
+            active_timer_start: undefined,
+            active_timer_task: undefined,
+            active_timer_drafter_id: undefined,
+            active_timer_drafter_name: undefined,
+            paused_by_break: false,
+            paused_timer_task: undefined,
+            paused_timer_drafter_id: undefined,
+            paused_timer_drafter_name: undefined,
+            paused_elapsed_seconds: undefined,
+            delegated_tasks: updatedTasks,
+            time_logs: updatedLogs,
+            total_time_entries: updatedLogs.length,
+            total_duration_minutes: totalMins,
+            total_duration_hours: totalHours,
+            comments: [...(j.comments || []), timerComment],
+            audit_logs: [
+              {
+                id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                action: 'Timer Stopped & Work Logged',
+                performedBy: drafterDisplayName,
+                timestamp: new Date().toISOString(),
+                details: durationSeconds > 0 
+                  ? `Logged ${durationFormatted} for: "${trimmed}" (posted to Messages & Notes)`
+                  : `Session stopped for: "${trimmed}"`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }
+        return j;
+      })
+    );
+
     setStopTimerPromptJob(null);
   };
 
   // Timer Stop Handler - prompts for mandatory note if missing
-  const handleStopTimer = (jobId: string, taskNote?: string) => {
+  const handleStopTimer = (jobId: string, taskNote?: string, delegatedTaskId?: string) => {
     const trimmed = taskNote ? taskNote.trim() : '';
 
     // If no note provided, prompt user with StopTimerModal to require work note
     if (!trimmed) {
-      const target = jobs.find(j => j.id === jobId);
+      const target = jobs.find(j => isTargetJob(j, jobId));
       if (target) {
         setStopTimerPromptJob({
           job: target,
@@ -564,7 +613,7 @@ export default function App() {
       return;
     }
 
-    handleConfirmStopTimer(jobId, trimmed);
+    handleConfirmStopTimer(jobId, trimmed, delegatedTaskId);
   };
 
   // Reset demo data helper
@@ -1618,41 +1667,59 @@ export default function App() {
     let completedTaskTitle = '';
     let delegatorName = '';
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId && j.delegated_tasks) {
-        const updatedTasks = j.delegated_tasks.map(t => {
-          if (t.id === taskId) {
-            completedTaskTitle = t.componentTitle;
-            delegatorName = t.delegatedBy;
-            return { 
-              ...t, 
-              status: newStatus,
-              completedAt: newStatus === 'Completed' ? new Date().toISOString() : t.completedAt,
-              completedBy: newStatus === 'Completed' ? currentStaff.name : t.completedBy
-            };
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (isTargetJob(j, jobId) && j.delegated_tasks) {
+          const updatedTasks = j.delegated_tasks.map(t => {
+            if (t.id === taskId) {
+              completedTaskTitle = t.componentTitle;
+              delegatorName = t.delegatedBy;
+              return { 
+                ...t, 
+                status: newStatus,
+                completedAt: newStatus === 'Completed' ? new Date().toISOString() : t.completedAt,
+                completedBy: newStatus === 'Completed' ? currentStaff.name : t.completedBy
+              };
+            }
+            return t;
+          });
+
+          // If transitioning to In Progress and no active timer is running on this job, start the timer
+          let activeTimerStart = j.active_timer_start;
+          let activeTimerTask = j.active_timer_task;
+          let activeTimerDrafterId = j.active_timer_drafter_id;
+          let activeTimerDrafterName = j.active_timer_drafter_name;
+
+          if (newStatus === 'In Progress' && !j.active_timer_start) {
+            activeTimerStart = new Date().toISOString();
+            activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
+            activeTimerDrafterId = currentStaff.id;
+            activeTimerDrafterName = currentStaff.name;
           }
-          return t;
-        });
 
-        return {
-          ...j,
-          delegated_tasks: updatedTasks,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Delegated Task Updated',
-              performedBy: currentStaff.name,
-              timestamp: new Date().toISOString(),
-              details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs, jobId);
+          return {
+            ...j,
+            active_timer_start: activeTimerStart,
+            active_timer_task: activeTimerTask,
+            active_timer_drafter_id: activeTimerDrafterId,
+            active_timer_drafter_name: activeTimerDrafterName,
+            delegated_tasks: updatedTasks,
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Delegated Task Updated',
+                performedBy: currentStaff.name,
+                timestamp: new Date().toISOString(),
+                details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }
+        return j;
+      }),
+      jobId
+    );
 
     // If marked Completed, notify delegator (Kyle / Jason / Greg)
     if (newStatus === 'Completed' && delegatorName && delegatorName !== currentStaff.name) {

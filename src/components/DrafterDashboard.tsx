@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
 import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
@@ -15,8 +15,8 @@ interface DrafterDashboardProps {
   onToggleRoadblock: (jobId: string) => void;
   onSelectJob: (job: Job) => void;
   onOpenNewJobModal: () => void;
-  onStartTimer: (jobId: string, taskNote?: string) => void;
-  onStopTimer: (jobId: string, taskNote?: string) => void;
+  onStartTimer: (jobId: string, taskNote?: string, delegatedTaskId?: string) => void;
+  onStopTimer: (jobId: string, taskNote?: string, delegatedTaskId?: string) => void;
   onOpenDelegateModal?: (job: Job) => void;
   onOpenCompleteTaskModal?: (task: DelegatedWorkItem, job: Job) => void;
   onUpdateTaskStatus?: (jobId: string, taskId: string, newStatus: DelegatedWorkItem['status']) => void;
@@ -221,55 +221,45 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Check if a timer is running for a delegated task
   const isTaskTimerRunning = (task: DelegatedWorkItem, parentJob?: Job): boolean => {
-    if (activeDelegatedTaskId === task.id) return true;
     if (parentJob && parentJob.active_timer_start) {
       const taskTitle = (task.componentTitle || '').toLowerCase();
       const activeTaskNote = (parentJob.active_timer_task || '').toLowerCase();
       if (activeTaskNote.includes(taskTitle) || (task.id && activeTaskNote.includes(task.id))) {
         return true;
       }
-      if (task.status === 'In Progress' && (parentJob.active_timer_drafter_id === currentStaff.id || (parentJob.active_timer_drafter_name && parentJob.active_timer_drafter_name.toLowerCase().includes(currentStaff.name.toLowerCase())))) {
+      if (task.status === 'In Progress') {
         return true;
       }
     }
+    if (activeDelegatedTaskId === task.id) return true;
     return false;
   };
 
   // Live timer elapsed text for a delegated task
   const getTaskElapsedTime = (task: DelegatedWorkItem, parentJob?: Job): string | null => {
-    if (!isTaskTimerRunning(task, parentJob) || !parentJob?.active_timer_start) return null;
-    const start = new Date(parentJob.active_timer_start).getTime();
-    const elapsedSeconds = Math.max(0, Math.floor(((nowTimestamp || Date.now()) - start) / 1000));
-    const hrs = Math.floor(elapsedSeconds / 3600);
-    const mins = Math.floor((elapsedSeconds % 3600) / 60);
-    const secs = elapsedSeconds % 60;
-    if (hrs > 0) {
-      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    if (!isTaskTimerRunning(task, parentJob)) return null;
+    const startMs = parentJob?.active_timer_start 
+      ? new Date(parentJob.active_timer_start).getTime() 
+      : (nowTimestamp || Date.now());
+    const elapsedSeconds = Math.max(0, Math.floor(((nowTimestamp || Date.now()) - startMs) / 1000));
+    return formatSecondsToHHMMSS(elapsedSeconds);
   };
 
-  // Start timer for delegated task -> sets status to In Progress
+  // Start timer for delegated task -> starts job timer and sets task status to In Progress atomically
   const handleStartTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
     setActiveDelegatedTaskId(task.id);
-    const targetJobId = parentJob?.id || task.jobId;
+    const targetJobId = parentJob?.id || task.jobId || task.jobNumber;
     if (targetJobId) {
-      onStartTimer(targetJobId, `${task.category}: ${task.componentTitle}`);
-    }
-    if (onUpdateTaskStatus) {
-      onUpdateTaskStatus(task.jobId, task.id, 'In Progress');
+      onStartTimer(targetJobId, `${task.category}: ${task.componentTitle}`, task.id);
     }
   };
 
-  // Stop timer for delegated task -> sets status to Pending
+  // Stop timer for delegated task -> stops job timer, calculates logs, and sets task to Pending atomically
   const handleStopTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
     setActiveDelegatedTaskId(null);
-    const targetJobId = parentJob?.id || task.jobId;
+    const targetJobId = parentJob?.id || task.jobId || task.jobNumber;
     if (targetJobId) {
-      onStopTimer(targetJobId, `Worked on ${task.componentTitle}`);
-    }
-    if (onUpdateTaskStatus) {
-      onUpdateTaskStatus(task.jobId, task.id, 'Pending');
+      onStopTimer(targetJobId, `Worked on ${task.componentTitle}`, task.id);
     }
   };
 
@@ -557,6 +547,103 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const activeDrafterStaff = effectiveStaff.find(s => s.name.toLowerCase() === activeDrafterTarget.toLowerCase()) || (isIndividualDrafter ? currentStaff : undefined);
   const activeDrafterStats = activeDrafterTarget !== 'all' ? getDrafterStats(activeDrafterTarget) : null;
 
+  // Render View Controls for Project Board (Grid, Kanban, Lists, Table + Make Default)
+  const renderProjectViewControls = () => (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-indigo-700/60 shadow-inner">
+        <button
+          type="button"
+          id="view-mode-grid-btn"
+          onClick={() => setViewMode('grid')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+            viewMode === 'grid' ? 'bg-blue-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+          }`}
+          title="Grid layout of project cards"
+        >
+          <Grid className="w-3.5 h-3.5" />
+          <span>Grid</span>
+        </button>
+
+        <button
+          type="button"
+          id="view-mode-board-btn"
+          onClick={() => setViewMode('board')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+            viewMode === 'board' ? 'bg-blue-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+          }`}
+          title="Kanban columns by workflow phase"
+        >
+          <Kanban className="w-3.5 h-3.5" />
+          <span>Kanban</span>
+        </button>
+
+        <button
+          type="button"
+          id="view-mode-list-btn"
+          onClick={() => setViewMode('list')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+            viewMode === 'list' ? 'bg-blue-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+          }`}
+          title="Streamlined list layout of project cards"
+        >
+          <List className="w-3.5 h-3.5" />
+          <span>Lists</span>
+        </button>
+
+        <button
+          type="button"
+          id="view-mode-table-btn"
+          onClick={() => setViewMode('table')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+            viewMode === 'table' ? 'bg-blue-600 text-white shadow-xs font-bold' : 'text-slate-300 hover:text-white'
+          }`}
+          title="Detailed data table sheet view"
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" />
+          <span>Table</span>
+        </button>
+      </div>
+
+      {/* BUTTON TO MAKE DEFAULT / DEFAULT STATUS BADGE */}
+      {justSavedDefault ? (
+        <div 
+          id="default-layout-saved-feedback"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
+          title={`Saved! ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} will now load automatically whenever you log in.`}
+        >
+          <Check className="w-3.5 h-3.5 stroke-[3]" />
+          <span>Saved!</span>
+        </div>
+      ) : viewMode === defaultLayout ? (
+        <div
+          id="default-layout-active-badge"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 select-none shadow-2xs"
+          title={`This is currently your default startup layout for ${currentStaff.name}. It loads automatically whenever you log in.`}
+        >
+          <BookmarkCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="hidden sm:inline text-emerald-300/80">Default View:</span>
+          <span className="font-bold">
+            {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
+          </span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          id="make-default-view-btn"
+          onClick={handleSetAsDefault}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-blue-400/50 bg-blue-800/70 hover:bg-blue-700 text-blue-100 active:scale-95 shadow-2xs group"
+          title={`Make ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} your permanent default view for ${currentStaff.name} when logged in`}
+        >
+          <Pin className="w-3.5 h-3.5 text-blue-300 group-hover:rotate-45 transition-transform shrink-0" />
+          <span>Make Default</span>
+          <span className="text-[10px] bg-blue-950 text-blue-200 font-bold px-1.5 py-0.5 rounded font-mono">
+            {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
       
@@ -611,97 +698,6 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <Plus className="w-4 h-4" />
             <span>New Job Intake</span>
           </button>
-
-          {/* View Switchers (Grid / Kanban / Lists / Table) + Make Default Button */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <button
-                id="view-mode-grid-btn"
-                onClick={() => setViewMode('grid')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  viewMode === 'grid' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Grid layout of project cards"
-              >
-                <Grid className="w-3.5 h-3.5" />
-                <span>Grid</span>
-              </button>
-
-              <button
-                id="view-mode-board-btn"
-                onClick={() => setViewMode('board')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  viewMode === 'board' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Kanban columns by workflow phase"
-              >
-                <Kanban className="w-3.5 h-3.5" />
-                <span>Kanban</span>
-              </button>
-
-              <button
-                id="view-mode-list-btn"
-                onClick={() => setViewMode('list')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  viewMode === 'list' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Streamlined list layout of project cards"
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>Lists</span>
-              </button>
-
-              <button
-                id="view-mode-table-btn"
-                onClick={() => setViewMode('table')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Detailed data table sheet view"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Table</span>
-              </button>
-            </div>
-
-            {/* BUTTON TO MAKE DEFAULT / DEFAULT STATUS BADGE */}
-            {justSavedDefault ? (
-              <div 
-                id="default-layout-saved-feedback"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white shadow-xs select-none transition-all animate-bounce"
-                title={`Saved! ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} will now load automatically whenever you log in.`}
-              >
-                <Check className="w-3.5 h-3.5 stroke-[3]" />
-                <span>Saved as Default!</span>
-              </div>
-            ) : viewMode === defaultLayout ? (
-              <div
-                id="default-layout-active-badge"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/90 select-none shadow-2xs"
-                title={`This is currently your default startup layout for ${currentStaff.name}. It loads automatically whenever you log in.`}
-              >
-                <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span className="hidden sm:inline text-emerald-700">Default View:</span>
-                <span className="font-bold">
-                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
-                </span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                id="make-default-view-btn"
-                onClick={handleSetAsDefault}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer border border-blue-300/90 bg-blue-50/90 hover:bg-blue-100 text-blue-700 active:scale-95 shadow-2xs group"
-                title={`Make ${viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'} your permanent default view for ${currentStaff.name} when logged in`}
-              >
-                <Pin className="w-3.5 h-3.5 text-blue-600 group-hover:rotate-45 transition-transform shrink-0" />
-                <span>Make Default</span>
-                <span className="text-[10px] bg-blue-200/80 text-blue-800 font-bold px-1.5 py-0.5 rounded font-mono">
-                  {viewMode === 'grid' ? 'Grid' : viewMode === 'board' ? 'Kanban' : viewMode === 'list' ? 'Lists' : 'Table'}
-                </span>
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -1931,13 +1927,14 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">Logged CAD Time</span>
                 <span className="text-sm font-bold text-emerald-400 font-mono">{formatSecondsToReadable(totalTrackedSeconds)}</span>
               </div>
+              {renderProjectViewControls()}
             </div>
           </div>
         </div>
       ) : (
         /* MANAGER & OPERATIONS DRAFTER SELECTOR CHIPS BAR (Jason, Greg, Kyle) */
         <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white p-4.5 rounded-2xl border border-indigo-800/80 shadow-md space-y-3.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-xs shrink-0">
                 <Users className="w-4 h-4 text-white" />
@@ -1950,15 +1947,20 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               </span>
             </div>
 
-            {selectedDrafter !== 'all' && (
-              <button
-                onClick={() => setSelectedDrafter('all')}
-                className="text-xs text-indigo-200 hover:text-white font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto bg-indigo-800/60 hover:bg-indigo-700/80 px-2.5 py-1 rounded-lg border border-indigo-600/50 transition"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Reset to All Drafters</span>
-              </button>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedDrafter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDrafter('all')}
+                  className="text-xs text-indigo-200 hover:text-white font-bold flex items-center gap-1.5 cursor-pointer bg-indigo-800/60 hover:bg-indigo-700/80 px-2.5 py-1.5 rounded-xl border border-indigo-600/50 transition shadow-2xs"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Reset to All Drafters</span>
+                </button>
+              )}
+
+              {renderProjectViewControls()}
+            </div>
           </div>
 
           {/* Drafter Pill Buttons */}
@@ -2400,16 +2402,20 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         </div>
 
                         {/* Kanban Quick Timer Control */}
-                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex items-center justify-between text-[11px]">
+                        <div className={`p-2 rounded-lg border flex items-center justify-between text-[11px] transition ${
+                          isRunning ? 'bg-emerald-50/80 border-emerald-300' : 'bg-slate-50 border-slate-200'
+                        }`}>
                           <div>
                             <span className="text-[10px] text-slate-400 font-mono block uppercase">Logged</span>
-                            <span className="font-mono font-bold text-slate-800">{formatSecondsToReadable(jobSecs)}</span>
+                            <span className={`font-mono font-bold ${isRunning ? 'text-emerald-700' : 'text-slate-800'}`}>
+                              {isRunning ? formatSecondsToHHMMSS(jobSecs) : formatSecondsToReadable(jobSecs)}
+                            </span>
                           </div>
                           <div>
                             {isRunning ? (
                               <button
                                 onClick={(e) => { e.stopPropagation(); onStopTimer(job.id); }}
-                                className="bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded text-[10px] flex items-center gap-1 cursor-pointer"
+                                className="bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs animate-pulse"
                               >
                                 <Square className="w-3 h-3 fill-white" />
                                 Stop
@@ -2417,7 +2423,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                             ) : (
                               <button
                                 onClick={(e) => { e.stopPropagation(); onStartTimer(job.id); }}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-[10px] flex items-center gap-1 cursor-pointer"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs"
                               >
                                 <Play className="w-3 h-3 fill-white" />
                                 Start
@@ -2428,7 +2434,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                         <div className="pt-1 flex justify-between items-center text-[10px] text-slate-400">
                           {canAccessFinancials ? (
-                            <span className="font-semibold text-emerald-700">${jobBillable.toFixed(2)} billable</span>
+                            <span className={`font-semibold ${isRunning ? 'text-emerald-600 font-bold' : 'text-emerald-700'}`}>
+                              ${jobBillable.toFixed(2)} billable
+                            </span>
                           ) : (
                             <span>{(job.time_logs || []).length} sessions</span>
                           )}
@@ -2654,12 +2662,14 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   {/* Logged Time */}
                   <div className="space-y-1 min-w-[110px]">
                     <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">CAD Time</span>
-                    <div className="flex items-center gap-1 text-sm font-bold font-mono text-slate-900">
+                    <div className="flex items-center gap-1.5 text-sm font-bold font-mono text-slate-900">
                       <Clock className={`w-3.5 h-3.5 ${isRunning ? 'text-emerald-600 animate-spin' : 'text-slate-400'}`} />
-                      <span className={isRunning ? 'text-emerald-700' : ''}>{formatSecondsToReadable(totalSecs)}</span>
+                      <span className={isRunning ? 'text-emerald-700 font-mono font-black' : ''}>
+                        {isRunning ? formatSecondsToHHMMSS(totalSecs) : formatSecondsToReadable(totalSecs)}
+                      </span>
                     </div>
                     {canAccessFinancials ? (
-                      <span className="text-[10px] font-mono font-semibold text-emerald-700 block">
+                      <span className={`text-[10px] font-mono font-semibold block ${isRunning ? 'text-emerald-600 font-bold animate-pulse' : 'text-emerald-700'}`}>
                         ${billable.toFixed(2)} billable
                       </span>
                     ) : (
@@ -2907,12 +2917,26 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           )}
                         </div>
                       </td>
-                      <td className="p-3.5 font-mono font-bold text-slate-800">
-                        {formatSecondsToReadable(totalSecs)}
+                      <td className="p-3.5 font-mono font-bold">
+                        {isRunning ? (
+                          <div className="flex items-center gap-1.5 text-emerald-700">
+                            <Clock className="w-3.5 h-3.5 animate-spin text-emerald-600 shrink-0" />
+                            <span className="font-mono text-emerald-800 font-black">{formatSecondsToHHMMSS(totalSecs)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-800">{formatSecondsToReadable(totalSecs)}</span>
+                        )}
                       </td>
                       {canAccessFinancials && (
-                        <td className="p-3.5 font-mono font-bold text-emerald-700">
-                          ${billable.toFixed(2)}
+                        <td className="p-3.5 font-mono font-bold">
+                          {isRunning ? (
+                            <div className="flex items-center gap-1.5 text-emerald-600">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                              <span className="font-mono font-black text-emerald-700">${billable.toFixed(2)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-emerald-700">${billable.toFixed(2)}</span>
+                          )}
                         </td>
                       )}
                       {/* Job Notes Column with Add Job Note button on each line */}
@@ -2931,18 +2955,20 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         {isRunning ? (
                           <button
                             onClick={() => onStopTimer(job.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer animate-pulse transition active:scale-95"
+                            title="Stop live drafting timer"
                           >
                             <Square className="w-3 h-3 fill-white" />
-                            Stop Timer
+                            <span>Stop Timer</span>
                           </button>
                         ) : (
                           <button
                             onClick={() => onStartTimer(job.id)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                            title="Start drafting timer"
                           >
                             <Play className="w-3 h-3 fill-white" />
-                            Start Timer
+                            <span>Start Timer</span>
                           </button>
                         )}
                       </td>

@@ -3221,7 +3221,9 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                   </div>
                   <div className="flex items-baseline justify-between gap-2 mt-2">
                     <span className="text-xl font-bold font-mono text-emerald-400">
-                      {formatSecondsToReadable(calculateJobTotalSeconds(job, nowTimestamp))}
+                      {Boolean(job.active_timer_start)
+                        ? formatSecondsToHHMMSS(calculateJobTotalSeconds(job, nowTimestamp))
+                        : formatSecondsToReadable(calculateJobTotalSeconds(job, nowTimestamp))}
                     </span>
                     {canAccessFinancials && (
                       <span className="text-[11px] font-mono text-slate-400">

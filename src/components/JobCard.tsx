@@ -399,7 +399,7 @@ export const JobCard: React.FC<JobCardProps> = ({
               <div className={`text-base font-bold font-mono ${
                 isTimerRunning ? 'text-emerald-700' : isTimerPaused ? 'text-amber-700' : 'text-slate-800'
               }`}>
-                {isTimerRunning ? formatSecondsToHHMMSS(activeSessionSeconds) : formatSecondsToReadable(totalSeconds)}
+                {isTimerRunning ? formatSecondsToHHMMSS(totalSeconds) : formatSecondsToReadable(totalSeconds)}
               </div>
               {job.total_duration_hours ? (
                 <div className="text-[10px] text-slate-400 font-mono">
@@ -414,7 +414,7 @@ export const JobCard: React.FC<JobCardProps> = ({
                 {job.total_time_entries || (job.time_logs || []).length} Recorded
               </div>
               {canAccessFinancials && (
-                <div className="text-[10px] text-emerald-700 font-mono font-semibold">
+                <div className={`text-[10px] font-mono font-semibold ${isTimerRunning ? 'text-emerald-600 font-bold animate-pulse' : 'text-emerald-700'}`}>
                   ${totalBillable.toFixed(2)} billable
                 </div>
               )}
