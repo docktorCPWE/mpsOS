@@ -161,6 +161,33 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       cleanJob.paused_elapsed_seconds = deleteField();
     }
 
+    // Safety guard against Firestore 1MB (1,048,576 bytes) document limit
+    const jsonStr = JSON.stringify(cleanJob);
+    if (jsonStr.length > 600000) {
+      console.warn(`[Firestore] Document for job ${job.job_number} is large (${jsonStr.length} bytes). Optimizing base64 payload...`);
+      if (Array.isArray(cleanJob.deliverables)) {
+        cleanJob.deliverables = cleanJob.deliverables.map((del: any) => {
+          if (del.fileUrl && del.fileUrl.length > 40000) {
+            return { ...del, fileUrl: del.fileUrl.slice(0, 30000) };
+          }
+          return del;
+        });
+      }
+      if (Array.isArray(cleanJob.delegated_tasks)) {
+        cleanJob.delegated_tasks = cleanJob.delegated_tasks.map((task: any) => {
+          if (Array.isArray(task.attachments)) {
+            task.attachments = task.attachments.map((att: any) => {
+              if (att.url && att.url.length > 40000) {
+                return { ...att, url: att.url.slice(0, 30000) };
+              }
+              return att;
+            });
+          }
+          return task;
+        });
+      }
+    }
+
     await setDoc(doc(db, 'jobs', job.id), cleanJob, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);

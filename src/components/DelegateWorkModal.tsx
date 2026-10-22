@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Send, Paperclip, FileText, CheckCircle2, UserCheck, AlertCircle, Calendar, Sparkles, Upload, FileCheck, Trash2, ArrowRight } from 'lucide-react';
 import { Job, DelegatedWorkItem, TaskAttachment, StaffUser } from '../types';
 import { STAFF_USERS } from '../data/mockData';
+import { processFileForAttachment } from '../utils/attachmentUtils';
 
 interface DelegateWorkModalProps {
   isOpen: boolean;
@@ -128,43 +129,33 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
     const fileList = Array.from(files) as File[];
-    let loadedCount = 0;
-    const newFiles: TaskAttachment[] = [];
 
-    fileList.forEach((file: File, index: number) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = (event.target?.result as string) || '';
-        newFiles.push({
-          id: `att-upload-${Date.now()}-${index}`,
-          name: file.name,
-          size: file.size < 1024 * 1024 
-            ? `${Math.max(1, Math.round(file.size / 1024))} KB`
-            : `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-          type: file.type || 'application/octet-stream',
-          url: dataUrl
-        });
-        loadedCount++;
-        if (loadedCount === fileList.length) {
-          setAttachments(prev => [...prev, ...newFiles]);
-          setIsUploading(false);
-        }
-      };
-      reader.onerror = () => {
-        loadedCount++;
-        if (loadedCount === fileList.length) {
-          setAttachments(prev => [...prev, ...newFiles]);
-          setIsUploading(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    try {
+      const processed = await Promise.all(
+        fileList.map(async (file, index) => {
+          const res = await processFileForAttachment(file);
+          return {
+            id: `att-upload-${Date.now()}-${index}`,
+            name: res.name,
+            size: res.size,
+            type: res.type,
+            url: res.url
+          };
+        })
+      );
+
+      setAttachments(prev => [...prev, ...processed]);
+    } catch (err) {
+      console.warn('Error processing attachments:', err);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleRemoveAttachment = (id: string) => {

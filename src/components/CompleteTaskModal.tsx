@@ -25,6 +25,7 @@ import {
 import { Job, DelegatedWorkItem, DeliverableFile, TaskAttachment, StaffUser } from '../types';
 import { STAFF_USERS } from '../data/mockData';
 import { DELEGATION_COMPLETION_TEMPLATES, DelegationEmailTemplate } from '../data/delegationEmailTemplates';
+import { processFileForAttachment } from '../utils/attachmentUtils';
 
 export interface CompleteTaskPayload {
   jobId: string;
@@ -177,47 +178,46 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
   };
 
   // Handle local file uploads
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
-    const newItems: TaskAttachment[] = [];
     const newCats: Record<string, DeliverableFile['category']> = { ...fileCategories };
 
-    Array.from(files).forEach((file: File, index: number) => {
-      const fileId = `att-comp-${Date.now()}-${index}`;
-      const reader = new FileReader();
-      
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        const defaultCat: DeliverableFile['category'] = 
-          file.name.toLowerCase().endsWith('.dwg') ? 'CAD / DWG File' :
-          file.name.toLowerCase().includes('foundation') ? 'Foundation Plan' :
-          file.name.toLowerCase().includes('elevation') ? 'Exterior Elevations' :
-          file.name.toLowerCase().includes('render') ? '3D Render' :
-          file.name.toLowerCase().includes('electrical') ? 'Electrical & Reflected Ceiling' :
-          'Floor Plan';
+    try {
+      const fileList = Array.from(files) as File[];
+      const processed = await Promise.all(
+        fileList.map(async (file: File, index: number) => {
+          const fileId = `att-comp-${Date.now()}-${index}`;
+          const res = await processFileForAttachment(file);
+          const defaultCat: DeliverableFile['category'] = 
+            file.name.toLowerCase().endsWith('.dwg') ? 'CAD / DWG File' :
+            file.name.toLowerCase().includes('foundation') ? 'Foundation Plan' :
+            file.name.toLowerCase().includes('elevation') ? 'Exterior Elevations' :
+            file.name.toLowerCase().includes('render') ? '3D Render' :
+            file.name.toLowerCase().includes('electrical') ? 'Electrical & Reflected Ceiling' :
+            'Floor Plan';
 
-        newCats[fileId] = defaultCat;
+          newCats[fileId] = defaultCat;
 
-        setReviewFiles(prev => [
-          ...prev,
-          {
+          return {
             id: fileId,
-            name: file.name,
-            size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-            type: file.type || 'application/octet-stream',
-            url: dataUrl
-          }
-        ]);
-        setFileCategories({ ...newCats });
-      };
+            name: res.name,
+            size: res.size,
+            type: res.type,
+            url: res.url
+          };
+        })
+      );
 
-      reader.readAsDataURL(file);
-    });
-
-    setIsUploading(false);
+      setReviewFiles(prev => [...prev, ...processed]);
+      setFileCategories({ ...newCats });
+    } catch (err) {
+      console.warn('Error processing review files:', err);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Add preset sample file

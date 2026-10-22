@@ -159,6 +159,13 @@ export default function App() {
           setJobs(cloudJobs);
           saveStoredJobs(cloudJobs);
           setSelectedCustomerId(prev => prev || cloudJobs[0].id);
+
+          // Keep selectedJobForDetail synchronized with cloud updates if open
+          setSelectedJobForDetail(prevSelected => {
+            if (!prevSelected) return null;
+            const updated = cloudJobs.find(j => j.id === prevSelected.id);
+            return updated || prevSelected;
+          });
         }
       },
       () => {
@@ -296,12 +303,20 @@ export default function App() {
   };
 
   // Sync jobs state to localStorage and Firestore whenever modified
-  const updateJobsState = (newJobs: Job[]) => {
+  const updateJobsState = (newJobs: Job[], specificJobId?: string) => {
     setJobs(newJobs);
     saveStoredJobs(newJobs);
 
-    // Sync to Firestore in background
-    newJobs.forEach(job => {
+    // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
+    const jobsToSync = specificJobId
+      ? newJobs.filter(j => j.id === specificJobId)
+      : newJobs.filter(newJob => {
+          const oldJob = jobs.find(j => j.id === newJob.id);
+          if (!oldJob) return true;
+          return JSON.stringify(newJob) !== JSON.stringify(oldJob);
+        });
+
+    jobsToSync.forEach(job => {
       saveJobToFirestore(job).catch(err => {
         console.warn('[Firestore] Sync warning for job:', job.job_number, err);
       });
@@ -1572,7 +1587,7 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs);
+    updateJobsState(updatedJobs, newTask.jobId);
 
     // Create Notification for the assigned drafter
     if (notifyDrafter) {
@@ -1637,7 +1652,7 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs);
+    updateJobsState(updatedJobs, jobId);
 
     // If marked Completed, notify delegator (Kyle / Jason / Greg)
     if (newStatus === 'Completed' && delegatorName && delegatorName !== currentStaff.name) {
@@ -1744,7 +1759,7 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs);
+    updateJobsState(updatedJobs, payload.jobId);
 
     const newNotifs: AppNotification[] = [];
 
@@ -1849,7 +1864,7 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs);
+    updateJobsState(updatedJobs, jobId);
 
     // Remove the delegation notification from the specific drafter, and send sign-off approval notification
     if (assignedDrafter) {
@@ -1941,7 +1956,7 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs);
+    updateJobsState(updatedJobs, jobId);
 
     // Notify drafter with clear Revision Request notification
     if (assignedDrafter) {
