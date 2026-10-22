@@ -2934,7 +2934,11 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                   </button>
                 </div>
 
-                <div className="text-[11px] text-slate-500 font-medium">
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                  <span className="inline-flex items-center gap-1 bg-white text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold shadow-2xs font-mono">
+                    <Clock className="w-3 h-3 text-blue-600" />
+                    <span>Newest First</span>
+                  </span>
                   {notesFilter === 'job_notes' ? (
                     <span className="flex items-center gap-1 text-slate-600">
                       <Check className="w-3 h-3 text-emerald-600" /> Filtered to specific job notes (audit trail in Audit Log tab)
@@ -2959,9 +2963,18 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
               )}
 
               <div className="space-y-3">
-                {displayedJob.comments
-                  .filter(c => notesFilter === 'all' || !isAuditLogDuplicate(c))
-                  .map(c => {
+                {[...displayedJob.comments]
+                  .map((comment, origIndex) => ({ comment, origIndex }))
+                  .sort((a, b) => {
+                    const timeA = new Date(a.comment.timestamp).getTime();
+                    const timeB = new Date(b.comment.timestamp).getTime();
+                    if (!isNaN(timeA) && !isNaN(timeB) && timeB !== timeA) {
+                      return timeB - timeA;
+                    }
+                    return b.origIndex - a.origIndex;
+                  })
+                  .filter(({ comment: c }) => notesFilter === 'all' || !isAuditLogDuplicate(c))
+                  .map(({ comment: c }) => {
                   const isRoadblockFlag = c.text.includes('ROADBLOCK FLAGGED') || c.text.includes('ROADBLOCK ACTIVATED') || c.text.startsWith('🚨');
                   const isRoadblockResolved = c.text.includes('ROADBLOCK RESOLVED') || c.text.startsWith('✅ ROADBLOCK');
                   const isTimerLog = c.text.includes('⏱️ Drafting Session Completed') || c.text.includes('⏱️ Drafting Time Logged') || c.text.startsWith('⏱️');
