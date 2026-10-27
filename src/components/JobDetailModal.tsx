@@ -7,6 +7,16 @@ import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived, STAFF_USERS } from '../data/mockData';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
+import { deleteFileFromJobInFirestore } from '../services/firebase';
+
+interface FileToDeleteInfo {
+  type: 'task_attachment' | 'deliverable';
+  taskId?: string;
+  taskTitle?: string;
+  fileId: string;
+  fileName: string;
+  fileSize?: string;
+}
 
 interface JobDetailModalProps {
   job: Job | null;
@@ -115,6 +125,11 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   
   // Delegated Task Revision Modal State
   const [revisionModalTask, setRevisionModalTask] = useState<DelegatedWorkItem | null>(null);
+
+  // File Deletion State (Permanent removal from local state & Firestore database)
+  const [fileToDelete, setFileToDelete] = useState<FileToDeleteInfo | null>(null);
+  const [isDeletingFile, setIsDeletingFile] = useState(false);
+  const [deleteFileFeedback, setDeleteFileFeedback] = useState<string | null>(null);
 
   // Delegated Task Date Editing States & Handlers
   const [editingCompletionTaskId, setEditingCompletionTaskId] = useState<string | null>(null);
@@ -1320,24 +1335,91 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
     });
   };
 
-  // Delete Deliverable
+  // Delete Deliverable helper to trigger confirmation modal
   const handleDeleteDeliverable = (deliverableId: string) => {
-    if (window.confirm('Are you sure you want to remove this deliverable sheet?')) {
-      const updated: Job = {
-        ...job,
-        deliverables: job.deliverables.filter(d => d.id !== deliverableId),
-        audit_logs: [
-          {
-            id: `a-${Date.now()}`,
-            action: 'Deliverable Removed',
-            performedBy: job.assigned_drafter.split(',')[0],
-            timestamp: new Date().toISOString(),
-            details: `Deleted deliverable sheet ID: ${deliverableId}`
-          },
-          ...job.audit_logs
-        ]
-      };
-      onUpdateJob(updated);
+    const del = job.deliverables.find(d => d.id === deliverableId);
+    setFileToDelete({
+      type: 'deliverable',
+      fileId: deliverableId,
+      fileName: del?.fileName || del?.title || 'Deliverable Sheet',
+      fileSize: del?.fileSize
+    });
+  };
+
+  // Permanently delete file from local job state, localStorage, and Firestore cloud database
+  const handleConfirmDeleteFile = async () => {
+    if (!fileToDelete) return;
+    setIsDeletingFile(true);
+    try {
+      const actorName = currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Staff User';
+      let updatedJob: Job = { ...job };
+
+      if (fileToDelete.type === 'task_attachment' && fileToDelete.taskId) {
+        const updatedTasks = (job.delegated_tasks || []).map(t => {
+          if (t.id === fileToDelete.taskId) {
+            return {
+              ...t,
+              attachments: (t.attachments || []).filter(a => a.id !== fileToDelete.fileId)
+            };
+          }
+          return t;
+        });
+        updatedJob = {
+          ...job,
+          delegated_tasks: updatedTasks,
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Task Attachment Deleted',
+              performedBy: actorName,
+              timestamp: new Date().toISOString(),
+              details: `Permanently deleted attachment "${fileToDelete.fileName}" from delegated task "${fileToDelete.taskTitle || fileToDelete.taskId}". File purged from database.`
+            },
+            ...(job.audit_logs || [])
+          ]
+        };
+      } else if (fileToDelete.type === 'deliverable') {
+        updatedJob = {
+          ...job,
+          deliverables: (job.deliverables || []).filter(d => d.id !== fileToDelete.fileId),
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Deliverable Sheet Deleted',
+              performedBy: actorName,
+              timestamp: new Date().toISOString(),
+              details: `Permanently deleted deliverable "${fileToDelete.fileName}" from project. File purged from database.`
+            },
+            ...(job.audit_logs || [])
+          ]
+        };
+      }
+
+      // 1. Update React state & localStorage
+      onUpdateJob(updatedJob);
+
+      // 2. If open in preview modal, close preview
+      if (previewModalFile && previewModalFile.id === fileToDelete.fileId) {
+        setPreviewModalFile(null);
+      }
+
+      // 3. Immediately purge from Cloud Firestore database to reclaim document size
+      await deleteFileFromJobInFirestore(job.id, {
+        type: fileToDelete.type,
+        taskId: fileToDelete.taskId,
+        fileId: fileToDelete.fileId
+      });
+
+      const deletedName = fileToDelete.fileName;
+      setFileToDelete(null);
+      setDeleteFileFeedback(`"${deletedName}" was permanently deleted from project & cloud database.`);
+      setTimeout(() => {
+        setDeleteFileFeedback(null);
+      }, 4500);
+    } catch (error) {
+      console.error('Failed to permanently delete file:', error);
+    } finally {
+      setIsDeletingFile(false);
     }
   };
 
@@ -2463,6 +2545,21 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                           >
                                             <Download className="w-3 h-3" />
                                           </a>
+                                          <button
+                                            type="button"
+                                            onClick={() => setFileToDelete({
+                                              type: 'task_attachment',
+                                              taskId: task.id,
+                                              taskTitle: task.componentTitle,
+                                              fileId: att.id,
+                                              fileName: att.name,
+                                              fileSize: att.size
+                                            })}
+                                            className="text-[11px] font-semibold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer border border-red-200 group/trash"
+                                            title="Delete file permanently from project & database"
+                                          >
+                                            <Trash2 className="w-3 h-3 transition group-hover/trash:scale-110" />
+                                          </button>
                                         </div>
                                       </div>
                                     ))}
@@ -2986,17 +3083,20 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                           <a
                             href={file.fileUrl || '#'}
                             download={file.fileName || `${file.title}.jpg`}
-                            onClick={(e) => {
-                              if (!file.fileUrl) {
-                                e.preventDefault();
-                                alert(`Downloading CAD Spec file (${file.version})...`);
-                              }
-                            }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3.5 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1.5"
                           >
                             <Download className="w-3.5 h-3.5" />
                             <span>Download Asset</span>
                           </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDeliverable(file.id)}
+                            className="bg-red-50 hover:bg-red-600 text-red-700 hover:text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition border border-red-200 flex items-center gap-1.5 cursor-pointer group/trashdel"
+                            title="Delete deliverable permanently from project & database"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 transition group-hover/trashdel:scale-110" />
+                            <span>Delete</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -3084,6 +3184,21 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                 <Download className="w-3 h-3" />
                                 <span>Download</span>
                               </a>
+                              <button
+                                type="button"
+                                onClick={() => setFileToDelete({
+                                  type: 'task_attachment',
+                                  taskId: task.id,
+                                  taskTitle: task.componentTitle,
+                                  fileId: att.id,
+                                  fileName: att.name,
+                                  fileSize: att.size
+                                })}
+                                className="text-[11px] font-bold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-2 py-1 rounded-lg border border-red-200 transition flex items-center gap-1 cursor-pointer group/trash"
+                                title="Delete file permanently from project & database"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 transition group-hover/trash:scale-110" />
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -4472,21 +4587,54 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
               )}
             </div>
 
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end gap-2">
-              <a
-                href={previewModalFile.fileUrl || '#'}
-                download={previewModalFile.fileName || `${previewModalFile.title}.jpg`}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download High-Res Original</span>
-              </a>
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
               <button
-                onClick={() => setPreviewModalFile(null)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2 rounded-xl transition"
+                type="button"
+                onClick={() => {
+                  const matchingTask = (job.delegated_tasks || []).find(t => 
+                    (t.attachments || []).some(a => a.id === previewModalFile.id)
+                  );
+                  if (matchingTask) {
+                    setFileToDelete({
+                      type: 'task_attachment',
+                      taskId: matchingTask.id,
+                      taskTitle: matchingTask.componentTitle,
+                      fileId: previewModalFile.id,
+                      fileName: previewModalFile.fileName || previewModalFile.title,
+                      fileSize: previewModalFile.fileSize
+                    });
+                  } else {
+                    setFileToDelete({
+                      type: 'deliverable',
+                      fileId: previewModalFile.id,
+                      fileName: previewModalFile.fileName || previewModalFile.title,
+                      fileSize: previewModalFile.fileSize
+                    });
+                  }
+                }}
+                className="bg-red-950/40 hover:bg-red-600 text-red-400 hover:text-white border border-red-800/60 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer group/prevdel"
+                title="Delete file permanently from project & database"
               >
-                Close
+                <Trash2 className="w-4 h-4 transition group-hover/prevdel:scale-110" />
+                <span>Delete File</span>
               </button>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewModalFile.fileUrl || '#'}
+                  download={previewModalFile.fileName || `${previewModalFile.title}.jpg`}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download High-Res Original</span>
+                </a>
+                <button
+                  onClick={() => setPreviewModalFile(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2 rounded-xl transition"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -5107,6 +5255,92 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* File Deletion Confirmation Modal */}
+      {fileToDelete && (
+        <div className="fixed inset-0 z-70 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150 font-sans">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-md w-full space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0 border border-red-200">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-slate-900">Delete File Permanently?</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  This will remove the file from this project and permanently delete its payload from the database.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center text-slate-600">
+                <span className="font-semibold text-slate-500">File Name:</span>
+                <span className="font-mono font-bold text-slate-900 truncate max-w-[210px]" title={fileToDelete.fileName}>
+                  {fileToDelete.fileName}
+                </span>
+              </div>
+              {fileToDelete.fileSize && (
+                <div className="flex justify-between items-center text-slate-600">
+                  <span className="font-semibold text-slate-500">File Size:</span>
+                  <span className="font-mono text-slate-700">{fileToDelete.fileSize}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-slate-600">
+                <span className="font-semibold text-slate-500">Location:</span>
+                <span className="text-slate-800 font-medium">
+                  {fileToDelete.type === 'task_attachment' 
+                    ? `Task: ${fileToDelete.taskTitle || 'Delegated Attachment'}` 
+                    : 'Deliverable Sheet'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-xs text-red-900">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <p>
+                <strong>Database Purge:</strong> Removing this file immediately shrinks the Firestore document size and cleans storage. This action cannot be reversed.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingFile}
+                onClick={() => setFileToDelete(null)}
+                className="px-4 py-2 rounded-xl text-slate-700 hover:bg-slate-100 font-semibold text-xs transition cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingFile}
+                onClick={handleConfirmDeleteFile}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingFile ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting & Purging...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete & Free Storage</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Feedback Banner */}
+      {deleteFileFeedback && (
+        <div className="fixed bottom-6 right-6 z-80 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-2.5 text-xs animate-in slide-in-from-bottom-3 duration-200 font-sans">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="font-medium">{deleteFileFeedback}</span>
         </div>
       )}
 

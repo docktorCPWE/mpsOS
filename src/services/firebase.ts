@@ -203,6 +203,53 @@ export async function deleteJobFromFirestore(jobId: string): Promise<void> {
   }
 }
 
+/**
+ * Permanently deletes an attachment or deliverable from a job in Firestore to reduce document size.
+ */
+export async function deleteFileFromJobInFirestore(
+  jobId: string,
+  options: {
+    type: 'task_attachment' | 'deliverable';
+    taskId?: string;
+    fileId: string;
+  }
+): Promise<void> {
+  const path = `jobs/${jobId}`;
+  try {
+    const jobDocRef = doc(db, 'jobs', jobId);
+    const snap = await getDoc(jobDocRef);
+    if (!snap.exists()) return;
+
+    const currentJob = snap.data() as Job;
+
+    if (options.type === 'task_attachment' && options.taskId) {
+      const updatedTasks = (currentJob.delegated_tasks || []).map(task => {
+        if (task.id === options.taskId) {
+          return {
+            ...task,
+            attachments: (task.attachments || []).filter(att => att.id !== options.fileId)
+          };
+        }
+        return task;
+      });
+
+      await updateDoc(jobDocRef, {
+        delegated_tasks: updatedTasks
+      });
+      console.log(`[Firestore] Deleted attachment ${options.fileId} from task ${options.taskId} in job ${jobId}. Document size reduced.`);
+    } else if (options.type === 'deliverable') {
+      const updatedDeliverables = (currentJob.deliverables || []).filter(del => del.id !== options.fileId);
+      await updateDoc(jobDocRef, {
+        deliverables: updatedDeliverables
+      });
+      console.log(`[Firestore] Deleted deliverable ${options.fileId} from job ${jobId}. Document size reduced.`);
+    }
+  } catch (err) {
+    console.error('[Firestore] Failed to delete file from Firestore:', err);
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
 export async function seedInitialJobsToFirestore(initialJobs: Job[]): Promise<void> {
   const path = 'jobs';
   try {
