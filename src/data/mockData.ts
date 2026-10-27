@@ -420,6 +420,7 @@ export const INITIAL_JOBS: Job[] = [
         neededWorkDescription: 'Update preliminary layout dimensions per customer redline markup notes.',
         notes: 'Check master suite setback clearance against lot survey.',
         status: 'Pending',
+        workedSeconds: 3600,
         attachments: [
           {
             id: 'att-214-1',

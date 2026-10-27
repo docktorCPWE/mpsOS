@@ -72,6 +72,8 @@ export interface TimeLog {
   billableHours?: number;
   billableAmount?: number;
   rawInputHours?: number;
+  delegatedTaskId?: string;
+  delegatedTaskTitle?: string;
 }
 
 export interface JobVersionSnapshot {
@@ -122,6 +124,9 @@ export interface DelegatedWorkItem {
   revisionRequestedAt?: string;
   revisionNotes?: string;
   revisionCount?: number;
+  workedSeconds?: number;
+  activeTimerStart?: string;
+  activeTimerDrafterName?: string;
 }
 
 export type StaffDepartment = 
@@ -361,6 +366,7 @@ export interface Job {
   active_timer_task?: string;  // Note for current active session
   active_timer_drafter_id?: string;
   active_timer_drafter_name?: string;
+  active_timer_delegated_task_id?: string; // Currently running delegated task ID
   paused_by_break?: boolean;   // Flagged if timer was auto-paused due to employee going on break
   paused_timer_task?: string;  // Preserved task label while paused
   paused_timer_drafter_id?: string;

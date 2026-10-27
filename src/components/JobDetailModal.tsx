@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived, STAFF_USERS } from '../data/mockData';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 import { deleteFileFromJobInFirestore } from '../services/firebase';
+import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab } from '../utils/attachmentUtils';
 
 interface FileToDeleteInfo {
   type: 'task_attachment' | 'deliverable';
@@ -131,27 +132,50 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [isDeletingFile, setIsDeletingFile] = useState(false);
   const [deleteFileFeedback, setDeleteFileFeedback] = useState<string | null>(null);
 
-  // Delegated Task Date Editing States & Handlers
+  // Delegated Task Date & Time Editing States & Handlers
   const [editingCompletionTaskId, setEditingCompletionTaskId] = useState<string | null>(null);
   const [editingDelegatedTaskId, setEditingDelegatedTaskId] = useState<string | null>(null);
+  const [editingTaskTimeId, setEditingTaskTimeId] = useState<string | null>(null);
+  const [taskHoursInput, setTaskHoursInput] = useState<string>('');
+  const [taskMinutesInput, setTaskMinutesInput] = useState<string>('');
 
   const handleMarkTaskCompleteWithDate = (taskId: string, completedDateIso?: string) => {
     if (!job || !job.delegated_tasks) return;
     const nowIso = completedDateIso || new Date().toISOString();
+    
+    // Check if active timer was running on this task
+    let timerElapsedSec = 0;
+    if (job.active_timer_start && (job.active_timer_delegated_task_id === taskId || (job.active_timer_task && job.active_timer_task.toLowerCase().includes(taskId.toLowerCase())))) {
+      timerElapsedSec = Math.max(0, Math.floor((Date.now() - new Date(job.active_timer_start).getTime()) / 1000));
+    }
+
     const updatedTasks = job.delegated_tasks.map(t => {
       if (t.id === taskId) {
+        const curWorked = t.workedSeconds || 0;
+        let taskTimerSec = 0;
+        if (t.activeTimerStart) {
+          taskTimerSec = Math.max(0, Math.floor((Date.now() - new Date(t.activeTimerStart).getTime()) / 1000));
+        }
         return {
           ...t,
           status: 'Completed' as const,
           completedAt: nowIso,
           completedBy: t.completedBy || currentStaff?.name || 'Staff User',
+          workedSeconds: curWorked + timerElapsedSec + taskTimerSec,
+          activeTimerStart: undefined,
+          activeTimerDrafterName: undefined
         };
       }
       return t;
     });
 
+    const shouldStopJobTimer = Boolean(job.active_timer_delegated_task_id === taskId);
+
     const updatedJob: Job = {
       ...job,
+      active_timer_start: shouldStopJobTimer ? undefined : job.active_timer_start,
+      active_timer_task: shouldStopJobTimer ? undefined : job.active_timer_task,
+      active_timer_delegated_task_id: shouldStopJobTimer ? undefined : job.active_timer_delegated_task_id,
       delegated_tasks: updatedTasks,
       audit_logs: [
         {
@@ -222,6 +246,183 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
     };
 
     onUpdateJob(updatedJob);
+  };
+
+  const handleSaveTaskTime = (taskId: string, hours: number, minutes: number) => {
+    if (!job || !job.delegated_tasks) return;
+    const totalSec = Math.max(0, Math.round(hours * 3600 + minutes * 60));
+    const targetTask = job.delegated_tasks.find(t => t.id === taskId);
+    if (!targetTask) return;
+
+    const updatedTasks = job.delegated_tasks.map(t => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          workedSeconds: totalSec
+        };
+      }
+      return t;
+    });
+
+    // Check if we need to add or update TimeLog for billing/reporting
+    let updatedLogs = [...(job.time_logs || [])];
+    const existingLogIdx = updatedLogs.findIndex(tl => tl.delegatedTaskId === taskId);
+    const drafterName = targetTask.assignedTo || currentStaff?.name || 'Drafter';
+
+    if (existingLogIdx >= 0) {
+      updatedLogs[existingLogIdx] = {
+        ...updatedLogs[existingLogIdx],
+        durationSeconds: totalSec,
+        billableHours: Number((totalSec / 3600).toFixed(2)),
+        billableAmount: Math.round((totalSec / 3600) * (job.hourly_rate || 85))
+      };
+    } else if (totalSec > 0) {
+      updatedLogs.push({
+        id: `tl-task-${Date.now()}`,
+        drafterName,
+        startTime: targetTask.delegatedAt || new Date().toISOString(),
+        endTime: targetTask.completedAt || new Date().toISOString(),
+        durationSeconds: totalSec,
+        taskDescription: `Task: ${targetTask.componentTitle}`,
+        hourlyRate: job.hourly_rate || 85,
+        billableHours: Number((totalSec / 3600).toFixed(2)),
+        billableAmount: Math.round((totalSec / 3600) * (job.hourly_rate || 85)),
+        delegatedTaskId: taskId,
+        delegatedTaskTitle: targetTask.componentTitle
+      });
+    }
+
+    const totalDurationSec = updatedLogs.reduce((acc, l) => acc + (l.durationSeconds || 0), 0);
+
+    const updatedJob: Job = {
+      ...job,
+      delegated_tasks: updatedTasks,
+      time_logs: updatedLogs,
+      total_time_entries: updatedLogs.length,
+      total_duration_minutes: Math.round(totalDurationSec / 60),
+      total_duration_hours: Number((totalDurationSec / 3600).toFixed(2)),
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Task Time Updated',
+          details: `Updated worked time for "${targetTask.componentTitle}" to ${formatSecondsToReadable(totalSec)} by ${currentStaff?.name || 'Staff User'}`,
+          timestamp: new Date().toISOString(),
+          drafter_name: currentStaff?.name || 'Staff User'
+        },
+        ...(job.audit_logs || [])
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    setEditingTaskTimeId(null);
+  };
+
+  const handleToggleTaskTimer = (task: DelegatedWorkItem) => {
+    if (!job) return;
+    const isTaskRunning = Boolean(
+      task.activeTimerStart ||
+      (job.active_timer_start && (job.active_timer_delegated_task_id === task.id || (job.active_timer_task && job.active_timer_task.toLowerCase().includes(task.componentTitle.toLowerCase()))))
+    );
+
+    if (isTaskRunning) {
+      // Stop timer for this task
+      let elapsedSeconds = 0;
+      if (task.activeTimerStart) {
+        elapsedSeconds = Math.max(1, Math.floor((Date.now() - new Date(task.activeTimerStart).getTime()) / 1000));
+      } else if (job.active_timer_start) {
+        elapsedSeconds = Math.max(1, Math.floor((Date.now() - new Date(job.active_timer_start).getTime()) / 1000));
+      }
+
+      const curWorked = task.workedSeconds || 0;
+      const newWorked = curWorked + elapsedSeconds;
+
+      const newLog: TimeLog = {
+        id: `tl-task-${Date.now()}`,
+        drafterName: currentStaff?.name || task.assignedTo || 'Drafter',
+        startTime: task.activeTimerStart || job.active_timer_start || new Date().toISOString(),
+        endTime: new Date().toISOString(),
+        durationSeconds: elapsedSeconds,
+        taskDescription: `Worked on task: ${task.componentTitle}`,
+        hourlyRate: job.hourly_rate || 85,
+        delegatedTaskId: task.id,
+        delegatedTaskTitle: task.componentTitle
+      };
+
+      const updatedTasks = (job.delegated_tasks || []).map(t => {
+        if (t.id === task.id) {
+          return {
+            ...t,
+            activeTimerStart: undefined,
+            activeTimerDrafterName: undefined,
+            workedSeconds: newWorked
+          };
+        }
+        return t;
+      });
+
+      const updatedLogs = [...(job.time_logs || []), newLog];
+      const totalDurationSec = updatedLogs.reduce((acc, l) => acc + (l.durationSeconds || 0), 0);
+
+      const updatedJob: Job = {
+        ...job,
+        active_timer_start: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_start,
+        active_timer_task: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_task,
+        active_timer_delegated_task_id: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_delegated_task_id,
+        delegated_tasks: updatedTasks,
+        time_logs: updatedLogs,
+        total_time_entries: updatedLogs.length,
+        total_duration_minutes: Math.round(totalDurationSec / 60),
+        total_duration_hours: Number((totalDurationSec / 3600).toFixed(2)),
+        audit_logs: [
+          {
+            id: `a-${Date.now()}`,
+            action: 'Task Timer Stopped',
+            details: `Logged ${formatSecondsToReadable(elapsedSeconds)} for "${task.componentTitle}"`,
+            timestamp: new Date().toISOString(),
+            drafter_name: currentStaff?.name || 'Staff User'
+          },
+          ...(job.audit_logs || [])
+        ]
+      };
+
+      onUpdateJob(updatedJob);
+    } else {
+      // Start timer on this task
+      const startIso = new Date().toISOString();
+      const updatedTasks = (job.delegated_tasks || []).map(t => {
+        if (t.id === task.id) {
+          return {
+            ...t,
+            status: t.status === 'Completed' ? t.status : ('In Progress' as const),
+            activeTimerStart: startIso,
+            activeTimerDrafterName: currentStaff?.name || 'Drafter'
+          };
+        }
+        return t;
+      });
+
+      const updatedJob: Job = {
+        ...job,
+        active_timer_start: startIso,
+        active_timer_task: `Task: ${task.componentTitle}`,
+        active_timer_drafter_id: currentStaff?.id,
+        active_timer_drafter_name: currentStaff?.name || 'Drafter',
+        active_timer_delegated_task_id: task.id,
+        delegated_tasks: updatedTasks,
+        audit_logs: [
+          {
+            id: `a-${Date.now()}`,
+            action: 'Task Timer Started',
+            details: `Started drafting timer for delegated task "${task.componentTitle}"`,
+            timestamp: startIso,
+            drafter_name: currentStaff?.name || 'Staff User'
+          },
+          ...(job.audit_logs || [])
+        ]
+      };
+
+      onUpdateJob(updatedJob);
+    }
   };
 
   // Official Invoice Generator Modal State
@@ -338,6 +539,21 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [attachedFileUrl, setAttachedFileUrl] = useState<string>('');
   const [attachedFileName, setAttachedFileName] = useState<string>('');
   const [previewModalFile, setPreviewModalFile] = useState<DeliverableFile | null>(null);
+  const [previewModalBlobUrl, setPreviewModalBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (previewModalFile?.fileUrl) {
+      const res = createBlobUrlFromDataUrl(previewModalFile.fileUrl);
+      if (res) {
+        setPreviewModalBlobUrl(res.blobUrl);
+        return () => res.revoke();
+      } else {
+        setPreviewModalBlobUrl(previewModalFile.fileUrl);
+      }
+    } else {
+      setPreviewModalBlobUrl(null);
+    }
+  }, [previewModalFile]);
 
   // Comment attachment state
   const [commentAttachmentUrl, setCommentAttachmentUrl] = useState<string>('');
@@ -2311,6 +2527,12 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                         )
                       );
 
+                      const taskWorkedSec = calculateDelegatedTaskWorkedSeconds(task, job, nowTimestamp);
+                      const isTaskTimerRunning = Boolean(
+                        task.activeTimerStart ||
+                        (job.active_timer_start && (job.active_timer_delegated_task_id === task.id || (job.active_timer_task && job.active_timer_task.toLowerCase().includes((task.componentTitle || '').toLowerCase()))))
+                      );
+
                       return (
                         <div
                           key={task.id}
@@ -2376,7 +2598,6 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11px] text-slate-600 font-mono mt-2 pt-2 border-t border-slate-200/70">
                                 <span>Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong></span>
                                 <span>• Delegated by: <strong className="text-slate-800">{task.delegatedBy}</strong></span>
-                                {task.dueDate && <span>• Due: <strong className="text-slate-700">{task.dueDate}</strong></span>}
 
                                 {/* 1. DATE TASK WAS DELEGATED (Box 1 in screenshot) */}
                                 <span className="inline-flex items-center gap-1.5 bg-slate-100/90 hover:bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded border border-slate-200 text-[10px] transition">
@@ -2419,78 +2640,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                   </div>
                                 )}
 
-                                {/* 2. DATE TASK WAS COMPLETED & WAY TO MARK/EDIT (Box 2 in screenshot) */}
-                                {task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt) ? (
-                                  <div className="inline-flex items-center gap-1">
-                                    <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold text-[10px] shadow-2xs">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                      <span>Completed:</span>
-                                      <span className="font-mono text-emerald-950 font-bold">
-                                        {task.completedAt ? new Date(task.completedAt).toLocaleDateString() : 'Yes'}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingCompletionTaskId(editingCompletionTaskId === task.id ? null : task.id)}
-                                        className="text-emerald-600 hover:text-emerald-900 transition cursor-pointer ml-0.5"
-                                        title="Change or edit completion date"
-                                      >
-                                        <Edit3 className="w-2.5 h-2.5" />
-                                      </button>
-                                    </span>
-
-                                    {editingCompletionTaskId === task.id && (
-                                      <div className="inline-flex items-center gap-1 bg-white border border-emerald-300 rounded px-1.5 py-0.5 shadow-xs">
-                                        <span className="text-[10px] text-slate-400">Date:</span>
-                                        <input
-                                          type="date"
-                                          defaultValue={task.completedAt ? new Date(task.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
-                                          onChange={(e) => {
-                                            if (e.target.value) {
-                                              handleUpdateTaskCompletionDate(task.id, e.target.value);
-                                              setEditingCompletionTaskId(null);
-                                            }
-                                          }}
-                                          className="text-[10px] font-mono text-slate-800 focus:outline-none cursor-pointer"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => setEditingCompletionTaskId(null)}
-                                          className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
-                                        >
-                                          <X className="w-3 h-3" />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="inline-flex items-center gap-1.5 flex-wrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMarkTaskCompleteWithDate(task.id, new Date().toISOString())}
-                                      className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-0.5 rounded shadow-2xs transition active:scale-95 cursor-pointer"
-                                      title="Mark this task as completed today"
-                                    >
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      <span>Mark Completed</span>
-                                    </button>
-
-                                    <div className="inline-flex items-center gap-1 text-[10px] text-slate-500">
-                                      <span>on:</span>
-                                      <input
-                                        type="date"
-                                        defaultValue={new Date().toISOString().split('T')[0]}
-                                        onChange={(e) => {
-                                          if (e.target.value) {
-                                            const customDate = new Date(e.target.value + 'T12:00:00').toISOString();
-                                            handleMarkTaskCompleteWithDate(task.id, customDate);
-                                          }
-                                        }}
-                                        className="text-[10px] font-mono px-1 py-0.5 bg-white border border-slate-300 rounded text-slate-700 cursor-pointer hover:border-emerald-500 focus:outline-none"
-                                        title="Pick specific date to mark this task completed"
-                                      />
-                                    </div>
-                                  </div>
-                                )}
+                                {task.dueDate && <span>• Due: <strong className="text-slate-700">{task.dueDate}</strong></span>}
                               </div>
 
                               {/* Attached Reference / Working CAD Files (Always visible for all statuses) */}
@@ -2537,14 +2687,14 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                               <span>View</span>
                                             </button>
                                           )}
-                                          <a
-                                            href={att.url || '#'}
-                                            download={att.name}
+                                          <button
+                                            type="button"
+                                            onClick={() => downloadFileFromUrl(att.url, att.name)}
                                             className="text-[11px] font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition flex items-center gap-1 cursor-pointer border border-slate-200"
                                             title="Download file"
                                           >
                                             <Download className="w-3 h-3" />
-                                          </a>
+                                          </button>
                                           <button
                                             type="button"
                                             onClick={() => setFileToDelete({
@@ -2588,23 +2738,58 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                               )}
 
                               {/* Completed details & Review banner */}
-                              {(task.status === 'Completed' || task.status === 'Under Review') && (
-                                <div className="mt-2 bg-white/90 p-2.5 rounded-lg border border-emerald-200 text-xs text-emerald-950 space-y-2">
-                                  <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
+                              {(task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && (
+                                <div className="mt-2.5 bg-emerald-50/90 p-2.5 rounded-lg border border-emerald-300 text-xs text-emerald-950 space-y-2">
+                                  <div className="flex items-center justify-between font-semibold flex-wrap gap-2">
                                     <span className="flex items-center gap-1.5 text-emerald-800">
                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                      <span>
+                                      <span className="font-bold">
                                         {isApproved
                                           ? `Approved & Signed Off by ${task.reviewedBy || delegatorName}`
                                           : `Completed & Submitted for Review to ${delegatorName}`
                                         }
                                       </span>
                                     </span>
-                                    {task.completedAt && (
-                                      <span className="text-[10px] text-emerald-700 font-mono">
-                                        {new Date(task.completedAt).toLocaleDateString()}
-                                      </span>
-                                    )}
+
+                                    {/* 3. AMOUNT OF TIME THIS TASK WAS WORKED ON (Box 3 in screenshot) */}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <div className="inline-flex items-center gap-1.5 bg-white border border-emerald-300 px-2.5 py-1 rounded-md text-[11px] font-bold text-emerald-950 shadow-2xs">
+                                        <Clock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                        <span>Time Worked:</span>
+                                        <span className="font-mono text-emerald-900 font-extrabold bg-emerald-100/70 px-1.5 py-0.5 rounded">
+                                          {formatSecondsToReadable(taskWorkedSec)}
+                                        </span>
+                                        {taskWorkedSec > 0 && (
+                                          <span className="text-[10px] text-emerald-700 font-normal">
+                                            ({Math.round(taskWorkedSec / 60)} min)
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (editingTaskTimeId === task.id) {
+                                              setEditingTaskTimeId(null);
+                                            } else {
+                                              setEditingTaskTimeId(task.id);
+                                              const hrs = Math.floor(taskWorkedSec / 3600);
+                                              const mins = Math.floor((taskWorkedSec % 3600) / 60);
+                                              setTaskHoursInput(hrs > 0 ? hrs.toString() : '');
+                                              setTaskMinutesInput(mins > 0 ? mins.toString() : '');
+                                            }
+                                          }}
+                                          className="text-emerald-700 hover:text-emerald-950 p-0.5 hover:bg-emerald-100 rounded transition cursor-pointer ml-0.5"
+                                          title="Edit or adjust time worked on this task"
+                                        >
+                                          <Edit3 className="w-3 h-3" />
+                                        </button>
+                                      </div>
+
+                                      {task.completedAt && (
+                                        <span className="text-[10px] text-emerald-800 font-mono font-bold bg-white/80 border border-emerald-300 px-2 py-1 rounded-md shadow-2xs">
+                                          {new Date(task.completedAt).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
 
                                   {isWaitingReview && (
@@ -2667,9 +2852,132 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                   )}
                                 </div>
                               )}
+
+                              {/* Task Time Tracking & Quick Timer Bar */}
+                              <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-100/70 p-2.5 rounded-xl">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition ${
+                                    isTaskTimerRunning
+                                      ? 'bg-emerald-50 border-emerald-400 text-emerald-900 animate-pulse'
+                                      : taskWorkedSec > 0
+                                      ? 'bg-indigo-50/80 border-indigo-200 text-indigo-900'
+                                      : 'bg-white border-slate-200 text-slate-600'
+                                  }`}>
+                                    <Clock className={`w-3.5 h-3.5 ${isTaskTimerRunning ? 'text-emerald-600 animate-spin' : 'text-indigo-600'}`} />
+                                    <span>Time Worked:</span>
+                                    <span className="font-mono font-extrabold text-slate-900">
+                                      {isTaskTimerRunning ? formatSecondsToHHMMSS(taskWorkedSec) : formatSecondsToReadable(taskWorkedSec)}
+                                    </span>
+                                  </div>
+
+                                  {/* Quick timer toggle button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTaskTimer(task)}
+                                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                                      isTaskTimerRunning
+                                        ? 'bg-red-600 hover:bg-red-700 text-white active:scale-95'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'
+                                    }`}
+                                    title={isTaskTimerRunning ? "Stop active timer and log time for this task" : "Start timer to track work on this specific component"}
+                                  >
+                                    {isTaskTimerRunning ? (
+                                      <>
+                                        <Square className="w-3 h-3 fill-current" />
+                                        <span>Stop & Log Time</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Play className="w-3 h-3 fill-current" />
+                                        <span>Track Time</span>
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {/* Manual Time Edit / Adjust button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (editingTaskTimeId === task.id) {
+                                        setEditingTaskTimeId(null);
+                                      } else {
+                                        setEditingTaskTimeId(task.id);
+                                        const hrs = Math.floor(taskWorkedSec / 3600);
+                                        const mins = Math.floor((taskWorkedSec % 3600) / 60);
+                                        setTaskHoursInput(hrs > 0 ? hrs.toString() : '');
+                                        setTaskMinutesInput(mins > 0 ? mins.toString() : '');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                    title="Edit or log manual hours/minutes for this item"
+                                  >
+                                    <Edit3 className="w-3 h-3 text-slate-500" />
+                                    <span>Edit / Log Time</span>
+                                  </button>
+                                </div>
+
+                                {taskWorkedSec > 0 && (
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    {(taskWorkedSec / 3600).toFixed(2)} hrs billable
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Inline Time Editor if toggled */}
+                              {editingTaskTimeId === task.id && (
+                                <div className="mt-2 p-2.5 bg-white border border-indigo-200 rounded-lg shadow-sm flex flex-wrap items-center gap-3 text-xs">
+                                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                                    <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Adjust Logged Time for "{task.componentTitle}":</span>
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      placeholder="0"
+                                      value={taskHoursInput}
+                                      onChange={(e) => setTaskHoursInput(e.target.value)}
+                                      className="w-14 px-2 py-1 text-xs border border-slate-300 rounded font-mono text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                    <span className="text-slate-500">hrs</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="59"
+                                      placeholder="0"
+                                      value={taskMinutesInput}
+                                      onChange={(e) => setTaskMinutesInput(e.target.value)}
+                                      className="w-14 px-2 py-1 text-xs border border-slate-300 rounded font-mono text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                    <span className="text-slate-500">mins</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 ml-auto">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const h = parseFloat(taskHoursInput) || 0;
+                                        const m = parseFloat(taskMinutesInput) || 0;
+                                        handleSaveTaskTime(task.id, h, m);
+                                      }}
+                                      className="px-2.5 py-1 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition cursor-pointer"
+                                    >
+                                      Save Time
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTaskTimeId(null)}
+                                      className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700 transition cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0 mt-2 sm:mt-0">
+                            <div className="flex flex-col items-end gap-1.5 shrink-0 mt-2 sm:mt-0">
                               <select
                                 value={task.status === 'Under Review' ? 'Completed' : task.status}
                                 onChange={(e) => {
@@ -2701,6 +3009,78 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                     : `Sent back to ${delegatorName} for Review`}
                                 </option>
                               </select>
+
+                              {/* 2. DATE TASK WAS COMPLETED (Box 2 in screenshot: Directly under the status dropdown) */}
+                              {task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt) ? (
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold text-[10px] shadow-2xs">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>Completed:</span>
+                                    <span className="font-mono text-emerald-950 font-bold">
+                                      {task.completedAt ? new Date(task.completedAt).toLocaleDateString() : 'Yes'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingCompletionTaskId(editingCompletionTaskId === task.id ? null : task.id)}
+                                      className="text-emerald-600 hover:text-emerald-900 transition cursor-pointer ml-0.5"
+                                      title="Change or edit completion date"
+                                    >
+                                      <Edit3 className="w-2.5 h-2.5" />
+                                    </button>
+                                  </span>
+
+                                  {editingCompletionTaskId === task.id && (
+                                    <div className="inline-flex items-center gap-1 bg-white border border-emerald-300 rounded px-1.5 py-0.5 shadow-xs">
+                                      <span className="text-[10px] text-slate-400">Date:</span>
+                                      <input
+                                        type="date"
+                                        defaultValue={task.completedAt ? new Date(task.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            handleUpdateTaskCompletionDate(task.id, e.target.value);
+                                            setEditingCompletionTaskId(null);
+                                          }
+                                        }}
+                                        className="text-[10px] font-mono text-slate-800 focus:outline-none cursor-pointer"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingCompletionTaskId(null)}
+                                        className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkTaskCompleteWithDate(task.id, new Date().toISOString())}
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 rounded shadow-2xs transition active:scale-95 cursor-pointer"
+                                    title="Mark this task as completed today"
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>Mark Completed</span>
+                                  </button>
+
+                                  <div className="inline-flex items-center gap-1 text-[10px] text-slate-500">
+                                    <input
+                                      type="date"
+                                      defaultValue={new Date().toISOString().split('T')[0]}
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          const customDate = new Date(e.target.value + 'T12:00:00').toISOString();
+                                          handleMarkTaskCompleteWithDate(task.id, customDate);
+                                        }
+                                      }}
+                                      className="text-[10px] font-mono px-1 py-0.5 bg-white border border-slate-300 rounded text-slate-700 cursor-pointer hover:border-emerald-500 focus:outline-none"
+                                      title="Pick specific date to mark this task completed"
+                                    />
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -3080,14 +3460,14 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                               <span>View Full Resolution</span>
                             </button>
                           )}
-                          <a
-                            href={file.fileUrl || '#'}
-                            download={file.fileName || `${file.title}.jpg`}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3.5 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1.5"
+                          <button
+                            type="button"
+                            onClick={() => downloadFileFromUrl(file.fileUrl, file.fileName || `${file.title}.pdf`)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3.5 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1.5 cursor-pointer"
                           >
                             <Download className="w-3.5 h-3.5" />
                             <span>Download Asset</span>
-                          </a>
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteDeliverable(file.id)}
@@ -3175,15 +3555,15 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                   <span>View</span>
                                 </button>
                               )}
-                              <a
-                                href={att.url || '#'}
-                                download={att.name}
+                              <button
+                                type="button"
+                                onClick={() => downloadFileFromUrl(att.url, att.name)}
                                 className="text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer"
                                 title="Download file"
                               >
                                 <Download className="w-3 h-3" />
                                 <span>Download</span>
-                              </a>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => setFileToDelete({
@@ -4558,16 +4938,29 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
             <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[300px]">
               {previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:image') || previewModalFile.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|svg)$/)) ? (
                 <img
-                  src={previewModalFile.fileUrl}
+                  src={previewModalBlobUrl || previewModalFile.fileUrl}
                   alt={previewModalFile.title}
                   className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
                 />
               ) : previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:application/pdf') || previewModalFile.fileName?.toLowerCase().endsWith('.pdf')) ? (
-                <iframe
-                  src={previewModalFile.fileUrl}
-                  title={previewModalFile.fileName || previewModalFile.title}
-                  className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
-                />
+                <div className="w-full flex flex-col items-center space-y-2">
+                  <iframe
+                    src={previewModalBlobUrl || previewModalFile.fileUrl}
+                    title={previewModalFile.fileName || previewModalFile.title}
+                    className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
+                  />
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between w-full px-1">
+                    <span>PDF Plan Sheet: <strong>{previewModalFile.fileName || previewModalFile.title}</strong></span>
+                    <button
+                      type="button"
+                      onClick={() => openFileInNewTab(previewModalFile.fileUrl, previewModalFile.fileName || previewModalFile.title)}
+                      className="text-blue-400 hover:text-blue-300 font-semibold underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Open PDF in Native Browser Window</span>
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="p-12 text-center text-slate-400 space-y-2">
                   <FileText className="w-12 h-12 mx-auto text-slate-500" />
@@ -4620,14 +5013,22 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
               </button>
 
               <div className="flex items-center gap-2">
-                <a
-                  href={previewModalFile.fileUrl || '#'}
-                  download={previewModalFile.fileName || `${previewModalFile.title}.jpg`}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5"
+                <button
+                  type="button"
+                  onClick={() => openFileInNewTab(previewModalFile.fileUrl, previewModalFile.fileName || previewModalFile.title)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Tab</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadFileFromUrl(previewModalFile.fileUrl, previewModalFile.fileName || `${previewModalFile.title}.pdf`)}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download High-Res Original</span>
-                </a>
+                </button>
                 <button
                   onClick={() => setPreviewModalFile(null)}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2 rounded-xl transition"

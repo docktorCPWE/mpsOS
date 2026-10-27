@@ -469,9 +469,17 @@ export default function App() {
       prevJobs.map(j => {
         if (isTargetJob(j, jobId)) {
           // If a delegated task was selected or matches the taskNote, set its status to In Progress
+          let matchedTaskId = delegatedTaskId;
           const updatedTasks = (j.delegated_tasks || []).map(t => {
-            if ((delegatedTaskId && t.id === delegatedTaskId) || (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase()))) {
-              return { ...t, status: 'In Progress' as const };
+            const isMatch = (delegatedTaskId && t.id === delegatedTaskId) || (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase()));
+            if (isMatch) {
+              matchedTaskId = t.id;
+              return { 
+                ...t, 
+                status: 'In Progress' as const,
+                activeTimerStart: startTimestamp,
+                activeTimerDrafterName: currentStaff.name
+              };
             }
             return t;
           });
@@ -482,6 +490,7 @@ export default function App() {
             active_timer_task: trimmed,
             active_timer_drafter_id: currentStaff.id,
             active_timer_drafter_name: currentStaff.name,
+            active_timer_delegated_task_id: matchedTaskId,
             paused_by_break: false,
             paused_timer_task: undefined,
             paused_timer_drafter_id: undefined,
@@ -525,6 +534,31 @@ export default function App() {
           const drafterDisplayName = j.active_timer_drafter_name || currentStaff.name || j.assigned_drafter.split(',')[0];
           const durationFormatted = formatSecondsToReadable(durationSeconds);
 
+          const effectiveTaskId = delegatedTaskId || j.active_timer_delegated_task_id;
+          let matchedTaskTitle: string | undefined;
+
+          // Add workedSeconds to the matched delegated task
+          const updatedTasks = (j.delegated_tasks || []).map(t => {
+            const isMatch = (effectiveTaskId && t.id === effectiveTaskId) || 
+                            (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase())) ||
+                            Boolean(t.activeTimerStart);
+            if (isMatch) {
+              matchedTaskTitle = t.componentTitle;
+              const curWorked = t.workedSeconds || 0;
+              return {
+                ...t,
+                status: t.status === 'In Progress' ? 'Pending' as const : t.status,
+                activeTimerStart: undefined,
+                activeTimerDrafterName: undefined,
+                workedSeconds: curWorked + durationSeconds
+              };
+            }
+            if (t.status === 'In Progress') {
+              return { ...t, status: 'Pending' as const, activeTimerStart: undefined };
+            }
+            return t;
+          });
+
           // Only add a new time log if there was an active timer session
           const newLog: TimeLog | null = hasRunningTimer && durationSeconds > 0 ? {
             id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -533,7 +567,9 @@ export default function App() {
             endTime: new Date(endMs).toISOString(),
             durationSeconds,
             taskDescription: trimmed,
-            hourlyRate: j.hourly_rate || 85
+            hourlyRate: j.hourly_rate || 85,
+            delegatedTaskId: effectiveTaskId,
+            delegatedTaskTitle: matchedTaskTitle
           } : null;
 
           // Post work completed note as an item in the Messages & Notes area inside the project card
@@ -551,20 +587,13 @@ export default function App() {
           const totalMins = Math.round(totalSec / 60);
           const totalHours = Number((totalSec / 3600).toFixed(2));
 
-          // Reset any delegated tasks that were In Progress back to Pending
-          const updatedTasks = (j.delegated_tasks || []).map(t => {
-            if ((delegatedTaskId && t.id === delegatedTaskId) || t.status === 'In Progress') {
-              return { ...t, status: 'Pending' as const };
-            }
-            return t;
-          });
-
           return {
             ...j,
             active_timer_start: undefined,
             active_timer_task: undefined,
             active_timer_drafter_id: undefined,
             active_timer_drafter_name: undefined,
+            active_timer_delegated_task_id: undefined,
             paused_by_break: false,
             paused_timer_task: undefined,
             paused_timer_drafter_id: undefined,
@@ -1618,7 +1647,6 @@ export default function App() {
       if (j.id === newTask.jobId) {
         return {
           ...j,
-          deliverables: [...(j.deliverables || []), ...taskDeliverables],
           delegated_tasks: [newTask, ...(j.delegated_tasks || [])],
           comments: [...j.comments, delegationComment],
           audit_logs: [
@@ -1753,12 +1781,14 @@ export default function App() {
 
     const updatedJobs = jobs.map(j => {
       if (j.id === payload.jobId && j.delegated_tasks) {
+        const loggedSeconds = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
         const updatedTasks = j.delegated_tasks.map(t => {
           if (t.id === payload.taskId) {
             targetTaskTitle = t.componentTitle;
             const existingAttachments = t.attachments || [];
             // Merge newly uploaded review attachments
             const mergedAttachments = [...existingAttachments, ...payload.reviewFiles];
+            const curWorked = t.workedSeconds || 0;
             
             return {
               ...t,
@@ -1766,7 +1796,10 @@ export default function App() {
               completedAt: nowIso,
               completedBy: currentStaff.name,
               completionNotes: payload.resolutionNotes,
-              attachments: mergedAttachments
+              attachments: mergedAttachments,
+              workedSeconds: curWorked + loggedSeconds,
+              activeTimerStart: undefined,
+              activeTimerDrafterName: undefined
             };
           }
           return t;
@@ -1785,16 +1818,21 @@ export default function App() {
                 drafterName: currentStaff.name,
                 startTime: new Date(Date.now() - payload.loggedHours * 3600 * 1000).toISOString(),
                 endTime: nowIso,
-                durationSeconds: Math.round(payload.loggedHours * 3600),
+                durationSeconds: loggedSeconds,
                 taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
                 hourlyRate: 85,
                 billableAmount: Math.round(payload.loggedHours * 85),
                 isBilled: false,
-                isApproved: false
+                isApproved: false,
+                delegatedTaskId: payload.taskId,
+                delegatedTaskTitle: targetTaskTitle
               },
               ...j.time_logs
             ]
           : j.time_logs;
+
+        // If the job had an active timer running specifically for this task, stop it
+        const shouldClearJobTimer = Boolean(j.active_timer_delegated_task_id === payload.taskId);
 
         // Add a detailed comment in the project stream for the team
         const completionComment = {
@@ -1807,6 +1845,11 @@ export default function App() {
 
         return {
           ...j,
+          active_timer_start: shouldClearJobTimer ? undefined : j.active_timer_start,
+          active_timer_task: shouldClearJobTimer ? undefined : j.active_timer_task,
+          active_timer_drafter_id: shouldClearJobTimer ? undefined : j.active_timer_drafter_id,
+          active_timer_drafter_name: shouldClearJobTimer ? undefined : j.active_timer_drafter_name,
+          active_timer_delegated_task_id: shouldClearJobTimer ? undefined : j.active_timer_delegated_task_id,
           delegated_tasks: updatedTasks,
           deliverables: updatedDeliverables,
           time_logs: updatedTimeLogs,

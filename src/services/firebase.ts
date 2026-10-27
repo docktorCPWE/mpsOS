@@ -150,6 +150,7 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       cleanJob.active_timer_task = deleteField();
       cleanJob.active_timer_drafter_id = deleteField();
       cleanJob.active_timer_drafter_name = deleteField();
+      cleanJob.active_timer_delegated_task_id = deleteField();
     }
     
     // Explicitly delete paused timer fields if job is not paused by break
@@ -161,31 +162,10 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       cleanJob.paused_elapsed_seconds = deleteField();
     }
 
-    // Safety guard against Firestore 1MB (1,048,576 bytes) document limit
+    // Log document size warnings if approaching Firestore 1MB document limit
     const jsonStr = JSON.stringify(cleanJob);
-    if (jsonStr.length > 600000) {
-      console.warn(`[Firestore] Document for job ${job.job_number} is large (${jsonStr.length} bytes). Optimizing base64 payload...`);
-      if (Array.isArray(cleanJob.deliverables)) {
-        cleanJob.deliverables = cleanJob.deliverables.map((del: any) => {
-          if (del.fileUrl && del.fileUrl.length > 40000) {
-            return { ...del, fileUrl: del.fileUrl.slice(0, 30000) };
-          }
-          return del;
-        });
-      }
-      if (Array.isArray(cleanJob.delegated_tasks)) {
-        cleanJob.delegated_tasks = cleanJob.delegated_tasks.map((task: any) => {
-          if (Array.isArray(task.attachments)) {
-            task.attachments = task.attachments.map((att: any) => {
-              if (att.url && att.url.length > 40000) {
-                return { ...att, url: att.url.slice(0, 30000) };
-              }
-              return att;
-            });
-          }
-          return task;
-        });
-      }
+    if (jsonStr.length > 800000) {
+      console.warn(`[Firestore] Document for job ${job.job_number} is large (${jsonStr.length} bytes). Use file deletion if needed.`);
     }
 
     await setDoc(doc(db, 'jobs', job.id), cleanJob, { merge: true });

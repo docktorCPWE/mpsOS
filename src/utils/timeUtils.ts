@@ -1,4 +1,47 @@
-import { Job } from '../types';
+import { Job, DelegatedWorkItem } from '../types';
+
+/**
+ * Calculate total seconds worked on a specific delegated work item.
+ * Combines task.workedSeconds, any time logs explicitly tagged with task.id or matching task title,
+ * and any currently running active timer specifically on this task.
+ */
+export function calculateDelegatedTaskWorkedSeconds(
+  task: DelegatedWorkItem,
+  job?: Job | null,
+  nowTimestamp?: number
+): number {
+  if (!task) return 0;
+  let seconds = task.workedSeconds || 0;
+
+  // If the job has time logs referencing this delegated task
+  if (job && job.time_logs && job.time_logs.length > 0) {
+    const matchingLogs = job.time_logs.filter(
+      tl => tl.delegatedTaskId === task.id ||
+      (tl.taskDescription && task.componentTitle && tl.taskDescription.toLowerCase().includes(task.componentTitle.toLowerCase()))
+    );
+    const logSum = matchingLogs.reduce((acc, l) => acc + (l.durationSeconds || 0), 0);
+    // Ensure we don't undercount if time logs exist
+    seconds = Math.max(seconds, logSum);
+  }
+
+  // Active timer on task directly
+  if (task.activeTimerStart) {
+    const startMs = new Date(task.activeTimerStart).getTime();
+    const currentMs = nowTimestamp || Date.now();
+    seconds += Math.max(0, Math.floor((currentMs - startMs) / 1000));
+  } else if (
+    job &&
+    job.active_timer_start &&
+    (job.active_timer_delegated_task_id === task.id ||
+     (job.active_timer_task && task.componentTitle && job.active_timer_task.toLowerCase().includes(task.componentTitle.toLowerCase())))
+  ) {
+    const startMs = new Date(job.active_timer_start).getTime();
+    const currentMs = nowTimestamp || Date.now();
+    seconds += Math.max(0, Math.floor((currentMs - startMs) / 1000));
+  }
+
+  return Math.max(0, seconds);
+}
 
 /**
  * Format total seconds into human readable format like "2h 45m 12s" or "02:45:10"
