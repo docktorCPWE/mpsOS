@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, Calendar } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV } from '../utils/timeUtils';
@@ -1454,15 +1454,27 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                   {/* Bottom Meta & Open Plan Link */}
                   <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       <span className="text-slate-500 block">
                         Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong> (by {task.delegatedBy})
                       </span>
-                      {task.dueDate && (
-                        <span className="text-slate-400 text-[10px] block">
-                          Due: {task.dueDate}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                          <Calendar className="w-3 h-3 text-indigo-600" />
+                          <span>Delegated: <strong>{task.delegatedAt ? new Date(task.delegatedAt).toLocaleDateString() : 'N/A'}</strong></span>
                         </span>
-                      )}
+                        {task.completedAt && (
+                          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300 font-bold">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Completed: <strong>{new Date(task.completedAt).toLocaleDateString()}</strong></span>
+                          </span>
+                        )}
+                        {task.dueDate && (
+                          <span className="text-slate-500">
+                            Due: <strong className="text-slate-700">{task.dueDate}</strong>
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1558,6 +1570,14 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   {/* Delegated By & Due */}
                   <td className="p-3 text-slate-500 text-[11px]">
                     <div>by <strong>{task.delegatedBy}</strong></div>
+                    <div className="text-[10px] text-slate-600 font-mono">
+                      Delegated: <strong>{task.delegatedAt ? new Date(task.delegatedAt).toLocaleDateString() : 'N/A'}</strong>
+                    </div>
+                    {task.completedAt && (
+                      <div className="text-[10px] text-emerald-700 font-mono font-bold">
+                        Completed: {new Date(task.completedAt).toLocaleDateString()}
+                      </div>
+                    )}
                     {task.dueDate && <div className="text-[10px] text-slate-400">Due: {task.dueDate}</div>}
                   </td>
 

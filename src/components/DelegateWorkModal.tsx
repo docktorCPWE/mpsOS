@@ -90,6 +90,7 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
   const [category, setCategory] = useState<DelegatedWorkItem['category']>('Floor Plan');
   const [assignedTo, setAssignedTo] = useState<string>(getInitialDrafter);
   const [priority, setPriority] = useState<DelegatedWorkItem['priority']>('Normal');
+  const [delegatedDate, setDelegatedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 5);
@@ -183,7 +184,7 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
       assignedTo,
       assignedToEmail: assignedStaff?.email || `${assignedTo.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
       delegatedBy: currentStaff.name,
-      delegatedAt: new Date().toISOString(),
+      delegatedAt: delegatedDate ? new Date(delegatedDate + 'T12:00:00').toISOString() : new Date().toISOString(),
       dueDate,
       neededWorkDescription: neededWorkDescription.trim() || undefined,
       notes: notes.trim() || undefined,
@@ -290,8 +291,8 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
             </div>
           </div>
 
-          {/* Assignee, Priority & Due Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Assignee, Priority, Delegated Date & Target Due Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block font-bold text-slate-900 mb-1 flex items-center justify-between">
                 <span>
@@ -343,6 +344,18 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
                 <option value="High">High Priority</option>
                 <option value="Urgent">🚨 Urgent / Blocking</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-900 mb-1">Date Delegated</label>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={delegatedDate}
+                  onChange={(e) => setDelegatedDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:bg-white focus:outline-none"
+                />
+              </div>
             </div>
 
             <div>

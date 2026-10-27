@@ -116,6 +116,99 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   // Delegated Task Revision Modal State
   const [revisionModalTask, setRevisionModalTask] = useState<DelegatedWorkItem | null>(null);
 
+  // Delegated Task Date Editing States & Handlers
+  const [editingCompletionTaskId, setEditingCompletionTaskId] = useState<string | null>(null);
+  const [editingDelegatedTaskId, setEditingDelegatedTaskId] = useState<string | null>(null);
+
+  const handleMarkTaskCompleteWithDate = (taskId: string, completedDateIso?: string) => {
+    if (!job || !job.delegated_tasks) return;
+    const nowIso = completedDateIso || new Date().toISOString();
+    const updatedTasks = job.delegated_tasks.map(t => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          status: 'Completed' as const,
+          completedAt: nowIso,
+          completedBy: t.completedBy || currentStaff?.name || 'Staff User',
+        };
+      }
+      return t;
+    });
+
+    const updatedJob: Job = {
+      ...job,
+      delegated_tasks: updatedTasks,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Task Marked Completed',
+          details: `Task completed on ${new Date(nowIso).toLocaleDateString()} by ${currentStaff?.name || 'Staff User'}`,
+          timestamp: new Date().toISOString(),
+          drafter_name: currentStaff?.name || 'Staff User'
+        },
+        ...(job.audit_logs || [])
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+    if (onUpdateTaskStatus) {
+      onUpdateTaskStatus(job.id, taskId, 'Completed');
+    }
+  };
+
+  const handleUpdateTaskCompletionDate = (taskId: string, newDateStr: string) => {
+    if (!job || !job.delegated_tasks || !newDateStr) return;
+    const isoDate = new Date(newDateStr + 'T12:00:00').toISOString();
+    const updatedTasks = job.delegated_tasks.map(t => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          completedAt: isoDate,
+          status: t.status === 'Completed' || t.status === 'Under Review' ? t.status : 'Completed'
+        };
+      }
+      return t;
+    });
+
+    const updatedJob: Job = {
+      ...job,
+      delegated_tasks: updatedTasks,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Task Completion Date Updated',
+          details: `Completion date changed to ${new Date(isoDate).toLocaleDateString()} by ${currentStaff?.name || 'Staff User'}`,
+          timestamp: new Date().toISOString(),
+          drafter_name: currentStaff?.name || 'Staff User'
+        },
+        ...(job.audit_logs || [])
+      ]
+    };
+
+    onUpdateJob(updatedJob);
+  };
+
+  const handleUpdateTaskDelegatedDate = (taskId: string, newDateStr: string) => {
+    if (!job || !job.delegated_tasks || !newDateStr) return;
+    const isoDate = new Date(newDateStr + 'T12:00:00').toISOString();
+    const updatedTasks = job.delegated_tasks.map(t => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          delegatedAt: isoDate
+        };
+      }
+      return t;
+    });
+
+    const updatedJob: Job = {
+      ...job,
+      delegated_tasks: updatedTasks,
+    };
+
+    onUpdateJob(updatedJob);
+  };
+
   // Official Invoice Generator Modal State
   const [isOfficialInvoiceModalOpen, setIsOfficialInvoiceModalOpen] = useState(false);
 
@@ -2198,10 +2291,124 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                                 </p>
                               )}
 
-                              <div className="flex items-center gap-3 text-[10px] text-slate-500 font-mono mt-1.5">
+                              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11px] text-slate-600 font-mono mt-2 pt-2 border-t border-slate-200/70">
                                 <span>Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong></span>
                                 <span>• Delegated by: <strong className="text-slate-800">{task.delegatedBy}</strong></span>
-                                {task.dueDate && <span>• Due: <strong>{task.dueDate}</strong></span>}
+                                {task.dueDate && <span>• Due: <strong className="text-slate-700">{task.dueDate}</strong></span>}
+
+                                {/* 1. DATE TASK WAS DELEGATED (Box 1 in screenshot) */}
+                                <span className="inline-flex items-center gap-1.5 bg-slate-100/90 hover:bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded border border-slate-200 text-[10px] transition">
+                                  <Calendar className="w-3 h-3 text-indigo-600 shrink-0" />
+                                  <span>Delegated:</span>
+                                  <strong className="text-slate-900 font-bold">
+                                    {task.delegatedAt ? new Date(task.delegatedAt).toLocaleDateString() : 'N/A'}
+                                  </strong>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingDelegatedTaskId(editingDelegatedTaskId === task.id ? null : task.id)}
+                                    className="text-slate-400 hover:text-indigo-600 transition cursor-pointer ml-0.5"
+                                    title="Edit delegation date"
+                                  >
+                                    <Edit3 className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
+
+                                {editingDelegatedTaskId === task.id && (
+                                  <div className="inline-flex items-center gap-1 bg-white border border-indigo-300 rounded px-1.5 py-0.5 shadow-xs">
+                                    <span className="text-[10px] text-slate-400">Set:</span>
+                                    <input
+                                      type="date"
+                                      defaultValue={task.delegatedAt ? new Date(task.delegatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleUpdateTaskDelegatedDate(task.id, e.target.value);
+                                          setEditingDelegatedTaskId(null);
+                                        }
+                                      }}
+                                      className="text-[10px] font-mono text-slate-800 focus:outline-none cursor-pointer"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingDelegatedTaskId(null)}
+                                      className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* 2. DATE TASK WAS COMPLETED & WAY TO MARK/EDIT (Box 2 in screenshot) */}
+                                {task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt) ? (
+                                  <div className="inline-flex items-center gap-1">
+                                    <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold text-[10px] shadow-2xs">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                      <span>Completed:</span>
+                                      <span className="font-mono text-emerald-950 font-bold">
+                                        {task.completedAt ? new Date(task.completedAt).toLocaleDateString() : 'Yes'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingCompletionTaskId(editingCompletionTaskId === task.id ? null : task.id)}
+                                        className="text-emerald-600 hover:text-emerald-900 transition cursor-pointer ml-0.5"
+                                        title="Change or edit completion date"
+                                      >
+                                        <Edit3 className="w-2.5 h-2.5" />
+                                      </button>
+                                    </span>
+
+                                    {editingCompletionTaskId === task.id && (
+                                      <div className="inline-flex items-center gap-1 bg-white border border-emerald-300 rounded px-1.5 py-0.5 shadow-xs">
+                                        <span className="text-[10px] text-slate-400">Date:</span>
+                                        <input
+                                          type="date"
+                                          defaultValue={task.completedAt ? new Date(task.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                                          onChange={(e) => {
+                                            if (e.target.value) {
+                                              handleUpdateTaskCompletionDate(task.id, e.target.value);
+                                              setEditingCompletionTaskId(null);
+                                            }
+                                          }}
+                                          className="text-[10px] font-mono text-slate-800 focus:outline-none cursor-pointer"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingCompletionTaskId(null)}
+                                          className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="inline-flex items-center gap-1.5 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMarkTaskCompleteWithDate(task.id, new Date().toISOString())}
+                                      className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-0.5 rounded shadow-2xs transition active:scale-95 cursor-pointer"
+                                      title="Mark this task as completed today"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      <span>Mark Completed</span>
+                                    </button>
+
+                                    <div className="inline-flex items-center gap-1 text-[10px] text-slate-500">
+                                      <span>on:</span>
+                                      <input
+                                        type="date"
+                                        defaultValue={new Date().toISOString().split('T')[0]}
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            const customDate = new Date(e.target.value + 'T12:00:00').toISOString();
+                                            handleMarkTaskCompleteWithDate(task.id, customDate);
+                                          }
+                                        }}
+                                        className="text-[10px] font-mono px-1 py-0.5 bg-white border border-slate-300 rounded text-slate-700 cursor-pointer hover:border-emerald-500 focus:outline-none"
+                                        title="Pick specific date to mark this task completed"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Attached Reference / Working CAD Files (Always visible for all statuses) */}

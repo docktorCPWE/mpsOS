@@ -1677,8 +1677,8 @@ export default function App() {
               return { 
                 ...t, 
                 status: newStatus,
-                completedAt: newStatus === 'Completed' ? new Date().toISOString() : t.completedAt,
-                completedBy: newStatus === 'Completed' ? currentStaff.name : t.completedBy
+                completedAt: newStatus === 'Completed' ? (t.completedAt || new Date().toISOString()) : t.completedAt,
+                completedBy: newStatus === 'Completed' ? (t.completedBy || currentStaff.name) : t.completedBy
               };
             }
             return t;
@@ -1749,7 +1749,7 @@ export default function App() {
     if (!targetJob) return;
 
     let targetTaskTitle = '';
-    const nowIso = new Date().toISOString();
+    const nowIso = payload.completedAtDate || new Date().toISOString();
 
     const updatedJobs = jobs.map(j => {
       if (j.id === payload.jobId && j.delegated_tasks) {

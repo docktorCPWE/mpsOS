@@ -39,6 +39,7 @@ export interface CompleteTaskPayload {
   notifyDelegator: boolean;
   delegatorName: string;
   delegatorEmail?: string;
+  completedAtDate?: string;
 }
 
 interface CompleteTaskModalProps {
@@ -89,6 +90,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
   const [addToDeliverables, setAddToDeliverables] = useState(true);
   const [loggedHours, setLoggedHours] = useState('');
   const [timeTaskDescription, setTimeTaskDescription] = useState('');
+  const [completionDate, setCompletionDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [notifyDelegator, setNotifyDelegator] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -286,7 +288,8 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       loggedTaskDescription: timeTaskDescription.trim() || `Drafting & Review Prep: ${task.componentTitle}`,
       notifyDelegator,
       delegatorName: delegator,
-      delegatorEmail: delegatorStaff?.email || `${delegator.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`
+      delegatorEmail: delegatorStaff?.email || `${delegator.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
+      completedAtDate: completionDate ? new Date(completionDate + 'T12:00:00').toISOString() : new Date().toISOString()
     };
 
     onCompleteTask(payload);
@@ -623,6 +626,23 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
                 Publish uploaded files directly to project's official <strong>Deliverables / Drawing Sheets</strong> tab
               </span>
             </label>
+          </div>
+
+          {/* Date Task Was Completed Field */}
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div>
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                <span>Date Task Completed</span>
+              </label>
+              <p className="text-[11px] text-slate-500">Record when this delegated component was finished</p>
+            </div>
+            <input
+              type="date"
+              value={completionDate}
+              onChange={(e) => setCompletionDate(e.target.value)}
+              className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+            />
           </div>
 
           {/* Optional Quick Time Log Entry */}
