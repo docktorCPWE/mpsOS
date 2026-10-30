@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye, List, LayoutGrid } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
@@ -10,6 +10,7 @@ import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 import { deleteFileFromJobInFirestore } from '../services/firebase';
 import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab } from '../utils/attachmentUtils';
 import { UniversalFileViewerModal } from './UniversalFileViewerModal';
+import { FileThumbnailPreview } from './FileThumbnailPreview';
 
 interface FileToDeleteInfo {
   type: 'task_attachment' | 'deliverable';
@@ -132,6 +133,10 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [fileToDelete, setFileToDelete] = useState<FileToDeleteInfo | null>(null);
   const [isDeletingFile, setIsDeletingFile] = useState(false);
   const [deleteFileFeedback, setDeleteFileFeedback] = useState<string | null>(null);
+
+  // Deliverable Sheets Tab View Preferences
+  const [deliverablesView, setDeliverablesView] = useState<'cards' | 'list'>('cards');
+  const [delegatedAttachmentsView, setDelegatedAttachmentsView] = useState<'list' | 'grid'>('list');
 
   // Delegated Task Date & Time Editing States & Handlers
   const [editingCompletionTaskId, setEditingCompletionTaskId] = useState<string | null>(null);
@@ -3374,115 +3379,234 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 </div>
               </form>
 
-              {/* Published Deliverables & CAD Renders Cards */}
+              {/* Published Deliverables & CAD Renders */}
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 font-mono">
-                    Published Deliverables & Renderings ({job.deliverables.length})
-                  </h4>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-mono flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-blue-600" />
+                      <span>Published Deliverables & Milestone Packages ({job.deliverables.length})</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Formal client-facing drawing sheets, 3D renderings, and revisions shared for customer portal review.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setDeliverablesView('cards')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        deliverablesView === 'cards'
+                          ? 'bg-white text-blue-700 shadow-2xs border border-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Card view with preview thumbnail"
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>Cards</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeliverablesView('list')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        deliverablesView === 'list'
+                          ? 'bg-white text-blue-700 shadow-2xs border border-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Compact list view"
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span>List</span>
+                    </button>
+                  </div>
                 </div>
 
-                {job.deliverables.map(file => (
-                  <div key={file.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-blue-300 transition space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="bg-blue-100 text-blue-800 font-mono font-bold text-[10px] px-2 py-0.5 rounded border border-blue-200">
-                          {file.category}
-                        </span>
-                        <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded">
-                          {file.version}
-                        </span>
-                        <h4 className="font-bold text-slate-900 text-sm">{file.title}</h4>
-                      </div>
+                {/* Cards View */}
+                {deliverablesView === 'cards' && (
+                  <div className="space-y-4">
+                    {job.deliverables.map(file => (
+                      <div key={file.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-blue-300 transition space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="bg-blue-100 text-blue-800 font-mono font-bold text-[10px] px-2 py-0.5 rounded border border-blue-200">
+                              {file.category}
+                            </span>
+                            <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded">
+                              {file.version}
+                            </span>
+                            <h4 className="font-bold text-slate-900 text-sm">{file.title}</h4>
+                          </div>
 
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
-                        <span>Uploaded {new Date(file.uploadedAt).toLocaleDateString()}</span>
-                        <span>• {file.fileSize}</span>
-                        <button
-                          onClick={() => handleDeleteDeliverable(file.id)}
-                          className="text-slate-400 hover:text-red-600 transition p-1 ml-2"
-                          title="Delete deliverable"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                            <span>Uploaded {new Date(file.uploadedAt).toLocaleDateString()}</span>
+                            <span>• {file.fileSize}</span>
+                            <button
+                              onClick={() => handleDeleteDeliverable(file.id)}
+                              className="text-slate-400 hover:text-red-600 transition p-1 ml-2 cursor-pointer"
+                              title="Delete deliverable"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
 
-                    {/* Preview Thumbnail & Drafter Change Notes */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                      {/* Left: File / Image Preview Thumbnail */}
-                      <div className="md:col-span-5 relative group bg-slate-900 rounded-xl overflow-hidden border border-slate-200 aspect-video flex items-center justify-center">
-                        {file.fileUrl ? (
-                          <>
-                            <img src={file.fileUrl} alt={file.title} className="w-full h-full object-cover transition duration-200 group-hover:scale-105" />
-                            <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                        {/* Preview Thumbnail & Drafter Change Notes */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                          {/* Left: Dynamic PDF Canvas / Image Preview Thumbnail */}
+                          <div className="md:col-span-5 aspect-video w-full rounded-xl overflow-hidden border border-slate-200 shadow-2xs">
+                            <FileThumbnailPreview
+                              url={file.fileUrl}
+                              filename={file.fileName}
+                              title={file.title}
+                              category={file.category}
+                              previewType={file.previewType}
+                              className="w-full h-full"
+                              onExpand={() => setPreviewModalFile(file)}
+                            />
+                          </div>
+
+                          {/* Right: Notes & Actions */}
+                          <div className="md:col-span-7 space-y-3">
+                            {/* Drafter Notes Box */}
+                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
+                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-blue-600" />
+                                <span>Drafter Revision & Rendering Notes:</span>
+                              </p>
+                              <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                                {file.changeNotes ? file.changeNotes : 'No specific change notes indicated for this version.'}
+                              </p>
+                              {file.authorDrafter && (
+                                <p className="text-[10px] text-slate-400 font-mono pt-1">
+                                  — Notes left by {file.authorDrafter}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-1 flex-wrap">
+                              {file.fileUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewModalFile(file)}
+                                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                  <span>View Full Resolution</span>
+                                </button>
+                              )}
                               <button
-                                onClick={() => setPreviewModalFile(file)}
-                                className="bg-white/90 hover:bg-white text-slate-900 text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-md flex items-center gap-1.5"
+                                type="button"
+                                onClick={() => downloadFileFromUrl(file.fileUrl, file.fileName || `${file.title}.pdf`)}
+                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3.5 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1.5 cursor-pointer"
                               >
-                                <Maximize2 className="w-3.5 h-3.5" />
-                                <span>Expand Image</span>
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Download Asset</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDeliverable(file.id)}
+                                className="bg-red-50 hover:bg-red-600 text-red-700 hover:text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition border border-red-200 flex items-center gap-1.5 cursor-pointer group/trashdel"
+                                title="Delete deliverable permanently from project & database"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 transition group-hover/trashdel:scale-110" />
+                                <span>Delete</span>
                               </button>
                             </div>
-                          </>
-                        ) : (
-                          <div className="p-6 text-center text-slate-400">
-                            <FileText className="w-8 h-8 mx-auto mb-1 text-slate-500" />
-                            <p className="text-xs font-medium text-slate-300">{file.fileName || 'CAD Specification Sheet'}</p>
                           </div>
-                        )}
-                      </div>
-
-                      {/* Right: Notes & Actions */}
-                      <div className="md:col-span-7 space-y-3">
-                        {/* Drafter Notes Box */}
-                        <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-blue-600" />
-                            <span>Drafter Revision & Rendering Notes:</span>
-                          </p>
-                          <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                            {file.changeNotes ? file.changeNotes : 'No specific change notes indicated for this version.'}
-                          </p>
-                          {file.authorDrafter && (
-                            <p className="text-[10px] text-slate-400 font-mono pt-1">
-                              — Notes left by {file.authorDrafter}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 pt-1">
-                          {file.fileUrl && (
-                            <button
-                              onClick={() => setPreviewModalFile(file)}
-                              className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1.5"
-                            >
-                              <Maximize2 className="w-3.5 h-3.5" />
-                              <span>View Full Resolution</span>
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => downloadFileFromUrl(file.fileUrl, file.fileName || `${file.title}.pdf`)}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3.5 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download Asset</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteDeliverable(file.id)}
-                            className="bg-red-50 hover:bg-red-600 text-red-700 hover:text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition border border-red-200 flex items-center gap-1.5 cursor-pointer group/trashdel"
-                            title="Delete deliverable permanently from project & database"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 transition group-hover/trashdel:scale-110" />
-                            <span>Delete</span>
-                          </button>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* List View for Deliverables */}
+                {deliverablesView === 'list' && (
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono text-[10px] uppercase">
+                          <tr>
+                            <th className="py-2.5 px-3">Deliverable / Sheet</th>
+                            <th className="py-2.5 px-3">Category & Version</th>
+                            <th className="py-2.5 px-3">Uploaded Date</th>
+                            <th className="py-2.5 px-3">Size</th>
+                            <th className="py-2.5 px-3">Author</th>
+                            <th className="py-2.5 px-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {job.deliverables.map(file => (
+                            <tr key={file.id} className="hover:bg-slate-50/80 transition">
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center shrink-0">
+                                    <FileText className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-slate-900 truncate" title={file.title}>
+                                      {file.title}
+                                    </p>
+                                    <p className="text-[10px] text-slate-400 truncate max-w-[240px]">
+                                      {file.changeNotes || file.fileName || 'No notes'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="bg-blue-100 text-blue-800 font-mono font-bold text-[10px] px-2 py-0.5 rounded border border-blue-200 mr-1.5">
+                                  {file.category}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">{file.version}</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
+                                {new Date(file.uploadedAt).toLocaleDateString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                                {file.fileSize}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-600 text-[11px] whitespace-nowrap">
+                                {file.authorDrafter || '—'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {file.fileUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPreviewModalFile(file)}
+                                      className="text-slate-800 hover:text-blue-700 bg-slate-100 hover:bg-blue-50 px-2 py-1 rounded-lg border border-slate-200 transition text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                      title="Preview full resolution"
+                                    >
+                                      <Maximize2 className="w-3 h-3" />
+                                      <span>View</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadFileFromUrl(file.fileUrl, file.fileName || `${file.title}.pdf`)}
+                                    className="text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg border border-blue-200 transition text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                    title="Download asset"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    <span>Download</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDeliverable(file.id)}
+                                    className="text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-1.5 py-1 rounded-lg border border-red-200 transition text-[11px] font-bold flex items-center cursor-pointer"
+                                    title="Delete deliverable"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                ))}
+                )}
 
                 {job.deliverables.length === 0 && (
                   <div className="bg-white p-8 rounded-2xl border border-dashed border-slate-300 text-center space-y-2">
@@ -3492,98 +3616,321 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                   </div>
                 )}
 
-                {/* Delegated Sub-Task & Working Reference Files Section */}
+                {/* BOTTOM SECTION: Delegated Sub-Task & Working Reference Files Section */}
                 {job.delegated_tasks && job.delegated_tasks.some(t => t.attachments && t.attachments.length > 0) && (
                   <div className="space-y-3 pt-6 border-t border-slate-200">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-mono flex items-center gap-2">
-                        <Paperclip className="w-4 h-4 text-blue-600" />
-                        <span>Delegated Component & Working Attachments</span>
-                      </h4>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-mono flex items-center gap-2">
+                          <Paperclip className="w-4 h-4 text-blue-600" />
+                          <span>Delegated Component & Working Attachments</span>
+                          <span className="bg-blue-50 text-blue-700 border border-blue-200 font-mono text-[10px] px-2 py-0.5 rounded-full">
+                            {job.delegated_tasks.reduce((sum, t) => sum + (t.attachments?.length || 0), 0)} files
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          Internal reference assets, customer meeting notes, and CAD markups attached to delegated drafter tasks.
+                        </p>
+                      </div>
+
+                      {/* View Switcher: List View (default) vs Grid View */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => setDelegatedAttachmentsView('list')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            delegatedAttachmentsView === 'list'
+                              ? 'bg-white text-blue-700 shadow-2xs border border-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                          title="List view with dates attached"
+                        >
+                          <List className="w-3.5 h-3.5" />
+                          <span>List View</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDelegatedAttachmentsView('grid')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            delegatedAttachmentsView === 'grid'
+                              ? 'bg-white text-blue-700 shadow-2xs border border-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                          title="Grid card view"
+                        >
+                          <LayoutGrid className="w-3.5 h-3.5" />
+                          <span>Grid View</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {job.delegated_tasks
-                        .filter(t => t.attachments && t.attachments.length > 0)
-                        .flatMap(task =>
-                          (task.attachments || []).map(att => ({
-                            task,
-                            att
-                          }))
-                        )
-                        .map(({ task, att }) => (
-                          <div
-                            key={`${task.id}-${att.id}`}
-                            className="bg-white p-3.5 rounded-xl border border-slate-200 hover:border-blue-300 shadow-2xs transition flex items-center justify-between gap-3"
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-200">
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="font-bold text-slate-900 text-xs truncate" title={att.name}>
-                                  {att.name}
-                                </p>
-                                <p className="text-[10px] text-slate-500 flex items-center gap-1.5 truncate">
-                                  <span>{att.size}</span>
-                                  <span>•</span>
-                                  <span className="text-blue-700 font-medium">Task: {task.componentTitle}</span>
-                                  <span>({task.assignedTo})</span>
-                                </p>
-                              </div>
-                            </div>
+                    {/* 1. LIST VIEW (Default requested by user) with Date Attached Column */}
+                    {delegatedAttachmentsView === 'list' && (
+                      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono text-[10px] uppercase">
+                              <tr>
+                                <th className="py-2.5 px-3">Attached File</th>
+                                <th className="py-2.5 px-3">Delegated Task & Assignee</th>
+                                <th className="py-2.5 px-3">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-blue-600" />
+                                    <span>Date Attached</span>
+                                  </div>
+                                </th>
+                                <th className="py-2.5 px-3">Size</th>
+                                <th className="py-2.5 px-3 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {job.delegated_tasks
+                                .filter(t => t.attachments && t.attachments.length > 0)
+                                .flatMap(task =>
+                                  (task.attachments || []).map(att => ({
+                                    task,
+                                    att
+                                  }))
+                                )
+                                .map(({ task, att }) => {
+                                  const rawDate = att.uploadedAt || task.delegatedAt;
+                                  const dateObj = rawDate ? new Date(rawDate) : new Date();
+                                  const formattedDate = dateObj.toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  });
+                                  const formattedTime = dateObj.toLocaleTimeString('en-US', {
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                  });
 
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {att.url && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewModalFile({
-                                    id: att.id,
-                                    title: `${task.componentTitle}: ${att.name}`,
-                                    category: 'CAD / DWG File',
-                                    version: 'v1.0 (Task Reference)',
-                                    uploadedAt: task.delegatedAt,
-                                    fileSize: att.size,
-                                    previewType: att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/) ? 'render_image' : 'cad_file',
-                                    fileUrl: att.url,
-                                    fileName: att.name,
-                                    changeNotes: `Attached for delegated component "${task.componentTitle}". Assigned to ${task.assignedTo}.`,
-                                    authorDrafter: task.delegatedBy
-                                  })}
-                                  className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Eye className="w-3 h-3" />
-                                  <span>View</span>
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => downloadFileFromUrl(att.url, att.name)}
-                                className="text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer"
-                                title="Download file"
-                              >
-                                <Download className="w-3 h-3" />
-                                <span>Download</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setFileToDelete({
-                                  type: 'task_attachment',
-                                  taskId: task.id,
-                                  taskTitle: task.componentTitle,
-                                  fileId: att.id,
-                                  fileName: att.name,
-                                  fileSize: att.size
+                                  const isPdf = att.name.toLowerCase().endsWith('.pdf');
+                                  const isImg = att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/);
+
+                                  return (
+                                    <tr key={`${task.id}-${att.id}`} className="hover:bg-slate-50/90 transition group">
+                                      {/* File Name & Format Badge */}
+                                      <td className="py-2.5 px-3">
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                                            isPdf
+                                              ? 'bg-red-50 text-red-600 border-red-200'
+                                              : isImg
+                                              ? 'bg-blue-50 text-blue-600 border-blue-200'
+                                              : 'bg-purple-50 text-purple-600 border-purple-200'
+                                          }`}>
+                                            <FileText className="w-4 h-4" />
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="font-bold text-slate-900 truncate max-w-[200px] sm:max-w-[280px]" title={att.name}>
+                                              {att.name}
+                                            </p>
+                                            <span className="text-[10px] text-slate-400 font-mono">
+                                              {isPdf ? 'PDF Document' : isImg ? 'Image / Redline' : 'Drafting Attachment'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </td>
+
+                                      {/* Delegated Task & Assignee */}
+                                      <td className="py-2.5 px-3">
+                                        <div className="space-y-0.5">
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className="bg-blue-100 text-blue-800 font-mono font-bold text-[10px] px-1.5 py-0.5 rounded border border-blue-200">
+                                              Task: {task.componentTitle}
+                                            </span>
+                                            <span className="text-[11px] font-medium text-slate-700">
+                                              {task.assignedTo}
+                                            </span>
+                                          </div>
+                                          {task.delegatedBy && (
+                                            <p className="text-[10px] text-slate-400">
+                                              Delegated by {task.delegatedBy}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </td>
+
+                                      {/* Date Attached */}
+                                      <td className="py-2.5 px-3 whitespace-nowrap">
+                                        <div className="text-[11px] font-mono text-slate-700 flex items-center gap-1.5">
+                                          <Calendar className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                          <span>{formattedDate}</span>
+                                          <span className="text-slate-400">• {formattedTime}</span>
+                                        </div>
+                                      </td>
+
+                                      {/* Size */}
+                                      <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                                        {att.size}
+                                      </td>
+
+                                      {/* Actions */}
+                                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          {att.url && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setPreviewModalFile({
+                                                id: att.id,
+                                                title: `${task.componentTitle}: ${att.name}`,
+                                                category: 'CAD / DWG File',
+                                                version: 'v1.0 (Task Reference)',
+                                                uploadedAt: rawDate,
+                                                fileSize: att.size,
+                                                previewType: isImg ? 'render_image' : isPdf ? 'pdf_spec' : 'cad_file',
+                                                fileUrl: att.url,
+                                                fileName: att.name,
+                                                changeNotes: `Attached for delegated component "${task.componentTitle}". Assigned to ${task.assignedTo}.`,
+                                                authorDrafter: task.delegatedBy
+                                              })}
+                                              className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition flex items-center gap-1 cursor-pointer"
+                                              title="View file preview"
+                                            >
+                                              <Eye className="w-3 h-3" />
+                                              <span>View</span>
+                                            </button>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => downloadFileFromUrl(att.url, att.name)}
+                                            className="text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer"
+                                            title="Download file"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                            <span>Download</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setFileToDelete({
+                                              type: 'task_attachment',
+                                              taskId: task.id,
+                                              taskTitle: task.componentTitle,
+                                              fileId: att.id,
+                                              fileName: att.name,
+                                              fileSize: att.size
+                                            })}
+                                            className="text-[11px] font-bold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-2 py-1 rounded-lg border border-red-200 transition flex items-center gap-1 cursor-pointer group/trash"
+                                            title="Delete file permanently from project & database"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5 transition group-hover/trash:scale-110" />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
                                 })}
-                                className="text-[11px] font-bold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-2 py-1 rounded-lg border border-red-200 transition flex items-center gap-1 cursor-pointer group/trash"
-                                title="Delete file permanently from project & database"
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. GRID VIEW (Optional toggle) with prominent Date Attached */}
+                    {delegatedAttachmentsView === 'grid' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {job.delegated_tasks
+                          .filter(t => t.attachments && t.attachments.length > 0)
+                          .flatMap(task =>
+                            (task.attachments || []).map(att => ({
+                              task,
+                              att
+                            }))
+                          )
+                          .map(({ task, att }) => {
+                            const rawDate = att.uploadedAt || task.delegatedAt;
+                            const dateObj = rawDate ? new Date(rawDate) : new Date();
+                            const formattedDate = dateObj.toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            });
+
+                            return (
+                              <div
+                                key={`${task.id}-${att.id}`}
+                                className="bg-white p-3.5 rounded-xl border border-slate-200 hover:border-blue-300 shadow-2xs transition flex flex-col justify-between gap-3"
                               >
-                                <Trash2 className="w-3.5 h-3.5 transition group-hover/trash:scale-110" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
+                                <div className="flex items-start justify-between gap-2.5">
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-200">
+                                      <FileText className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="font-bold text-slate-900 text-xs truncate" title={att.name}>
+                                        {att.name}
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 flex items-center gap-1.5 truncate">
+                                        <span>{att.size}</span>
+                                        <span>•</span>
+                                        <span className="text-blue-700 font-medium">Task: {task.componentTitle}</span>
+                                        <span>({task.assignedTo})</span>
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] text-slate-500">
+                                  <span className="flex items-center gap-1 font-mono">
+                                    <Calendar className="w-3 h-3 text-blue-600" />
+                                    <span>Attached {formattedDate}</span>
+                                  </span>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {att.url && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPreviewModalFile({
+                                          id: att.id,
+                                          title: `${task.componentTitle}: ${att.name}`,
+                                          category: 'CAD / DWG File',
+                                          version: 'v1.0 (Task Reference)',
+                                          uploadedAt: rawDate,
+                                          fileSize: att.size,
+                                          previewType: att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/) ? 'render_image' : 'cad_file',
+                                          fileUrl: att.url,
+                                          fileName: att.name,
+                                          changeNotes: `Attached for delegated component "${task.componentTitle}". Assigned to ${task.assignedTo}.`,
+                                          authorDrafter: task.delegatedBy
+                                        })}
+                                        className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                        <span>View</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadFileFromUrl(att.url, att.name)}
+                                      className="text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer"
+                                      title="Download file"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      <span>Download</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFileToDelete({
+                                        type: 'task_attachment',
+                                        taskId: task.id,
+                                        taskTitle: task.componentTitle,
+                                        fileId: att.id,
+                                        fileName: att.name,
+                                        fileSize: att.size
+                                      })}
+                                      className="text-[11px] font-bold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-2 py-1 rounded-lg border border-red-200 transition flex items-center gap-1 cursor-pointer group/trash"
+                                      title="Delete file permanently from project & database"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 transition group-hover/trash:scale-110" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -4,6 +4,7 @@ import { Job, PinnedLocation, DeliverableFile } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
 import { UniversalFileViewerModal } from './UniversalFileViewerModal';
+import { FileThumbnailPreview } from './FileThumbnailPreview';
 
 interface CustomerPortalProps {
   job: Job;
@@ -331,26 +332,16 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                 </div>
 
                 {/* Preview Thumbnail Box */}
-                <div className="relative group bg-slate-900 rounded-xl overflow-hidden border border-slate-200 aspect-video flex items-center justify-center">
-                  {file.fileUrl ? (
-                    <>
-                      <img src={file.fileUrl} alt={file.title} className="w-full h-full object-cover transition duration-200 group-hover:scale-105" />
-                      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => setSelectedDeliverable(file)}
-                          className="bg-white text-slate-900 text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow-md flex items-center gap-1.5"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Expand Full View</span>
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="p-6 text-center text-slate-400">
-                      <FileText className="w-8 h-8 mx-auto mb-1 text-slate-500" />
-                      <p className="text-xs font-medium text-slate-300">{file.fileName || 'CAD Spec Sheet'}</p>
-                    </div>
-                  )}
+                <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-200 shadow-2xs">
+                  <FileThumbnailPreview
+                    url={file.fileUrl}
+                    filename={file.fileName}
+                    title={file.title}
+                    category={file.category}
+                    previewType={file.previewType}
+                    className="w-full h-full"
+                    onExpand={() => setSelectedDeliverable(file)}
+                  />
                 </div>
 
                 {/* Drafter Revision & Rendering Notes */}
