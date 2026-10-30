@@ -8,6 +8,7 @@ import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
 import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab } from '../utils/attachmentUtils';
+import { UniversalFileViewerModal } from './UniversalFileViewerModal';
 
 interface DrafterDashboardProps {
   jobs: Job[];
@@ -3218,112 +3219,19 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
       )}
 
-      {/* Lightbox File / Attachment Preview Modal in Drafter Dashboard */}
+      {/* Universal High-Definition File & PDF Canvas Viewer Modal in Drafter Dashboard */}
       {previewingAttachment && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full overflow-hidden text-white shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-mono font-bold text-blue-400 uppercase bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800">
-                  {previewingAttachment.jobNumber ? `Job #${previewingAttachment.jobNumber}` : 'Attached File'}
-                </span>
-                <span className="font-bold text-sm text-white truncate max-w-md">
-                  {previewingAttachment.file.name}
-                </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  ({previewingAttachment.file.size})
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPreviewingAttachment(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[320px]">
-              {(previewingAttachment.file.url && previewingAttachment.file.url.startsWith('data:image')) || previewingAttachment.file.name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|svg)$/) ? (
-                <img
-                  src={attachmentBlobUrl || previewingAttachment.file.url}
-                  alt={previewingAttachment.file.name}
-                  className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
-                />
-              ) : previewingAttachment.file.url && (previewingAttachment.file.url.startsWith('data:application/pdf') || previewingAttachment.file.name.toLowerCase().endsWith('.pdf')) ? (
-                <div className="w-full flex flex-col items-center space-y-2">
-                  <iframe
-                    src={attachmentBlobUrl || previewingAttachment.file.url}
-                    title={previewingAttachment.file.name}
-                    className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
-                  />
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between w-full px-1">
-                    <span>PDF Plan Sheet: <strong>{previewingAttachment.file.name}</strong></span>
-                    <button
-                      type="button"
-                      onClick={() => openFileInNewTab(previewingAttachment.file.url, previewingAttachment.file.name)}
-                      className="text-blue-400 hover:text-blue-300 font-semibold underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>Open PDF in Native Browser Window</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-12 text-center text-slate-300 space-y-3">
-                  <div className="w-16 h-16 rounded-2xl bg-blue-950/80 border border-blue-700/60 text-blue-400 flex items-center justify-center mx-auto">
-                    <FileText className="w-8 h-8" />
-                  </div>
-                  <div>
-                    <p className="text-base font-bold text-white">{previewingAttachment.file.name}</p>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5">{previewingAttachment.file.size} • {previewingAttachment.file.type || 'Attached File'}</p>
-                  </div>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    Binary or CAD drawing files can be downloaded directly to open in your CAD software (AutoCAD, Chief Architect, Revit).
-                  </p>
-                </div>
-              )}
-
-              <div className="mt-4 bg-slate-950 border border-slate-800 p-3 rounded-xl text-xs w-full text-slate-300 flex items-center justify-between gap-2">
-                <span className="text-slate-400">Attached to Component: <strong className="text-white">{previewingAttachment.taskTitle}</strong></span>
-                <span className="text-[10px] text-slate-500 font-mono">{previewingAttachment.file.type || 'Attached File'}</span>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
-              <div className="text-xs text-slate-400 font-mono truncate max-w-xs">
-                {previewingAttachment.file.name}
-              </div>
-              <div className="flex items-center gap-2">
-                {previewingAttachment.file.url && (
-                  <button
-                    type="button"
-                    onClick={() => openFileInNewTab(previewingAttachment.file.url, previewingAttachment.file.name)}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open in Tab</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => downloadFileFromUrl(previewingAttachment.file.url, previewingAttachment.file.name)}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download File</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewingAttachment(null)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <UniversalFileViewerModal
+          file={{
+            id: previewingAttachment.file.id,
+            name: previewingAttachment.file.name,
+            url: previewingAttachment.file.url,
+            size: previewingAttachment.file.size,
+            type: previewingAttachment.file.type
+          }}
+          subtitle={`Attached to Task: ${previewingAttachment.taskTitle}${previewingAttachment.jobNumber ? ` • Job #${previewingAttachment.jobNumber}` : ''}`}
+          onClose={() => setPreviewingAttachment(null)}
+        />
       )}
 
     </div>

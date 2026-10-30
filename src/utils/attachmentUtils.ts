@@ -66,7 +66,32 @@ export async function processFileForAttachment(file: File): Promise<{
     : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
   if (isImage) {
-    const compressedUrl = await compressImageFile(file);
+    // If under 2.5 MB, preserve pristine original raw bytes without any canvas re-compression
+    if (file.size <= 2.5 * 1024 * 1024) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          resolve({
+            url: (e.target?.result as string) || '',
+            name: file.name,
+            size: formattedSize,
+            type: file.type || 'image/jpeg'
+          });
+        };
+        reader.onerror = () => {
+          resolve({
+            url: '',
+            name: file.name,
+            size: formattedSize,
+            type: file.type || 'image/jpeg'
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Only if image is very large (> 2.5MB), use high-definition canvas scaling
+    const compressedUrl = await compressImageFile(file, 2600, 0.90);
     return {
       url: compressedUrl,
       name: file.name,
@@ -75,7 +100,7 @@ export async function processFileForAttachment(file: File): Promise<{
     };
   }
 
-  // Non-image files (PDFs, CAD DWG, DOCX, TXT, etc.)
+  // Non-image files (PDFs, CAD DWG, DOCX, TXT, etc.) - preserve 100% exact raw bytes
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -205,7 +230,49 @@ export function downloadFileFromUrl(url: string, filename: string): void {
     }
   }
 
-  // 2. Standard Blob or HTTP URL
+  // 2. Local relative URLs or HTTP URLs: fetch blob first to ensure correct download filename
+  if (url.startsWith('/') || url.startsWith('http://') || url.startsWith('https://')) {
+    fetch(url)
+      .then(res => res.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobUrl;
+        a.download = safeName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+          } catch {
+            // ignore
+          }
+        }, 1500);
+      })
+      .catch(() => {
+        // Fallback to direct anchor navigation
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = safeName;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a);
+          } catch {
+            // ignore
+          }
+        }, 1500);
+      });
+    return;
+  }
+
+  // 3. Standard Blob or direct URL fallback
   try {
     const a = document.createElement('a');
     a.style.display = 'none';

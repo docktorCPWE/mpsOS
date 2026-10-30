@@ -3,6 +3,7 @@ import { CheckCircle2, Clock, FileText, Send, Download, Sparkles, MessageSquare,
 import { Job, PinnedLocation, DeliverableFile } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
+import { UniversalFileViewerModal } from './UniversalFileViewerModal';
 
 interface CustomerPortalProps {
   job: Job;
@@ -616,68 +617,24 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
         </div>
       )}
 
-      {/* MODAL 3: LIGHTBOX DELIVERABLE & IMAGE PREVIEW MODAL */}
+      {/* MODAL 3: UNIVERSAL HIGH-DEFINITION DELIVERABLE & IMAGE PREVIEW MODAL */}
       {selectedDeliverable && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 font-sans">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full overflow-hidden text-white shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-blue-400 uppercase bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800 mr-2">
-                  {selectedDeliverable.category} ({selectedDeliverable.version})
-                </span>
-                <span className="font-bold text-sm text-white">{selectedDeliverable.title}</span>
-              </div>
-              <button
-                onClick={() => setSelectedDeliverable(null)}
-                className="p-1 text-slate-400 hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[300px]">
-              {selectedDeliverable.fileUrl ? (
-                <img
-                  src={selectedDeliverable.fileUrl}
-                  alt={selectedDeliverable.title}
-                  className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
-                />
-              ) : (
-                <div className="p-12 text-center text-slate-400">
-                  <FileText className="w-12 h-12 mx-auto mb-2 text-slate-500" />
-                  <p className="text-sm font-semibold">{selectedDeliverable.fileName || 'CAD Drawing File'}</p>
-                </div>
-              )}
-
-              {selectedDeliverable.changeNotes && (
-                <div className="mt-4 bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-xs w-full text-slate-200">
-                  <p className="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    <span>Drafter Revision & Change Notes:</span>
-                  </p>
-                  <p className="leading-relaxed font-medium">{selectedDeliverable.changeNotes}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end gap-2">
-              <a
-                href={selectedDeliverable.fileUrl || '#'}
-                download={selectedDeliverable.fileName || `${selectedDeliverable.title}.jpg`}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download High-Res Original</span>
-              </a>
-              <button
-                onClick={() => setSelectedDeliverable(null)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2 rounded-xl transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <UniversalFileViewerModal
+          file={{
+            id: selectedDeliverable.id,
+            name: selectedDeliverable.fileName || selectedDeliverable.title,
+            url: selectedDeliverable.fileUrl,
+            size: selectedDeliverable.fileSize,
+            title: selectedDeliverable.title,
+            category: selectedDeliverable.category,
+            version: selectedDeliverable.version,
+            uploadedAt: selectedDeliverable.uploadedAt,
+            authorDrafter: selectedDeliverable.authorDrafter,
+            notes: selectedDeliverable.changeNotes
+          }}
+          subtitle={selectedDeliverable.category ? `${selectedDeliverable.category} • ${selectedDeliverable.version}` : undefined}
+          onClose={() => setSelectedDeliverable(null)}
+        />
       )}
 
       {/* Customer Contact Update Modal */}

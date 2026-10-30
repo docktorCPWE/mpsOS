@@ -9,6 +9,7 @@ import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, c
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 import { deleteFileFromJobInFirestore } from '../services/firebase';
 import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab } from '../utils/attachmentUtils';
+import { UniversalFileViewerModal } from './UniversalFileViewerModal';
 
 interface FileToDeleteInfo {
   type: 'task_attachment' | 'deliverable';
@@ -4916,130 +4917,57 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         </div>
       )}
 
-      {/* Lightbox Image Preview Modal */}
-      {previewModalFile && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full overflow-hidden text-white shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-blue-400 uppercase bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800 mr-2">
-                  {previewModalFile.category} ({previewModalFile.version})
-                </span>
-                <span className="font-bold text-sm text-white">{previewModalFile.title}</span>
-              </div>
-              <button
-                onClick={() => setPreviewModalFile(null)}
-                className="p-1 text-slate-400 hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Universal High-Definition File & PDF Canvas Viewer Modal */}
+      {previewModalFile && (() => {
+        const matchingTask = (job.delegated_tasks || []).find(t => 
+          (t.attachments || []).some(a => a.id === previewModalFile.id)
+        );
+        const sub = matchingTask 
+          ? `Attached to Task: ${matchingTask.componentTitle} • Assigned to ${matchingTask.assignedTo}` 
+          : previewModalFile.category ? `${previewModalFile.category} • ${previewModalFile.version}` : undefined;
 
-            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-black/40 min-h-[300px]">
-              {previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:image') || previewModalFile.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|svg)$/)) ? (
-                <img
-                  src={previewModalBlobUrl || previewModalFile.fileUrl}
-                  alt={previewModalFile.title}
-                  className="max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl"
-                />
-              ) : previewModalFile.fileUrl && (previewModalFile.fileUrl.startsWith('data:application/pdf') || previewModalFile.fileName?.toLowerCase().endsWith('.pdf')) ? (
-                <div className="w-full flex flex-col items-center space-y-2">
-                  <iframe
-                    src={previewModalBlobUrl || previewModalFile.fileUrl}
-                    title={previewModalFile.fileName || previewModalFile.title}
-                    className="w-full h-[60vh] rounded-lg border border-slate-800 bg-white"
-                  />
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between w-full px-1">
-                    <span>PDF Plan Sheet: <strong>{previewModalFile.fileName || previewModalFile.title}</strong></span>
-                    <button
-                      type="button"
-                      onClick={() => openFileInNewTab(previewModalFile.fileUrl, previewModalFile.fileName || previewModalFile.title)}
-                      className="text-blue-400 hover:text-blue-300 font-semibold underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>Open PDF in Native Browser Window</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-12 text-center text-slate-400 space-y-2">
-                  <FileText className="w-12 h-12 mx-auto text-slate-500" />
-                  <p className="text-sm font-semibold text-white">{previewModalFile.fileName || 'CAD Drawing File'}</p>
-                  <p className="text-xs text-slate-400 font-mono">{previewModalFile.fileSize} • {previewModalFile.category}</p>
-                </div>
-              )}
+        const cleanNotes = previewModalFile.changeNotes && !previewModalFile.changeNotes.startsWith('Attached for delegated component')
+          ? previewModalFile.changeNotes
+          : undefined;
 
-              {previewModalFile.changeNotes && (
-                <div className="mt-4 bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-xs w-full text-slate-200">
-                  <p className="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    <span>Drafter Notes & Rendering Changes:</span>
-                  </p>
-                  <p className="leading-relaxed font-medium">{previewModalFile.changeNotes}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const matchingTask = (job.delegated_tasks || []).find(t => 
-                    (t.attachments || []).some(a => a.id === previewModalFile.id)
-                  );
-                  if (matchingTask) {
-                    setFileToDelete({
-                      type: 'task_attachment',
-                      taskId: matchingTask.id,
-                      taskTitle: matchingTask.componentTitle,
-                      fileId: previewModalFile.id,
-                      fileName: previewModalFile.fileName || previewModalFile.title,
-                      fileSize: previewModalFile.fileSize
-                    });
-                  } else {
-                    setFileToDelete({
-                      type: 'deliverable',
-                      fileId: previewModalFile.id,
-                      fileName: previewModalFile.fileName || previewModalFile.title,
-                      fileSize: previewModalFile.fileSize
-                    });
-                  }
-                }}
-                className="bg-red-950/40 hover:bg-red-600 text-red-400 hover:text-white border border-red-800/60 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer group/prevdel"
-                title="Delete file permanently from project & database"
-              >
-                <Trash2 className="w-4 h-4 transition group-hover/prevdel:scale-110" />
-                <span>Delete File</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => openFileInNewTab(previewModalFile.fileUrl, previewModalFile.fileName || previewModalFile.title)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open in Tab</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadFileFromUrl(previewModalFile.fileUrl, previewModalFile.fileName || `${previewModalFile.title}.pdf`)}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download High-Res Original</span>
-                </button>
-                <button
-                  onClick={() => setPreviewModalFile(null)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2 rounded-xl transition"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        return (
+          <UniversalFileViewerModal
+            file={{
+              id: previewModalFile.id,
+              name: previewModalFile.fileName || previewModalFile.title,
+              url: previewModalFile.fileUrl,
+              size: previewModalFile.fileSize,
+              title: previewModalFile.title,
+              category: previewModalFile.category,
+              version: previewModalFile.version,
+              uploadedAt: previewModalFile.uploadedAt,
+              authorDrafter: previewModalFile.authorDrafter,
+              notes: cleanNotes
+            }}
+            subtitle={sub}
+            onClose={() => setPreviewModalFile(null)}
+            onDelete={(f) => {
+              if (matchingTask) {
+                setFileToDelete({
+                  type: 'task_attachment',
+                  taskId: matchingTask.id,
+                  taskTitle: matchingTask.componentTitle,
+                  fileId: f.id,
+                  fileName: f.name,
+                  fileSize: f.size
+                });
+              } else {
+                setFileToDelete({
+                  type: 'deliverable',
+                  fileId: f.id,
+                  fileName: f.name,
+                  fileSize: f.size
+                });
+              }
+            }}
+          />
+        );
+      })()}
 
       {/* Request Revision Modal */}
       {revisionModalTask && (
