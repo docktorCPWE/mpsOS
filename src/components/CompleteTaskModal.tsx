@@ -208,7 +208,10 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
             name: res.name,
             size: res.size,
             type: res.type,
-            url: res.url
+            url: res.url,
+            uploadedAt: new Date().toISOString(),
+            uploadedBy: currentStaff.name,
+            category: defaultCat
           };
         })
       );
@@ -233,7 +236,10 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
           name: sample.name,
           size: sample.size,
           type: sample.type,
-          url: sample.url
+          url: sample.url,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: currentStaff.name,
+          category: sample.category
         }
       ]);
       setFileCategories(prev => ({
@@ -258,16 +264,25 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     }
 
     const delegatorStaff = STAFF_USERS.find(s => s.name.toLowerCase().includes(delegator.toLowerCase()));
+    const effectiveCompletionDate = completionDate ? new Date(completionDate + 'T12:00:00').toISOString() : new Date().toISOString();
+
+    // Ensure all review files have uploadedAt and uploadedBy
+    const enrichedReviewFiles = reviewFiles.map(f => ({
+      ...f,
+      uploadedAt: f.uploadedAt || effectiveCompletionDate,
+      uploadedBy: f.uploadedBy || currentStaff.name,
+      category: f.category || fileCategories[f.id] || 'Floor Plan'
+    }));
 
     // Create DeliverableFile objects for project gallery if option selected
-    const deliverableSheets: DeliverableFile[] = reviewFiles.map(f => {
-      const cat = fileCategories[f.id] || 'Floor Plan';
+    const deliverableSheets: DeliverableFile[] = enrichedReviewFiles.map(f => {
+      const cat = fileCategories[f.id] || f.category || 'Floor Plan';
       return {
         id: `deliv-${Date.now()}-${f.id}`,
         title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
-        category: cat,
+        category: cat as DeliverableFile['category'],
         version: `v2.${Date.now().toString().slice(-2)} (Review)`,
-        uploadedAt: new Date().toISOString(),
+        uploadedAt: effectiveCompletionDate,
         fileSize: f.size,
         previewType: cat === 'CAD / DWG File' ? 'cad_file' : cat === '3D Render' ? 'render_image' : cat === 'Exterior Elevations' ? 'canvas_elevation' : 'pdf_spec',
         fileUrl: f.url,
@@ -278,10 +293,10 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     });
 
     const payload: CompleteTaskPayload = {
-      jobId: task.jobId,
+      jobId: job?.id || task.jobId || task.jobNumber,
       taskId: task.id,
       resolutionNotes: completionNotes.trim(),
-      reviewFiles,
+      reviewFiles: enrichedReviewFiles,
       deliverableSheets,
       addToJobDeliverables: addToDeliverables,
       loggedHours: loggedHours ? parseFloat(loggedHours) : undefined,
@@ -289,7 +304,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       notifyDelegator,
       delegatorName: delegator,
       delegatorEmail: delegatorStaff?.email || `${delegator.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
-      completedAtDate: completionDate ? new Date(completionDate + 'T12:00:00').toISOString() : new Date().toISOString()
+      completedAtDate: effectiveCompletionDate
     };
 
     onCompleteTask(payload);

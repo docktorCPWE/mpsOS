@@ -1695,63 +1695,79 @@ export default function App() {
     let completedTaskTitle = '';
     let delegatorName = '';
 
-    updateJobsState(prevJobs =>
-      prevJobs.map(j => {
-        if (isTargetJob(j, jobId) && j.delegated_tasks) {
-          const updatedTasks = j.delegated_tasks.map(t => {
-            if (t.id === taskId) {
-              completedTaskTitle = t.componentTitle;
-              delegatorName = t.delegatedBy;
-              return { 
-                ...t, 
-                status: newStatus,
-                completedAt: newStatus === 'Completed' ? (t.completedAt || new Date().toISOString()) : t.completedAt,
-                completedBy: newStatus === 'Completed' ? (t.completedBy || currentStaff.name) : t.completedBy
-              };
-            }
-            return t;
-          });
-
-          // If transitioning to In Progress and no active timer is running on this job, start the timer
-          let activeTimerStart = j.active_timer_start;
-          let activeTimerTask = j.active_timer_task;
-          let activeTimerDrafterId = j.active_timer_drafter_id;
-          let activeTimerDrafterName = j.active_timer_drafter_name;
-
-          if (newStatus === 'In Progress' && !j.active_timer_start) {
-            activeTimerStart = new Date().toISOString();
-            activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
-            activeTimerDrafterId = currentStaff.id;
-            activeTimerDrafterName = currentStaff.name;
-          }
-
-          return {
-            ...j,
-            active_timer_start: activeTimerStart,
-            active_timer_task: activeTimerTask,
-            active_timer_drafter_id: activeTimerDrafterId,
-            active_timer_drafter_name: activeTimerDrafterName,
-            delegated_tasks: updatedTasks,
-            audit_logs: [
-              {
-                id: `a-${Date.now()}`,
-                action: 'Delegated Task Updated',
-                performedBy: currentStaff.name,
-                timestamp: new Date().toISOString(),
-                details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
-              },
-              ...j.audit_logs
-            ]
-          };
-        }
-        return j;
-      }),
-      jobId
+    const targetJob = jobs.find(j => 
+      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+      (jobId && isTargetJob(j, jobId)) ||
+      (jobId && j.id === jobId)
     );
+    const targetJobId = targetJob ? targetJob.id : jobId;
+
+    const updatedJobs = jobs.map(j => {
+      const isMatch = targetJob ? j.id === targetJob.id : (isTargetJob(j, jobId) || (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)));
+      if (isMatch && j.delegated_tasks) {
+        const updatedTasks = j.delegated_tasks.map(t => {
+          if (t.id === taskId) {
+            completedTaskTitle = t.componentTitle;
+            delegatorName = t.delegatedBy;
+            return { 
+              ...t, 
+              status: newStatus,
+              completedAt: newStatus === 'Completed' ? (t.completedAt || new Date().toISOString()) : t.completedAt,
+              completedBy: newStatus === 'Completed' ? (t.completedBy || currentStaff.name) : t.completedBy,
+              isReviewed: newStatus === 'Completed' ? false : t.isReviewed,
+              revisionRequested: newStatus === 'Completed' ? false : t.revisionRequested
+            };
+          }
+          return t;
+        });
+
+        // If transitioning to In Progress and no active timer is running on this job, start the timer
+        let activeTimerStart = j.active_timer_start;
+        let activeTimerTask = j.active_timer_task;
+        let activeTimerDrafterId = j.active_timer_drafter_id;
+        let activeTimerDrafterName = j.active_timer_drafter_name;
+
+        if (newStatus === 'In Progress' && !j.active_timer_start) {
+          activeTimerStart = new Date().toISOString();
+          activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
+          activeTimerDrafterId = currentStaff.id;
+          activeTimerDrafterName = currentStaff.name;
+        }
+
+        return {
+          ...j,
+          active_timer_start: activeTimerStart,
+          active_timer_task: activeTimerTask,
+          active_timer_drafter_id: activeTimerDrafterId,
+          active_timer_drafter_name: activeTimerDrafterName,
+          delegated_tasks: updatedTasks,
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Delegated Task Updated',
+              performedBy: currentStaff.name,
+              timestamp: new Date().toISOString(),
+              details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
+            },
+            ...j.audit_logs
+          ]
+        };
+      }
+      return j;
+    });
+
+    updateJobsState(updatedJobs, targetJobId);
+
+    // Keep selectedJobForDetail synchronized if currently open
+    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
+      const freshJob = updatedJobs.find(j => j.id === targetJobId);
+      if (freshJob) {
+        setSelectedJobForDetail(freshJob);
+      }
+    }
 
     // If marked Completed, notify delegator (Kyle / Jason / Greg)
     if (newStatus === 'Completed' && delegatorName && delegatorName !== currentStaff.name) {
-      const targetJob = jobs.find(j => j.id === jobId);
       const delegatorStaff = STAFF_USERS.find(s => s.name === delegatorName);
       const completionNotif: AppNotification = {
         id: `notif-${Date.now()}`,
@@ -1760,7 +1776,7 @@ export default function App() {
         senderName: currentStaff.name,
         title: `Task Completed: ${completedTaskTitle}`,
         message: `${currentStaff.name} has completed the delegated component "${completedTaskTitle}" on Job #${targetJob?.job_number || ''}.`,
-        jobId: jobId,
+        jobId: targetJobId,
         jobNumber: targetJob?.job_number || '',
         timestamp: new Date().toISOString(),
         read: false,
@@ -1773,20 +1789,30 @@ export default function App() {
 
   // 9. Handle Comprehensive Task Completion Submission (Modal with Notes, Files, Time Log, and Notification)
   const handleCompleteTask = (payload: CompleteTaskPayload) => {
-    const targetJob = jobs.find(j => j.id === payload.jobId);
-    if (!targetJob) return;
+    // Resilient job discovery by task ID in delegated_tasks first, then flexible jobId matcher
+    const targetJob = jobs.find(j => 
+      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === payload.taskId)) ||
+      (payload.jobId && isTargetJob(j, payload.jobId)) ||
+      (payload.jobId && j.id === payload.jobId)
+    );
 
+    if (!targetJob) {
+      console.warn('handleCompleteTask: Target job not found for payload', payload);
+      return;
+    }
+
+    const targetJobId = targetJob.id;
     let targetTaskTitle = '';
     const nowIso = payload.completedAtDate || new Date().toISOString();
 
     const updatedJobs = jobs.map(j => {
-      if (j.id === payload.jobId && j.delegated_tasks) {
+      if (j.id === targetJobId && j.delegated_tasks) {
         const loggedSeconds = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
         const updatedTasks = j.delegated_tasks.map(t => {
           if (t.id === payload.taskId) {
             targetTaskTitle = t.componentTitle;
             const existingAttachments = t.attachments || [];
-            // Merge newly uploaded review attachments
+            // Merge newly uploaded review attachments with full metadata
             const mergedAttachments = [...existingAttachments, ...payload.reviewFiles];
             const curWorked = t.workedSeconds || 0;
             
@@ -1798,6 +1824,8 @@ export default function App() {
               completionNotes: payload.resolutionNotes,
               attachments: mergedAttachments,
               workedSeconds: curWorked + loggedSeconds,
+              isReviewed: false,
+              revisionRequested: false,
               activeTimerStart: undefined,
               activeTimerDrafterName: undefined
             };
@@ -1869,7 +1897,15 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs, payload.jobId);
+    updateJobsState(updatedJobs, targetJobId);
+
+    // Synchronize selectedJobForDetail if currently open
+    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
+      const freshJob = updatedJobs.find(j => j.id === targetJobId);
+      if (freshJob) {
+        setSelectedJobForDetail(freshJob);
+      }
+    }
 
     const newNotifs: AppNotification[] = [];
 
@@ -1921,14 +1957,19 @@ export default function App() {
 
   // 10. Handle Approving / Signing Off on a Reviewed Delegated Task
   const handleApproveTaskReview = (jobId: string, taskId: string, reviewNote?: string) => {
-    const targetJob = jobs.find(j => j.id === jobId);
+    const targetJob = jobs.find(j => 
+      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+      (jobId && isTargetJob(j, jobId)) ||
+      (jobId && j.id === jobId)
+    );
     if (!targetJob) return;
+    const targetJobId = targetJob.id;
     const nowIso = new Date().toISOString();
     let assignedDrafter = '';
     let taskTitle = '';
 
     const updatedJobs = jobs.map(j => {
-      if (j.id === jobId && j.delegated_tasks) {
+      if (j.id === targetJobId && j.delegated_tasks) {
         const updatedTasks = j.delegated_tasks.map(t => {
           if (t.id === taskId) {
             assignedDrafter = t.assignedTo;
@@ -1974,7 +2015,15 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs, jobId);
+    updateJobsState(updatedJobs, targetJobId);
+
+    // Keep selectedJobForDetail synchronized if currently open
+    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
+      const freshJob = updatedJobs.find(j => j.id === targetJobId);
+      if (freshJob) {
+        setSelectedJobForDetail(freshJob);
+      }
+    }
 
     // Remove the delegation notification from the specific drafter, and send sign-off approval notification
     if (assignedDrafter) {
@@ -2009,15 +2058,20 @@ export default function App() {
 
   // 11. Handle Requesting Revisions on a Delegated Task
   const handleRequestTaskRevision = (jobId: string, taskId: string, feedbackNote: string) => {
-    const targetJob = jobs.find(j => j.id === jobId);
+    const targetJob = jobs.find(j => 
+      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+      (jobId && isTargetJob(j, jobId)) ||
+      (jobId && j.id === jobId)
+    );
     if (!targetJob) return;
+    const targetJobId = targetJob.id;
     const nowIso = new Date().toISOString();
     let assignedDrafter = '';
     let taskTitle = '';
     let currentRevCount = 1;
 
     const updatedJobs = jobs.map(j => {
-      if (j.id === jobId && j.delegated_tasks) {
+      if (j.id === targetJobId && j.delegated_tasks) {
         const updatedTasks = j.delegated_tasks.map(t => {
           if (t.id === taskId) {
             assignedDrafter = t.assignedTo;
@@ -2066,7 +2120,15 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs, jobId);
+    updateJobsState(updatedJobs, targetJobId);
+
+    // Keep selectedJobForDetail synchronized if currently open
+    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
+      const freshJob = updatedJobs.find(j => j.id === targetJobId);
+      if (freshJob) {
+        setSelectedJobForDetail(freshJob);
+      }
+    }
 
     // Notify drafter with clear Revision Request notification
     if (assignedDrafter) {

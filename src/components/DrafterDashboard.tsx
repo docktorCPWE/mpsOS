@@ -228,6 +228,11 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Helper to find parent job for a delegated task
   const resolveParentJob = (task: DelegatedWorkItem): Job | undefined => {
+    // 1. Direct match by task.id within delegated_tasks (100% reliable across all jobs)
+    const matchedByTask = jobs.find(j => (j.delegated_tasks || []).some(t => t.id === task.id));
+    if (matchedByTask) return matchedByTask;
+
+    // 2. Fallback to clean job number or sanitized ID match
     const cleanTaskNum = (task.jobNumber || '').replace(/^[#M\-_]+/i, '').trim().toLowerCase();
     return jobs.find(j => 
       (j.id && task.jobId && j.id === task.jobId) || 
@@ -265,7 +270,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // Start timer for delegated task -> starts job timer and sets task status to In Progress atomically
   const handleStartTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
     setActiveDelegatedTaskId(task.id);
-    const targetJobId = parentJob?.id || task.jobId || task.jobNumber;
+    const resolvedJob = parentJob || resolveParentJob(task);
+    const targetJobId = resolvedJob?.id || task.jobId || task.jobNumber;
     if (targetJobId) {
       onStartTimer(targetJobId, `${task.category}: ${task.componentTitle}`, task.id);
     }
@@ -274,7 +280,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // Stop timer for delegated task -> stops job timer, calculates logs, and sets task to Pending atomically
   const handleStopTaskTimer = (task: DelegatedWorkItem, parentJob?: Job) => {
     setActiveDelegatedTaskId(null);
-    const targetJobId = parentJob?.id || task.jobId || task.jobNumber;
+    const resolvedJob = parentJob || resolveParentJob(task);
+    const targetJobId = resolvedJob?.id || task.jobId || task.jobNumber;
     if (targetJobId) {
       onStopTimer(targetJobId, `Worked on ${task.componentTitle}`, task.id);
     }
@@ -282,13 +289,14 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Mark task complete -> opens CompleteTaskModal or marks completed
   const handleMarkTaskComplete = (task: DelegatedWorkItem, parentJob?: Job) => {
-    if (isTaskTimerRunning(task, parentJob)) {
-      handleStopTaskTimer(task, parentJob);
+    const resolvedJob = parentJob || resolveParentJob(task);
+    if (isTaskTimerRunning(task, resolvedJob)) {
+      handleStopTaskTimer(task, resolvedJob);
     }
-    if (onOpenCompleteTaskModal && parentJob) {
-      onOpenCompleteTaskModal(task, parentJob);
+    if (onOpenCompleteTaskModal && resolvedJob) {
+      onOpenCompleteTaskModal(task, resolvedJob);
     } else if (onUpdateTaskStatus) {
-      onUpdateTaskStatus(task.jobId, task.id, 'Completed');
+      onUpdateTaskStatus(resolvedJob?.id || task.jobId, task.id, 'Completed');
     }
   };
 

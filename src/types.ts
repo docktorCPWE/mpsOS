@@ -93,6 +93,9 @@ export interface TaskAttachment {
   size: string;
   type: string;
   url?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+  category?: string;
 }
 
 export interface DelegatedWorkItem {

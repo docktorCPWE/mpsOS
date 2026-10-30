@@ -26,6 +26,8 @@ import {
 import { Job, DelegatedWorkItem, DeliverableFile, StaffUser } from '../types';
 import { STAFF_USERS } from '../data/mockData';
 import { RequestRevisionModal } from './RequestRevisionModal';
+import { UniversalFileViewerModal, ViewableFile } from './UniversalFileViewerModal';
+import { downloadFileFromUrl } from '../utils/attachmentUtils';
 
 interface KyleDelegationInboxModalProps {
   isOpen: boolean;
@@ -57,6 +59,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
   const [approvalNote, setApprovalNote] = useState('');
   const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
   const [revisionModalTask, setRevisionModalTask] = useState<{ task: DelegatedWorkItem; job?: Job } | null>(null);
+  const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
 
   if (!isOpen) return null;
 
@@ -463,23 +466,31 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                           <div className="flex items-center gap-1 shrink-0">
                             {file.url && (
                               <>
-                                <a
-                                  href={file.url}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFile({
+                                    id: file.id,
+                                    name: file.name,
+                                    url: file.url,
+                                    size: file.size,
+                                    type: file.type,
+                                    title: `${activeTask.componentTitle}: ${file.name}`,
+                                    category: activeTask.category,
+                                    uploadedAt: activeTask.completedAt
+                                  })}
                                   className="p-1.5 text-slate-400 hover:text-blue-400 rounded transition cursor-pointer"
-                                  title="Inspect / view file"
+                                  title="Inspect / view full file"
                                 >
                                   <Eye className="w-4 h-4" />
-                                </a>
-                                <a
-                                  href={file.url}
-                                  download={file.name}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadFileFromUrl(file.url, file.name)}
                                   className="p-1.5 text-slate-400 hover:text-emerald-400 rounded transition cursor-pointer"
                                   title="Download file"
                                 >
                                   <Download className="w-4 h-4" />
-                                </a>
+                                </button>
                               </>
                             )}
                           </div>
@@ -564,6 +575,14 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
             setRevisionModalTask(null);
             setSelectedFilter('revisions');
           }}
+        />
+      )}
+
+      {previewFile && (
+        <UniversalFileViewerModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          subtitle={activeTask ? `${activeTask.componentTitle} • Job #${activeTask.jobNumber}` : undefined}
         />
       )}
     </div>
