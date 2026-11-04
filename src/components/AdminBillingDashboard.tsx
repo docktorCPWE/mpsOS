@@ -237,7 +237,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   const [selectedDrafterFilter, setSelectedDrafterFilter] = useState<string>('ALL');
   const [roadblockFilter, setRoadblockFilter] = useState<'ALL' | 'ROADBLOCKS_ONLY' | 'CLEAN_ONLY'>('ALL');
   const [minDaysInPhaseFilter, setMinDaysInPhaseFilter] = useState<number>(0);
-  const [sortBy, setSortBy] = useState<'days_desc' | 'activity_newest' | 'cost_desc' | 'job_number'>('days_desc');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'days_desc' | 'activity_newest' | 'cost_desc' | 'job_number'>('newest');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   // Canonicalize raw drafter names so that if a name corresponds to an existing staff user, it maps to their full name
@@ -389,8 +389,28 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
     return true;
   });
 
-  // Sorted Jobs
+  // Sorted Jobs (Default: Newest to Oldest)
   const sortedJobs = [...filteredJobs].sort((a, b) => {
+    if (sortBy === 'newest') {
+      const timeB = new Date(b.created_at || 0).getTime();
+      const timeA = new Date(a.created_at || 0).getTime();
+      if (timeB !== timeA && !isNaN(timeB) && !isNaN(timeA)) {
+        return timeB - timeA;
+      }
+      const numB = parseInt((b.job_number || '').replace(/\D+/g, ''), 10) || 0;
+      const numA = parseInt((a.job_number || '').replace(/\D+/g, ''), 10) || 0;
+      return numB - numA;
+    }
+    if (sortBy === 'oldest') {
+      const timeA = new Date(a.created_at || 0).getTime();
+      const timeB = new Date(b.created_at || 0).getTime();
+      if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) {
+        return timeA - timeB;
+      }
+      const numA = parseInt((a.job_number || '').replace(/\D+/g, ''), 10) || 0;
+      const numB = parseInt((b.job_number || '').replace(/\D+/g, ''), 10) || 0;
+      return numA - numB;
+    }
     if (sortBy === 'days_desc') {
       return getDaysInPhase(b) - getDaysInPhase(a);
     }
@@ -945,11 +965,14 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
                 className="bg-transparent text-slate-900 font-semibold focus:outline-none cursor-pointer"
+                title="Sort project list"
               >
-                <option value="days_desc">Time in Phase (Longest first)</option>
+                <option value="newest">Newest to Oldest (Default)</option>
+                <option value="oldest">Oldest to Newest</option>
                 <option value="activity_newest">Last Activity (Newest first)</option>
+                <option value="days_desc">Time in Phase (Longest first)</option>
                 <option value="cost_desc">Billable Amount (High to Low)</option>
-                <option value="job_number">Job Number</option>
+                <option value="job_number">Job Number (Ascending)</option>
               </select>
             </div>
 
@@ -1062,12 +1085,72 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-900 text-slate-300 font-mono text-[10px] uppercase tracking-wider border-b border-slate-800">
                   <tr>
-                    <th className="p-3.5">Job & Style</th>
+                    <th 
+                      onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')}
+                      className="p-3.5 cursor-pointer hover:text-white transition select-none group"
+                      title="Click to toggle Newest to Oldest / Oldest to Newest"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Job & Style</span>
+                        {sortBy === 'newest' && (
+                          <span className="text-emerald-400 font-bold lowercase text-[10px] font-sans flex items-center gap-0.5 bg-emerald-950/70 px-1.5 py-0.2 rounded border border-emerald-600/40">
+                            ↓ newest
+                          </span>
+                        )}
+                        {sortBy === 'oldest' && (
+                          <span className="text-amber-400 font-bold lowercase text-[10px] font-sans flex items-center gap-0.5 bg-amber-950/70 px-1.5 py-0.2 rounded border border-amber-600/40">
+                            ↑ oldest
+                          </span>
+                        )}
+                        {sortBy !== 'newest' && sortBy !== 'oldest' && (
+                          <ArrowUpDown className="w-3 h-3 text-slate-500 opacity-60 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3.5">Customer & Drafter</th>
-                    <th className="p-3.5">Phase & Time In Phase</th>
-                    <th className="p-3.5">Last Activity</th>
+                    <th 
+                      onClick={() => setSortBy(sortBy === 'days_desc' ? 'newest' : 'days_desc')}
+                      className="p-3.5 cursor-pointer hover:text-white transition select-none group"
+                      title="Click to sort by Time in Phase"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Phase & Time In Phase</span>
+                        {sortBy === 'days_desc' && (
+                          <span className="text-amber-400 font-bold lowercase text-[10px] font-sans bg-amber-950/70 px-1.5 py-0.2 rounded border border-amber-600/40">
+                            ↓ longest
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => setSortBy(sortBy === 'activity_newest' ? 'newest' : 'activity_newest')}
+                      className="p-3.5 cursor-pointer hover:text-white transition select-none group"
+                      title="Click to sort by Last Activity"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Last Activity</span>
+                        {sortBy === 'activity_newest' && (
+                          <span className="text-blue-400 font-bold lowercase text-[10px] font-sans bg-blue-950/70 px-1.5 py-0.2 rounded border border-blue-600/40">
+                            ↓ recent
+                          </span>
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3.5">Roadblock Status & Reason</th>
-                    <th className="p-3.5">Invoice Status & Amount</th>
+                    <th 
+                      onClick={() => setSortBy(sortBy === 'cost_desc' ? 'newest' : 'cost_desc')}
+                      className="p-3.5 cursor-pointer hover:text-white transition select-none group"
+                      title="Click to sort by Invoice Amount"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Invoice Status & Amount</span>
+                        {sortBy === 'cost_desc' && (
+                          <span className="text-emerald-400 font-bold lowercase text-[10px] font-sans bg-emerald-950/70 px-1.5 py-0.2 rounded border border-emerald-600/40">
+                            ↓ highest
+                          </span>
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3.5 text-right">Actions</th>
                   </tr>
                 </thead>

@@ -98,11 +98,11 @@ export const STAFF_USERS: StaffUser[] = [
     hourlyRate: 75,
     status: 'active',
     joinedDate: '2023-01-20',
-    canAccessFinancials: false,
+    canAccessFinancials: true,
     canDelegate: false,
-    canViewAllProjects: false,
+    canViewAllProjects: true,
     canManageStaff: false,
-    canManageInvoices: false,
+    canManageInvoices: true,
     canEditJobPhases: false,
     canManageRoadblocks: false,
     canAccessPayroll: false
@@ -129,9 +129,9 @@ export const STAFF_USERS: StaffUser[] = [
   }
 ];
 
-export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Kyle', 'Drew Lupkey'];
+export const AUTHORIZED_FINANCIAL_NAMES = ['Greg Hyatt', 'Jason', 'Kyle', 'Drew Lupkey', 'Ethan Pierce', 'Ethan'];
 export const AUTHORIZED_DELEGATOR_NAMES = ['Greg Hyatt', 'Kyle', 'Jason'];
-export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Greg Hyatt', 'Kyle', 'Jason', 'Drew Lupkey'];
+export const AUTHORIZED_ALL_PROJECTS_NAMES = ['Greg Hyatt', 'Kyle', 'Jason', 'Drew Lupkey', 'Ethan Pierce', 'Ethan'];
 export const AUTHORIZED_PAYROLL_NAMES = ['Greg Hyatt', 'Jason', 'Drew Lupkey'];
 
 export function canUserAccessPayroll(userNameOrStaff?: string | StaffUser): boolean {
