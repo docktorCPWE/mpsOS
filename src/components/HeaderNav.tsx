@@ -91,7 +91,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   // Delegated tasks completed and waiting for Kyle to review
   const allDelegated = jobs.flatMap(j => j.delegated_tasks || []);
   const tasksWaitingForKyle = allDelegated.filter(
-    t => (t.delegatedBy || '').toLowerCase().includes('kyle') && (t.status === 'Completed' || t.status === 'Under Review') && !t.isReviewed
+    t => (t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.completedAt)) && !t.isReviewed
   );
   const waitingForKyleCount = tasksWaitingForKyle.length;
 

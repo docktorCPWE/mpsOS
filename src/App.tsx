@@ -189,14 +189,11 @@ export default function App() {
             }
           }
 
-          // Filter out mock staff-aaron or staff-james
+          // Filter out mock staff-aaron placeholder
           const cleanMerged = merged.filter(s => 
             s.id !== 'staff-aaron' && 
-            s.id !== 'staff-james' && 
             s.email !== 'aaron@myplanstore.com' && 
-            s.email !== 'james@myplanstore.com' &&
-            s.name.trim().toLowerCase() !== 'aaron' &&
-            s.name.trim().toLowerCase() !== 'james'
+            s.name.trim().toLowerCase() !== 'aaron'
           );
 
           setStaffList(cleanMerged);
@@ -468,10 +465,20 @@ export default function App() {
     updateJobsState(prevJobs =>
       prevJobs.map(j => {
         if (isTargetJob(j, jobId)) {
-          // If a delegated task was selected or matches the taskNote, set its status to In Progress
+          // If a delegated task was selected, ONLY that specific task is started; never alter completed tasks!
           let matchedTaskId = delegatedTaskId;
           const updatedTasks = (j.delegated_tasks || []).map(t => {
-            const isMatch = (delegatedTaskId && t.id === delegatedTaskId) || (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase()));
+            // A completed task or task waiting review can NEVER be reverted to In Progress by starting a timer!
+            if (t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.isReviewed) || Boolean(t.completedAt)) {
+              return t;
+            }
+
+            // If a specific delegatedTaskId is given, match ONLY that exact task ID!
+            // If no delegatedTaskId is given, only match if the note strictly matches an active pending task
+            const isMatch = delegatedTaskId 
+              ? String(t.id).trim() === String(delegatedTaskId).trim()
+              : Boolean(trimmed && t.componentTitle && trimmed.trim().toLowerCase() === t.componentTitle.trim().toLowerCase());
+
             if (isMatch) {
               matchedTaskId = t.id;
               return { 
@@ -537,11 +544,17 @@ export default function App() {
           const effectiveTaskId = delegatedTaskId || j.active_timer_delegated_task_id;
           let matchedTaskTitle: string | undefined;
 
-          // Add workedSeconds to the matched delegated task
+          // Add workedSeconds to the matched delegated task ONLY
           const updatedTasks = (j.delegated_tasks || []).map(t => {
-            const isMatch = (effectiveTaskId && t.id === effectiveTaskId) || 
-                            (trimmed && trimmed.toLowerCase().includes((t.componentTitle || '').toLowerCase())) ||
-                            Boolean(t.activeTimerStart);
+            // Completed tasks must NEVER have their status reverted or changed
+            if (t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.isReviewed) || Boolean(t.completedAt)) {
+              return { ...t, activeTimerStart: undefined, activeTimerDrafterName: undefined };
+            }
+
+            const isMatch = effectiveTaskId 
+              ? String(t.id).trim() === String(effectiveTaskId).trim()
+              : Boolean(t.activeTimerStart || (trimmed && t.componentTitle && trimmed.trim().toLowerCase() === t.componentTitle.trim().toLowerCase()));
+
             if (isMatch) {
               matchedTaskTitle = t.componentTitle;
               const curWorked = t.workedSeconds || 0;
@@ -553,8 +566,8 @@ export default function App() {
                 workedSeconds: curWorked + durationSeconds
               };
             }
-            if (t.status === 'In Progress') {
-              return { ...t, status: 'Pending' as const, activeTimerStart: undefined };
+            if (t.activeTimerStart) {
+              return { ...t, activeTimerStart: undefined, activeTimerDrafterName: undefined };
             }
             return t;
           });
@@ -1721,17 +1734,26 @@ export default function App() {
           return t;
         });
 
-        // If transitioning to In Progress and no active timer is running on this job, start the timer
+        // Timer management for task status changes
         let activeTimerStart = j.active_timer_start;
         let activeTimerTask = j.active_timer_task;
         let activeTimerDrafterId = j.active_timer_drafter_id;
         let activeTimerDrafterName = j.active_timer_drafter_name;
+        let activeTimerDelegatedTaskId = j.active_timer_delegated_task_id;
 
         if (newStatus === 'In Progress' && !j.active_timer_start) {
           activeTimerStart = new Date().toISOString();
           activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
           activeTimerDrafterId = currentStaff.id;
           activeTimerDrafterName = currentStaff.name;
+          activeTimerDelegatedTaskId = taskId;
+        } else if (newStatus === 'Completed' && (j.active_timer_delegated_task_id === taskId || !j.active_timer_delegated_task_id)) {
+          // Task completed: finalize and clear running timer
+          activeTimerStart = undefined;
+          activeTimerTask = undefined;
+          activeTimerDrafterId = undefined;
+          activeTimerDrafterName = undefined;
+          activeTimerDelegatedTaskId = undefined;
         }
 
         return {
@@ -1740,6 +1762,7 @@ export default function App() {
           active_timer_task: activeTimerTask,
           active_timer_drafter_id: activeTimerDrafterId,
           active_timer_drafter_name: activeTimerDrafterName,
+          active_timer_delegated_task_id: activeTimerDelegatedTaskId,
           delegated_tasks: updatedTasks,
           audit_logs: [
             {
@@ -1807,9 +1830,28 @@ export default function App() {
 
     const updatedJobs = jobs.map(j => {
       if (j.id === targetJobId && j.delegated_tasks) {
-        const loggedSeconds = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
+        const targetTask = j.delegated_tasks.find(t => String(t.id).trim() === String(payload.taskId).trim());
+        targetTaskTitle = targetTask ? targetTask.componentTitle : '';
+        const manualLoggedSec = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
+        
+        // Check if an active timer was running on this job for this task
+        const isTimerOnThisTask = Boolean(
+          j.active_timer_start && (
+            (j.active_timer_delegated_task_id && String(j.active_timer_delegated_task_id).trim() === String(payload.taskId).trim()) ||
+            (!j.active_timer_delegated_task_id && targetTaskTitle && j.active_timer_task && j.active_timer_task.toLowerCase().includes(targetTaskTitle.toLowerCase()))
+          )
+        );
+
+        let liveTimerSec = 0;
+        if (isTimerOnThisTask && j.active_timer_start) {
+          const startMs = new Date(j.active_timer_start).getTime();
+          liveTimerSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+        }
+
+        const effectiveWorkedSec = manualLoggedSec > 0 ? manualLoggedSec : liveTimerSec;
+
         const updatedTasks = j.delegated_tasks.map(t => {
-          if (t.id === payload.taskId) {
+          if (String(t.id).trim() === String(payload.taskId).trim()) {
             targetTaskTitle = t.componentTitle;
             const existingAttachments = t.attachments || [];
             // Merge newly uploaded review attachments with full metadata
@@ -1823,7 +1865,7 @@ export default function App() {
               completedBy: currentStaff.name,
               completionNotes: payload.resolutionNotes,
               attachments: mergedAttachments,
-              workedSeconds: curWorked + loggedSeconds,
+              workedSeconds: curWorked + effectiveWorkedSec,
               isReviewed: false,
               revisionRequested: false,
               activeTimerStart: undefined,
@@ -1838,29 +1880,40 @@ export default function App() {
           ? [...payload.deliverableSheets, ...j.deliverables]
           : j.deliverables;
 
-        // If user logged time spent during completion
-        const updatedTimeLogs = payload.loggedHours && payload.loggedHours > 0
-          ? [
-              {
-                id: `log-comp-${Date.now()}`,
-                drafterName: currentStaff.name,
-                startTime: new Date(Date.now() - payload.loggedHours * 3600 * 1000).toISOString(),
-                endTime: nowIso,
-                durationSeconds: loggedSeconds,
-                taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
-                hourlyRate: 85,
-                billableAmount: Math.round(payload.loggedHours * 85),
-                isBilled: false,
-                isApproved: false,
-                delegatedTaskId: payload.taskId,
-                delegatedTaskTitle: targetTaskTitle
-              },
-              ...j.time_logs
-            ]
-          : j.time_logs;
+        // If user logged time spent during completion or had active timer running
+        let updatedTimeLogs = j.time_logs || [];
+        if (manualLoggedSec > 0) {
+          const manualLog: TimeLog = {
+            id: `log-comp-${Date.now()}`,
+            drafterName: currentStaff.name,
+            startTime: new Date(Date.now() - manualLoggedSec * 1000).toISOString(),
+            endTime: nowIso,
+            durationSeconds: manualLoggedSec,
+            taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
+            hourlyRate: j.hourly_rate || 85,
+            billableAmount: Math.round((manualLoggedSec / 3600) * (j.hourly_rate || 85)),
+            delegatedTaskId: payload.taskId,
+            delegatedTaskTitle: targetTaskTitle
+          };
+          updatedTimeLogs = [manualLog, ...updatedTimeLogs];
+        } else if (liveTimerSec > 0 && j.active_timer_start) {
+          const liveLog: TimeLog = {
+            id: `log-live-${Date.now()}`,
+            drafterName: currentStaff.name || j.active_timer_drafter_name || 'James Barnett',
+            startTime: j.active_timer_start,
+            endTime: nowIso,
+            durationSeconds: liveTimerSec,
+            taskDescription: `Completed: ${targetTaskTitle}`,
+            hourlyRate: j.hourly_rate || 85,
+            billableAmount: Math.round((liveTimerSec / 3600) * (j.hourly_rate || 85)),
+            delegatedTaskId: payload.taskId,
+            delegatedTaskTitle: targetTaskTitle
+          };
+          updatedTimeLogs = [liveLog, ...updatedTimeLogs];
+        }
 
-        // If the job had an active timer running specifically for this task, stop it
-        const shouldClearJobTimer = Boolean(j.active_timer_delegated_task_id === payload.taskId);
+        // If the job had an active timer running on this task, clear it completely
+        const shouldClearJobTimer = isTimerOnThisTask;
 
         // Add a detailed comment in the project stream for the team
         const completionComment = {

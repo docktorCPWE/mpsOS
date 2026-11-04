@@ -24,6 +24,12 @@ export function calculateDelegatedTaskWorkedSeconds(
     seconds = Math.max(seconds, logSum);
   }
 
+  // A completed task or task waiting review only reports its finalized workedSeconds / matching time logs
+  const isCompleted = task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.isReviewed) || Boolean(task.completedAt);
+  if (isCompleted) {
+    return Math.max(0, seconds);
+  }
+
   // Active timer on task directly
   if (task.activeTimerStart) {
     const startMs = new Date(task.activeTimerStart).getTime();
@@ -32,8 +38,7 @@ export function calculateDelegatedTaskWorkedSeconds(
   } else if (
     job &&
     job.active_timer_start &&
-    (job.active_timer_delegated_task_id === task.id ||
-     (job.active_timer_task && task.componentTitle && job.active_timer_task.toLowerCase().includes(task.componentTitle.toLowerCase())))
+    job.active_timer_delegated_task_id === task.id
   ) {
     const startMs = new Date(job.active_timer_start).getTime();
     const currentMs = nowTimestamp || Date.now();

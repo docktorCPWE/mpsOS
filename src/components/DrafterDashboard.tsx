@@ -243,17 +243,25 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Check if a timer is running for a delegated task
   const isTaskTimerRunning = (task: DelegatedWorkItem, parentJob?: Job): boolean => {
-    if (parentJob && parentJob.active_timer_start) {
-      const taskTitle = (task.componentTitle || '').toLowerCase();
-      const activeTaskNote = (parentJob.active_timer_task || '').toLowerCase();
-      if (activeTaskNote.includes(taskTitle) || (task.id && activeTaskNote.includes(task.id))) {
-        return true;
-      }
-      if (task.status === 'In Progress') {
-        return true;
-      }
+    // A completed or reviewed task can NEVER have a running timer
+    if (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.isReviewed) || Boolean(task.completedAt)) {
+      return false;
     }
-    if (activeDelegatedTaskId === task.id) return true;
+    if (!parentJob || !parentJob.active_timer_start) {
+      return false;
+    }
+    // If parent job specifies which delegated task is active, it MUST match this exact task ID
+    if (parentJob.active_timer_delegated_task_id) {
+      return String(parentJob.active_timer_delegated_task_id).trim() === String(task.id).trim();
+    }
+    // If the task itself has an active timer start recorded
+    if (task.activeTimerStart) {
+      return true;
+    }
+    // Ephemeral active delegated task ID
+    if (activeDelegatedTaskId && String(activeDelegatedTaskId).trim() === String(task.id).trim()) {
+      return true;
+    }
     return false;
   };
 
@@ -351,7 +359,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
     ])
   ).filter(Boolean).filter(name => {
     const lower = name.trim().toLowerCase();
-    return lower !== 'aaron' && lower !== 'james';
+    return lower !== 'aaron';
   });
 
   // Helper function to get all drafters who have touched, worked on, been assigned, or been tagged in a job
@@ -548,9 +556,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Completed items waiting for Kyle's review (strictly where !t.isReviewed)
   const tasksWaitingForKyle = allDelegatedTasks.filter(t => {
-    const isKyleDelegator = (t.delegatedBy || '').toLowerCase().includes('kyle');
-    const isCompleted = t.status === 'Completed' || t.status === 'Under Review';
-    return isKyleDelegator && isCompleted && !t.isReviewed;
+    const isCompleted = t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.completedAt);
+    return isCompleted && !t.isReviewed;
   });
   const waitingForKyleCount = tasksWaitingForKyle.length;
 
@@ -1102,13 +1109,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             // 1. Filter Tasks
             const filteredTasks = allDelegatedTasks.filter(task => {
               if (delegationFilter === 'waiting_kyle') {
-                if (currentStaff.name.toLowerCase().includes('kyle')) {
-                  return (task.delegatedBy || '').toLowerCase().includes('kyle') && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                } else if (isIndividualDrafter) {
-                  return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) && (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                } else {
-                  return (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
-                }
+                return (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && !task.isReviewed;
               }
               if (delegationFilter === 'revisions_requested') {
                 return task.status === 'Revision Requested' || Boolean(task.revisionRequested);
@@ -1161,9 +1162,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
               const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
               const delegatorName = task.delegatedBy || 'Kyle';
-              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && !task.isReviewed;
               const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
               const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+              const isTaskFinished = isApproved || isWaitingReview || task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt);
               const isTimerActive = isTaskTimerRunning(task, parentJob);
               const timeDisplay = getTaskElapsedTime(task, parentJob);
               const isAuthorizedReviewer = Boolean(
@@ -1213,12 +1215,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                     {/* Dynamic Status Badge (Neatly right aligned, never squashed) */}
                     <div className="shrink-0">
-                      {isTimerActive ? (
-                        <span className="text-[10px] sm:text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs animate-pulse">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                          <span>In Progress</span>
-                        </span>
-                      ) : isApproved ? (
+                      {isApproved ? (
                         <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1 shadow-2xs">
                           <CheckCircle className="w-3 h-3 text-emerald-600" />
                           <span>Approved</span>
@@ -1232,6 +1229,15 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-orange-50 text-orange-800 border border-orange-300 flex items-center gap-1 shadow-2xs">
                           <RotateCcw className="w-3 h-3 text-orange-600" />
                           <span>Revision</span>
+                        </span>
+                      ) : isTimerActive ? (
+                        <span className="text-[10px] sm:text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs animate-pulse">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                          <span>In Progress</span>
+                        </span>
+                      ) : task.status === 'In Progress' ? (
+                        <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                          <span>In Progress</span>
                         </span>
                       ) : (
                         <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs">
@@ -1274,38 +1280,38 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Dedicated Action Controls Tray: Start/Stop Timer Button + Mark Complete Button */}
-                  <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200 flex items-center gap-2 flex-wrap">
-                    {/* Start / Stop Timer Button */}
-                    {isTimerActive ? (
-                      <button
-                        type="button"
-                        onClick={() => handleStopTaskTimer(task, parentJob)}
-                        className="flex-1 min-w-[120px] justify-center bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer animate-pulse"
-                        title="Stop active drafting timer"
-                      >
-                        <Square className="w-3 h-3 fill-white shrink-0" />
-                        <span>Stop Timer</span>
-                        {timeDisplay && (
-                          <span className="font-mono bg-red-800/90 px-1.5 py-0.5 rounded text-[10px] shrink-0">
-                            {timeDisplay}
-                          </span>
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleStartTaskTimer(task, parentJob)}
-                        className="flex-1 min-w-[110px] justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
-                        title="Start drafting timer for this component"
-                      >
-                        <Play className="w-3 h-3 fill-white shrink-0" />
-                        <span>Start Timer</span>
-                      </button>
-                    )}
+                  {/* Dedicated Action Controls Tray: ONLY displayed for active uncompleted tasks */}
+                  {!isTaskFinished && (
+                    <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200 flex items-center gap-2 flex-wrap">
+                      {/* Start / Stop Timer Button */}
+                      {isTimerActive ? (
+                        <button
+                          type="button"
+                          onClick={() => handleStopTaskTimer(task, parentJob)}
+                          className="flex-1 min-w-[120px] justify-center bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer animate-pulse"
+                          title="Stop active drafting timer"
+                        >
+                          <Square className="w-3 h-3 fill-white shrink-0" />
+                          <span>Stop Timer</span>
+                          {timeDisplay && (
+                            <span className="font-mono bg-red-800/90 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                              {timeDisplay}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartTaskTimer(task, parentJob)}
+                          className="flex-1 min-w-[110px] justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                          title="Start drafting timer for this component"
+                        >
+                          <Play className="w-3 h-3 fill-white shrink-0" />
+                          <span>Start Timer</span>
+                        </button>
+                      )}
 
-                    {/* Mark Complete Button */}
-                    {!isApproved && !isWaitingReview ? (
+                      {/* Mark Complete Button */}
                       <button
                         type="button"
                         onClick={() => handleMarkTaskComplete(task, parentJob)}
@@ -1315,17 +1321,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                         <span>Mark Complete</span>
                       </button>
-                    ) : isWaitingReview ? (
-                      <div className="flex-1 min-w-[100px] text-center text-[11px] font-bold text-amber-800 bg-amber-100/70 py-1.5 rounded-lg border border-amber-200">
-                        Submitted for Review
-                      </div>
-                    ) : (
-                      <div className="flex-1 min-w-[100px] text-center text-[11px] font-bold text-emerald-800 bg-emerald-100/70 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-center gap-1">
-                        <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span>Signed Off</span>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Description */}
                   {task.neededWorkDescription && (
@@ -1560,9 +1557,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             const renderDelegatedTableRow = (task: DelegatedWorkItem) => {
               const parentJob = resolveParentJob(task);
               const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
-              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+              const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && !task.isReviewed;
               const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
               const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
+              const isTaskFinished = isApproved || isWaitingReview || task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt);
               const isTimerActive = isTaskTimerRunning(task, parentJob);
               const timeDisplay = getTaskElapsedTime(task, parentJob);
 
@@ -1659,7 +1657,9 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                   {/* Timer Controls */}
                   <td className="p-3">
-                    {isTimerActive ? (
+                    {isTaskFinished ? (
+                      <span className="text-[10px] text-slate-400 font-mono italic">—</span>
+                    ) : isTimerActive ? (
                       <button
                         type="button"
                         onClick={() => handleStopTaskTimer(task, parentJob)}

@@ -106,6 +106,26 @@ export const STAFF_USERS: StaffUser[] = [
     canEditJobPhases: false,
     canManageRoadblocks: false,
     canAccessPayroll: false
+  },
+  {
+    id: 'staff-james-barnett',
+    name: 'James Barnett',
+    email: 'james.barnett@myplanstore.com',
+    title: 'Architectural Drafter & CAD Specialist',
+    phone: '(555) 789-0123',
+    role: 'drafter',
+    department: 'Drafting',
+    hourlyRate: 85,
+    status: 'active',
+    joinedDate: '2022-08-15',
+    canAccessFinancials: false,
+    canDelegate: false,
+    canViewAllProjects: false,
+    canManageStaff: false,
+    canManageInvoices: false,
+    canEditJobPhases: false,
+    canManageRoadblocks: false,
+    canAccessPayroll: false
   }
 ];
 

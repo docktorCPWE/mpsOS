@@ -37,22 +37,28 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
   const [imageError, setImageError] = useState<boolean>(false);
 
   const cleanName = (filename || title || '').toLowerCase();
-  const isPdf =
-    Boolean(url?.startsWith('data:application/pdf')) ||
-    Boolean(url?.includes('application/pdf')) ||
-    cleanName.endsWith('.pdf') ||
-    previewType === 'pdf_spec';
 
+  // 1. Prioritize image formats first (data:image URL, image extensions, or render previewType)
   const isImage =
-    !isPdf &&
-    (Boolean(url?.startsWith('data:image/')) ||
-      /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(cleanName) ||
-      previewType === 'render_image');
+    Boolean(url?.startsWith('data:image/')) ||
+    /\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i.test(cleanName) ||
+    previewType === 'render_image' ||
+    category === '3D Render';
+
+  // 2. Only treat as PDF if it is NOT an image
+  const isPdf =
+    !isImage &&
+    (Boolean(url?.startsWith('data:application/pdf')) ||
+      Boolean(url?.includes('application/pdf')) ||
+      cleanName.endsWith('.pdf') ||
+      previewType === 'pdf_spec');
 
   const isCad =
-    /\.(dwg|dxf|cad|rvt|bim)$/i.test(cleanName) ||
-    previewType === 'cad_file' ||
-    category?.toLowerCase().includes('cad');
+    !isImage &&
+    !isPdf &&
+    (/\.(dwg|dxf|cad|rvt|bim)$/i.test(cleanName) ||
+      previewType === 'cad_file' ||
+      category?.toLowerCase().includes('cad'));
 
   // Render PDF Page 1 on canvas
   useEffect(() => {

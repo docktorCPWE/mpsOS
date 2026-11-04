@@ -81,16 +81,13 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
     ])
   ).filter(Boolean).filter(name => {
     const lower = name.trim().toLowerCase();
-    return lower !== 'aaron' && lower !== 'james';
+    return lower !== 'aaron';
   });
 
   // Filter tasks based on selected tab and filters
   const filteredTasks = allTasks.filter(task => {
-    // Kyle filter condition: items delegated by Kyle or items where Kyle is reviewer
-    const isKyleDelegation = (task.delegatedBy || '').toLowerCase().includes('kyle') || !task.delegatedBy;
-
     if (selectedFilter === 'pending') {
-      const isPending = (task.status === 'Completed' || task.status === 'Under Review') && !task.isReviewed;
+      const isPending = (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && !task.isReviewed;
       if (!isPending) return false;
     } else if (selectedFilter === 'revisions') {
       const isRev = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
@@ -124,7 +121,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
   const activeParentJob = activeTask ? jobs.find(j => j.id === activeTask.jobId || j.job_number === activeTask.jobNumber) : null;
 
   // Counts for tabs
-  const pendingCount = allTasks.filter(t => (t.status === 'Completed' || t.status === 'Under Review') && !t.isReviewed).length;
+  const pendingCount = allTasks.filter(t => (t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.completedAt)) && !t.isReviewed).length;
   const revisionsCount = allTasks.filter(t => t.status === 'Revision Requested' || Boolean(t.revisionRequested)).length;
   const approvedCount = allTasks.filter(t => t.status === 'Completed' && Boolean(t.isReviewed)).length;
 

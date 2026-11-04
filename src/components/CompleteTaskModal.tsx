@@ -277,6 +277,22 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     // Create DeliverableFile objects for project gallery if option selected
     const deliverableSheets: DeliverableFile[] = enrichedReviewFiles.map(f => {
       const cat = fileCategories[f.id] || f.category || 'Floor Plan';
+      const isImg = f.name.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i) !== null || 
+                    Boolean(f.type?.startsWith('image/')) || 
+                    Boolean(f.url?.startsWith('data:image'));
+      const isPdfFile = !isImg && (f.name.toLowerCase().endsWith('.pdf') || Boolean(f.type?.includes('pdf')));
+      const isCadFile = !isImg && !isPdfFile && (f.name.toLowerCase().endsWith('.dwg') || f.name.toLowerCase().endsWith('.dxf') || cat === 'CAD / DWG File');
+
+      const previewType: DeliverableFile['previewType'] = isImg
+        ? 'render_image'
+        : isPdfFile
+        ? 'pdf_spec'
+        : isCadFile
+        ? 'cad_file'
+        : cat === 'Exterior Elevations'
+        ? 'canvas_elevation'
+        : 'pdf_spec';
+
       return {
         id: `deliv-${Date.now()}-${f.id}`,
         title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
@@ -284,7 +300,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
         version: `v2.${Date.now().toString().slice(-2)} (Review)`,
         uploadedAt: effectiveCompletionDate,
         fileSize: f.size,
-        previewType: cat === 'CAD / DWG File' ? 'cad_file' : cat === '3D Render' ? 'render_image' : cat === 'Exterior Elevations' ? 'canvas_elevation' : 'pdf_spec',
+        previewType,
         fileUrl: f.url,
         fileName: f.name,
         changeNotes: `Submitted for review on delegated task "${task.componentTitle}". Notes: ${completionNotes.trim()}`,

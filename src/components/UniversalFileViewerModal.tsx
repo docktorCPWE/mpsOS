@@ -56,18 +56,21 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
   const fileUrl = file.url || '';
   const lowerName = fileName.toLowerCase();
   
-  const isPdf = fileUrl.startsWith('data:application/pdf') || 
+  const isImage = Boolean(fileUrl.startsWith('data:image')) || 
+                  Boolean(file.type?.startsWith('image/')) ||
+                  lowerName.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i) !== null ||
+                  fileUrl.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) !== null ||
+                  file.category === '3D Render';
+
+  const isPdf = !isImage && (
+                fileUrl.startsWith('data:application/pdf') || 
                 lowerName.endsWith('.pdf') || 
-                file.type?.includes('pdf') ||
-                fileUrl.includes('.pdf');
+                Boolean(file.type?.includes('pdf')) ||
+                fileUrl.includes('.pdf')
+  );
 
-  const isImage = fileUrl.startsWith('data:image') || 
-                  lowerName.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/) !== null ||
-                  file.type?.startsWith('image/') ||
-                  fileUrl.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) !== null;
-
-  const isCad = lowerName.endsWith('.dwg') || lowerName.endsWith('.dxf') || file.type?.includes('acad');
-  const isDoc = lowerName.match(/\.(doc|docx|odt|rtf|txt)$/) !== null;
+  const isCad = !isImage && !isPdf && (lowerName.endsWith('.dwg') || lowerName.endsWith('.dxf') || Boolean(file.type?.includes('acad')));
+  const isDoc = !isImage && !isPdf && !isCad && lowerName.match(/\.(doc|docx|odt|rtf|txt)$/) !== null;
 
   const handleDownload = () => {
     downloadFileFromUrl(fileUrl, fileName);
