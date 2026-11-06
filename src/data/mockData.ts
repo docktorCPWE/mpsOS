@@ -302,6 +302,106 @@ export function isMessageRelevantForUser(msg: ChatMessage, staff?: StaffUser, jo
   return false;
 }
 
+export function isTestJob(job: Partial<Job> | Record<string, any>): boolean {
+  if (!job) return false;
+  const num = (job.job_number || '').trim().toUpperCase();
+  const name = (job.project_name || '').toLowerCase();
+  const cust = (job.customer_name || '').toLowerCase();
+  const id = (job.id || '').toLowerCase();
+
+  if (id === 'job-1' || id === 'job-m26-1000' || id === 'job-m26-8800' || id === 'job-m26-300' || id === 'job-m26-195') {
+    return true;
+  }
+  if (num === 'M26-1000' || num === '1000' || num === 'M26-8800' || num === '8800' || num === 'M26-300' || num === '300' || num === 'M26-195' || num === '195') {
+    return true;
+  }
+  if (cust.includes('smiley') || name.includes('smiley') || cust.includes('smileypants')) {
+    return true;
+  }
+  if (cust.includes('chelsey o\'thompson') || cust.includes('chelsey thompson') || name.includes('chelsey o\'thompson')) {
+    return true;
+  }
+  if (cust.includes('testing dummy') || name.includes('testing dummy') || cust.includes('test job') || name.includes('test job')) {
+    return true;
+  }
+  if (name.includes('— testing') || name.includes('testing —') || cust === 'testing') {
+    return true;
+  }
+  return false;
+}
+
+export function isTestDelegatedTask(task: Partial<DelegatedWorkItem> | Record<string, any>): boolean {
+  if (!task) return false;
+  const title = (task.componentTitle || '').toLowerCase();
+  const desc = (task.neededWorkDescription || '').toLowerCase();
+  const notes = (task.notes || '').toLowerCase();
+  const jobNum = (task.jobNumber || '').toUpperCase();
+  const cust = (task.customerName || '').toLowerCase();
+
+  if (jobNum === 'M26-1000' || jobNum === '1000' || jobNum === 'M26-8800' || jobNum === '8800' || jobNum === 'M26-300' || jobNum === '300' || jobNum === 'M26-195' || jobNum === '195') {
+    return true;
+  }
+  if (cust.includes('smiley') || cust.includes('chelsey') || cust.includes('testing')) {
+    return true;
+  }
+  if (
+    desc.includes('draw prelim based on customer plan') ||
+    desc.includes('make changes per customer notes') ||
+    desc.includes('create prelim based on sketch') ||
+    desc.includes('make changes to prelim per customer notes') ||
+    desc.includes('testing dummy') ||
+    desc.includes('test task') ||
+    desc.includes('test card') ||
+    notes.includes('testing dummy') ||
+    title.includes('testing dummy')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isTestDeliverable(del: any): boolean {
+  if (!del) return false;
+  const title = (del.title || '').toLowerCase();
+  const fileName = (del.fileName || '').toLowerCase();
+  if (
+    title.includes('sept 11 layout') ||
+    title.includes('chelsey berry') ||
+    title.includes('customer notes 2') ||
+    title.includes('full layout 3') ||
+    title.includes('m26-279 oct 13 prelim') ||
+    title.includes('m26 240 sept 11 prelim') ||
+    title.includes('cleanshot') ||
+    fileName.includes('cleanshot') ||
+    fileName.includes('sept 11 layout') ||
+    title.includes('testing') ||
+    title.includes('smiley')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isTestComment(comment: any): boolean {
+  if (!comment) return false;
+  const text = (comment.text || '').toLowerCase();
+  if (
+    text.includes('testing dummy') ||
+    text.includes('m26-1000') ||
+    text.includes('m26-8800') ||
+    text.includes('m26-300') ||
+    text.includes('m26-195') ||
+    text.includes('smiley') ||
+    text.includes('chelsey o\'thompson') ||
+    text.includes('draw prelim based on customer plan') ||
+    text.includes('make changes per customer notes') ||
+    text.includes('create prelim based on sketch')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [];
 
 export const INITIAL_JOBS: Job[] = [
@@ -1135,9 +1235,9 @@ export function getStoredJobs(): Job[] {
         return val.trim().toLowerCase() === 'aaron';
       };
 
-      // Filter out dummy job-1 or Testing Dummy or M26-195, and remove dummy James/Aaron assignments
+      // Filter out testing jobs, test cards, test deliverables, and remove dummy James/Aaron assignments
       const cleaned = parsed
-        .filter((j: Job) => j.id !== 'job-1' && j.job_number !== 'M26-195' && j.customer_name !== 'Testing Dummy')
+        .filter((j: Job) => !isTestJob(j))
         .map((j: Job) => {
           let updated = { ...j };
           if (isDummyJames(updated.assigned_drafter) || isDummyAaron(updated.assigned_drafter)) {
@@ -1148,20 +1248,37 @@ export function getStoredJobs(): Job[] {
               (isDummyJames(tl.drafterName) || isDummyAaron(tl.drafterName)) ? { ...tl, drafterName: 'Kyle' } : tl
             );
           }
+          // Remove all testing cards from delegated tasks
           if (updated.delegated_tasks && updated.delegated_tasks.length > 0) {
-            updated.delegated_tasks = updated.delegated_tasks.map(dt => 
-              (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) ? { ...dt, assignedTo: 'Kyle' } : dt
-            );
+            updated.delegated_tasks = updated.delegated_tasks
+              .filter(dt => !isTestDelegatedTask(dt))
+              .map(dt => 
+                (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) ? { ...dt, assignedTo: 'Kyle' } : dt
+              );
           }
+          // Remove testing deliverables
           if (updated.deliverables && updated.deliverables.length > 0) {
-            updated.deliverables = updated.deliverables.map(d =>
-              (isDummyJames(d.authorDrafter) || isDummyAaron(d.authorDrafter)) ? { ...d, authorDrafter: 'Kyle' } : d
-            );
+            updated.deliverables = updated.deliverables
+              .filter(d => !isTestDeliverable(d))
+              .map(d =>
+                (isDummyJames(d.authorDrafter) || isDummyAaron(d.authorDrafter)) ? { ...d, authorDrafter: 'Kyle' } : d
+              );
           }
+          // Remove testing comments
           if (updated.comments && updated.comments.length > 0) {
-            updated.comments = updated.comments.map(c =>
-              (isDummyJames(c.author) || isDummyAaron(c.author)) ? { ...c, author: 'Kyle' } : c
-            );
+            updated.comments = updated.comments
+              .filter(c => !isTestComment(c))
+              .map(c =>
+                (isDummyJames(c.author) || isDummyAaron(c.author)) ? { ...c, author: 'Kyle' } : c
+              );
+          }
+          // Reset any dangling timer fields left running from testing
+          if (updated.active_timer_start && (isTestJob(updated) || isTestDelegatedTask({ neededWorkDescription: updated.active_timer_task }))) {
+            delete updated.active_timer_start;
+            delete updated.active_timer_task;
+            delete updated.active_timer_drafter_id;
+            delete updated.active_timer_drafter_name;
+            delete updated.active_timer_delegated_task_id;
           }
           return updated;
         });
@@ -1177,7 +1294,11 @@ export function getStoredJobs(): Job[] {
 
 export function saveStoredJobs(jobs: Job[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
+    const cleanJobs = jobs.filter(j => !isTestJob(j)).map(j => ({
+      ...j,
+      delegated_tasks: (j.delegated_tasks || []).filter(t => !isTestDelegatedTask(t))
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanJobs));
   } catch (err) {
     console.error('Failed to save jobs:', err);
   }
@@ -1221,7 +1342,17 @@ export function getStoredNotifications(): AppNotification[] {
       const cleaned = parsed.filter(n => {
         if (dismissedIds.includes(n.id) || n.id === 'notif-greg-welcome') return false;
         const text = (n.message || '').toLowerCase();
-        return !text.includes('m26-195') && !text.includes('testing dummy') && !text.includes('mock staff profiles removed');
+        const isTest = 
+          text.includes('m26-1000') ||
+          text.includes('m26-8800') ||
+          text.includes('m26-300') ||
+          text.includes('m26-195') ||
+          text.includes('smiley') ||
+          text.includes('chelsey') ||
+          text.includes('testing dummy') ||
+          text.includes('draw prelim based on customer plan') ||
+          text.includes('mock staff profiles removed');
+        return !isTest;
       });
       localStorage.setItem(NOTIFS_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;
@@ -1255,13 +1386,25 @@ export function getStoredChatMessages(): ChatMessage[] {
     if (Array.isArray(parsed)) {
       const cleaned = parsed.filter((m: ChatMessage) => {
         const text = (m.text || '').toLowerCase();
-        const hasDummyJob = (m.referencedJobNumbers || []).some(j => j.includes('195'));
-        const isDummyText = text.includes('m26-195') || text.includes('testing dummy');
+        const hasTestJob = (m.referencedJobNumbers || []).some(j => 
+          j.includes('195') || j.includes('1000') || j.includes('8800') || j.includes('300')
+        );
+        const isTestText = 
+          text.includes('m26-195') || 
+          text.includes('m26-1000') || 
+          text.includes('m26-8800') || 
+          text.includes('m26-300') || 
+          text.includes('smiley') ||
+          text.includes('chelsey') ||
+          text.includes('testing dummy') ||
+          text.includes('draw prelim based on customer plan') ||
+          text.includes('make changes per customer notes') ||
+          text.includes('create prelim based on sketch');
         const isDummyId = m.id.startsWith('msg-ethan-') || 
                           m.id.startsWith('msg-jm-') || 
                           m.id.startsWith('msg-dr-') || 
                           ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(m.id);
-        return !hasDummyJob && !isDummyText && !isDummyId;
+        return !hasTestJob && !isTestText && !isDummyId;
       });
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;

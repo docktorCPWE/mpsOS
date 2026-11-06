@@ -100,7 +100,7 @@ export const INITIAL_GREG_DEV_CARDS: GregDevProjectCard[] = [
     isPausedByBreak: false,
     todaySeconds: 0,
     totalSeconds: 32400,
-    currentNotes: 'Stem separation DSP testing'
+    currentNotes: 'Stem separation & frequency DSP processing'
   }
 ];
 
@@ -295,7 +295,15 @@ export function getStoredGregDevEntries(): GregDevTimeEntry[] {
       return INITIAL_GREG_DEV_ENTRIES;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const isTestEntry = (e: GregDevTimeEntry) => {
+        const text = (e.notes || '').toLowerCase();
+        return text.includes('dsp testing') || text.includes('test card') || text.includes('dummy') || text.includes('m26-1000') || text.includes('m26-300');
+      };
+      const cleaned = parsed.filter(e => !isTestEntry(e));
+      localStorage.setItem(GREG_DEV_STORAGE_ENTRIES_KEY, JSON.stringify(cleaned));
+      return cleaned;
+    }
     return INITIAL_GREG_DEV_ENTRIES;
   } catch (err) {
     console.warn('Error reading stored Greg dev entries:', err);
