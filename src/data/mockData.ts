@@ -1236,6 +1236,10 @@ export function getStoredJobs(): Job[] {
       raw = localStorage.getItem('my_plan_store_os_jobs_v14');
     }
     if (!raw) {
+      const isInit = typeof window !== 'undefined' && localStorage.getItem('my_plan_store_os_initialized_v1') === 'true';
+      if (isInit) {
+        return [];
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_JOBS));
       return INITIAL_JOBS;
     }

@@ -362,8 +362,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const draftersList = Array.from(
     new Set([
       ...effectiveStaff.map(s => s.name),
-      ...jobs.map(j => canonicalizeDrafterName(j.assigned_drafter.split(',')[0])),
-      ...allDelegatedTasks.map(t => canonicalizeDrafterName(t.assignedTo))
+      ...jobs.map(j => canonicalizeDrafterName((j.assigned_drafter || '').split(',')[0])),
+      ...allDelegatedTasks.map(t => canonicalizeDrafterName(t.assignedTo || ''))
     ])
   ).filter(Boolean).filter(name => {
     const lower = name.trim().toLowerCase();
@@ -3424,10 +3424,13 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 disabled={isDeletingJob}
                 onClick={async () => {
                   if (onDeleteJob && jobToDelete) {
+                    const idToDelete = jobToDelete.id;
+                    setJobToDelete(null);
                     setIsDeletingJob(true);
                     try {
-                      await onDeleteJob(jobToDelete.id);
-                      setJobToDelete(null);
+                      await onDeleteJob(idToDelete);
+                    } catch (err) {
+                      console.error('Delete project error in DrafterDashboard:', err);
                     } finally {
                       setIsDeletingJob(false);
                     }

@@ -58,6 +58,7 @@ import { TimeClockBar } from './components/TimeClockBar';
 import { TimeCardModal } from './components/TimeCardModal';
 import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLocalDateString } from './utils/timeCardExport';
 import { formatSecondsToReadable } from './utils/timeUtils';
 
@@ -157,21 +158,28 @@ export default function App() {
     // 3. Connect real-time Firestore synchronization
     const unsubscribeJobs = subscribeToJobs(
       (cloudJobs) => {
-        if (cloudJobs && cloudJobs.length > 0) {
+        if (cloudJobs) {
           setJobs(cloudJobs);
           saveStoredJobs(cloudJobs);
-          setSelectedCustomerId(prev => prev || cloudJobs[0].id);
+          setSelectedCustomerId(prev => {
+            if (cloudJobs.some(j => j.id === prev)) return prev;
+            return cloudJobs[0]?.id || '';
+          });
 
           // Keep selectedJobForDetail synchronized with cloud updates if open
           setSelectedJobForDetail(prevSelected => {
             if (!prevSelected) return null;
-            const updated = cloudJobs.find(j => j.id === prevSelected.id);
-            return updated || prevSelected;
+            return cloudJobs.find(j => j.id === prevSelected.id) || null;
           });
         }
       },
       () => {
-        // Database collection is currently empty; seed initial jobs
+        // Only seed on initial launch if not previously initialized
+        const isInit = typeof window !== 'undefined' && localStorage.getItem('my_plan_store_os_initialized_v1') === 'true';
+        if (isInit) {
+          console.log('[Firestore] Jobs empty but workspace already initialized. Skipping re-seed.');
+          return;
+        }
         const local = getStoredJobs();
         if (local && local.length > 0) {
           seedInitialJobsToFirestore(local);
@@ -320,11 +328,14 @@ export default function App() {
     newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
     specificJobId?: string
   ) => {
+    let computedNextJobs: Job[] = [];
+
     setJobs(prevJobs => {
       const nextJobs = typeof newJobsOrUpdater === 'function'
         ? newJobsOrUpdater(prevJobs)
         : newJobsOrUpdater;
 
+      computedNextJobs = nextJobs;
       saveStoredJobs(nextJobs);
 
       // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
@@ -341,32 +352,31 @@ export default function App() {
           console.warn('[Firestore] Sync warning for job:', job.job_number, err);
         });
       });
-      
-      // Update selected detail job reference if open
-      if (selectedJobForDetail) {
-        const match = nextJobs.find(j => j.id === selectedJobForDetail.id);
-        if (match) setSelectedJobForDetail(match);
-      }
-
-      // Update jobToDelegate if open
-      if (jobToDelegate) {
-        const match = nextJobs.find(j => j.id === jobToDelegate.id);
-        if (match) setJobToDelegate(match);
-      }
-
-      // Update timerPromptJob if open
-      if (timerPromptJob) {
-        const match = nextJobs.find(j => j.id === timerPromptJob.job.id);
-        if (match) setTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
-      }
-
-      // Update stopTimerPromptJob if open
-      if (stopTimerPromptJob) {
-        const match = nextJobs.find(j => j.id === stopTimerPromptJob.job.id);
-        if (match) setStopTimerPromptJob(prev => prev ? { ...prev, job: match } : null);
-      }
 
       return nextJobs;
+    });
+
+    // Safely update detail and modal references OUTSIDE the setJobs state updater!
+    setSelectedJobForDetail(prev => {
+      if (!prev) return null;
+      return computedNextJobs.find(j => j.id === prev.id) || null;
+    });
+
+    setJobToDelegate(prev => {
+      if (!prev) return null;
+      return computedNextJobs.find(j => j.id === prev.id) || null;
+    });
+
+    setTimerPromptJob(prev => {
+      if (!prev) return null;
+      const match = computedNextJobs.find(j => j.id === prev.job.id);
+      return match ? { ...prev, job: match } : null;
+    });
+
+    setStopTimerPromptJob(prev => {
+      if (!prev) return null;
+      const match = computedNextJobs.find(j => j.id === prev.job.id);
+      return match ? { ...prev, job: match } : null;
     });
   };
 
@@ -2316,16 +2326,26 @@ export default function App() {
     const jobNumber = targetJob.job_number;
     const customerName = targetJob.customer_name;
 
-    // 1. Remove from local state
-    const remainingJobs = jobs.filter(j => j.id !== realJobId);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('my_plan_store_os_initialized_v1', 'true');
+      }
+    } catch {}
+
+    // 1. Close all modals referencing this job immediately
+    setSelectedJobForDetail(prev => (prev && (prev.id === realJobId || isTargetJob(prev, realJobId)) ? null : prev));
+    setJobToDelegate(prev => (prev && (prev.id === realJobId || isTargetJob(prev, realJobId)) ? null : prev));
+    setTimerPromptJob(prev => (prev && (prev.job.id === realJobId || isTargetJob(prev.job, realJobId)) ? null : prev));
+    setStopTimerPromptJob(prev => (prev && (prev.job.id === realJobId || isTargetJob(prev.job, realJobId)) ? null : prev));
+
+    // 2. Remove from local state
+    const remainingJobs = jobs.filter(j => j.id !== realJobId && !isTargetJob(j, realJobId));
     updateJobsState(remainingJobs);
 
-    // 2. If open in modal, close it
-    if (selectedJobForDetail && (selectedJobForDetail.id === realJobId || selectedJobForDetail.job_number === jobNumber)) {
-      setSelectedJobForDetail(null);
-    }
+    // 3. Update customer ID if active
+    setSelectedCustomerId(prev => (prev === realJobId ? (remainingJobs[0]?.id || '') : prev));
 
-    // 3. Delete from Firestore permanently
+    // 4. Delete from Firestore permanently
     try {
       await deleteJobFromFirestore(realJobId);
       console.log(`[Firestore] Successfully deleted job #${jobNumber} (${realJobId}) from Firestore`);
@@ -2333,7 +2353,7 @@ export default function App() {
       console.error('[Firestore] Error deleting job from Firestore:', err);
     }
 
-    // 4. Dispatch a system notification
+    // 5. Dispatch a system notification
     setNotifications(prev => [
       {
         id: `notif-del-${Date.now()}`,
@@ -2575,72 +2595,74 @@ export default function App() {
 
       {/* Main OS View Switcher */}
       <main className="flex-1">
-        {userRole === 'drafter' ? (
-          <DrafterDashboard
-            jobs={jobs}
-            currentStaff={currentStaff}
-            staffList={staffList}
-            onUpdateStatus={handleUpdateJobStatus}
-            onToggleRoadblock={handleToggleRoadblock}
-            onSelectJob={handleOpenJobDetail}
-            onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
-            onStartTimer={handleStartTimer}
-            onStopTimer={handleStopTimer}
-            onOpenDelegateModal={(job) => setJobToDelegate(job)}
-            onOpenCompleteTaskModal={(task, job) => setTaskToComplete({ task, job })}
-            onUpdateTaskStatus={handleUpdateTaskStatus}
-            onApproveTaskReview={handleApproveTaskReview}
-            onRequestTaskRevision={handleRequestTaskRevision}
-            onDeleteDelegatedTask={handleDeleteDelegatedTask}
-            onDeleteJob={handleDeleteJob}
-            onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
-            onSaveDefaultLayout={handleUpdatePreferredLayout}
-            onUpdateCustomerContact={handleUpdateCustomerContact}
-            nowTimestamp={nowTimestamp}
-            devCards={devCards}
-            devEntries={devEntries}
-            onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
-            onAddJobNote={handleAddJobNote}
-          />
-        ) : userRole === 'admin' ? (
-          <AdminBillingDashboard
-            jobs={jobs}
-            currentStaff={currentStaff}
-            staffList={staffList}
-            onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
-            onUpdateStatus={handleUpdateJobStatus}
-            onToggleRoadblock={handleToggleRoadblock}
-            onSelectJob={handleOpenJobDetail}
-            onUpdateJob={(updatedJob) => {
-              const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
-              updateJobsState(updatedList);
-              if (selectedJobForDetail && selectedJobForDetail.id === updatedJob.id) {
-                setSelectedJobForDetail(updatedJob);
-              }
-            }}
-            onDispatchNotifications={handleDispatchNotifications}
-            nowTimestamp={nowTimestamp}
-            payrollEntries={payrollEntries}
-            onSavePayrollEntry={handleSavePayrollEntry}
-            onDeletePayrollEntry={handleDeletePayrollEntry}
-            devCards={devCards}
-            devEntries={devEntries}
-            onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
-          />
-        ) : (
-          activeCustomerJob ? (
-            <CustomerPortal
-              job={activeCustomerJob}
-              allJobs={jobs}
-              onAddComment={(text, loc) => handleAddComment(activeCustomerJob.id, text, loc)}
-              onApprovePhase={() => handleApprovePhase(activeCustomerJob.id)}
-              onRequestRevision={(notes) => handleRequestRevision(activeCustomerJob.id, notes)}
+        <ErrorBoundary fallbackTitle="Workspace View Error">
+          {userRole === 'drafter' ? (
+            <DrafterDashboard
+              jobs={jobs}
+              currentStaff={currentStaff}
+              staffList={staffList}
+              onUpdateStatus={handleUpdateJobStatus}
+              onToggleRoadblock={handleToggleRoadblock}
+              onSelectJob={handleOpenJobDetail}
+              onOpenNewJobModal={() => setIsNewJobModalOpen(true)}
+              onStartTimer={handleStartTimer}
+              onStopTimer={handleStopTimer}
+              onOpenDelegateModal={(job) => setJobToDelegate(job)}
+              onOpenCompleteTaskModal={(task, job) => setTaskToComplete({ task, job })}
+              onUpdateTaskStatus={handleUpdateTaskStatus}
+              onApproveTaskReview={handleApproveTaskReview}
+              onRequestTaskRevision={handleRequestTaskRevision}
+              onDeleteDelegatedTask={handleDeleteDelegatedTask}
+              onDeleteJob={handleDeleteJob}
+              onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
+              onSaveDefaultLayout={handleUpdatePreferredLayout}
               onUpdateCustomerContact={handleUpdateCustomerContact}
+              nowTimestamp={nowTimestamp}
+              devCards={devCards}
+              devEntries={devEntries}
+              onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
+              onAddJobNote={handleAddJobNote}
+            />
+          ) : userRole === 'admin' ? (
+            <AdminBillingDashboard
+              jobs={jobs}
+              currentStaff={currentStaff}
+              staffList={staffList}
+              onOpenStaffManagement={() => setIsStaffManagementOpen(true)}
+              onUpdateStatus={handleUpdateJobStatus}
+              onToggleRoadblock={handleToggleRoadblock}
+              onSelectJob={handleOpenJobDetail}
+              onUpdateJob={(updatedJob) => {
+                const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
+                updateJobsState(updatedList);
+                if (selectedJobForDetail && selectedJobForDetail.id === updatedJob.id) {
+                  setSelectedJobForDetail(updatedJob);
+                }
+              }}
+              onDispatchNotifications={handleDispatchNotifications}
+              nowTimestamp={nowTimestamp}
+              payrollEntries={payrollEntries}
+              onSavePayrollEntry={handleSavePayrollEntry}
+              onDeletePayrollEntry={handleDeletePayrollEntry}
+              devCards={devCards}
+              devEntries={devEntries}
+              onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
             />
           ) : (
-            <div className="p-12 text-center text-slate-500">No active customer jobs found.</div>
-          )
-        )}
+            activeCustomerJob ? (
+              <CustomerPortal
+                job={activeCustomerJob}
+                allJobs={jobs}
+                onAddComment={(text, loc) => handleAddComment(activeCustomerJob.id, text, loc)}
+                onApprovePhase={() => handleApprovePhase(activeCustomerJob.id)}
+                onRequestRevision={(notes) => handleRequestRevision(activeCustomerJob.id, notes)}
+                onUpdateCustomerContact={handleUpdateCustomerContact}
+              />
+            ) : (
+              <div className="p-12 text-center text-slate-500">No active customer jobs found.</div>
+            )
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* MODAL 1: Drafter Job Detail & Control Workspace */}

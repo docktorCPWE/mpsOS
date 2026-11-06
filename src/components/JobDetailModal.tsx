@@ -6170,11 +6170,14 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 disabled={isDeletingProject}
                 onClick={async () => {
                   if (onDeleteJob) {
+                    const idToDelete = job.id;
+                    setShowDeleteProjectConfirm(false);
+                    onClose();
                     setIsDeletingProject(true);
                     try {
-                      await onDeleteJob(job.id);
-                      setShowDeleteProjectConfirm(false);
-                      onClose();
+                      await onDeleteJob(idToDelete);
+                    } catch (err) {
+                      console.error('Delete project error in JobDetailModal:', err);
                     } finally {
                       setIsDeletingProject(false);
                     }

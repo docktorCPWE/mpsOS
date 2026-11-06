@@ -118,8 +118,15 @@ export function subscribeToJobs(
       collection(db, path),
       (snapshot) => {
         if (snapshot.empty) {
-          console.log('[Firestore] Jobs collection is empty in cloud database. Triggering seed...');
-          onSeedNeeded();
+          // Always notify subscribers that jobs is empty so UI clears deleted cards
+          onUpdate([]);
+          const isInitialized = typeof window !== 'undefined' && localStorage.getItem('my_plan_store_os_initialized_v1') === 'true';
+          if (!isInitialized && onSeedNeeded) {
+            console.log('[Firestore] Jobs collection is empty on first boot. Triggering initial seed...');
+            onSeedNeeded();
+          } else {
+            console.log('[Firestore] Jobs collection is currently empty (cards purged/deleted by user).');
+          }
         } else {
           const loaded: Job[] = [];
           snapshot.forEach((docSnap) => {
@@ -317,6 +324,11 @@ export async function seedInitialJobsToFirestore(initialJobs: Job[]): Promise<vo
       batch.set(doc(db, 'jobs', job.id), cleanJob);
     }
     await batch.commit();
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('my_plan_store_os_initialized_v1', 'true');
+      }
+    } catch {}
     console.log(`[Firestore] Successfully seeded ${initialJobs.length} projects to cloud database.`);
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);

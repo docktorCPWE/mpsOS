@@ -689,10 +689,12 @@ export const JobCard: React.FC<JobCardProps> = ({
                 disabled={isDeleting}
                 onClick={async () => {
                   if (onDeleteJob) {
+                    setShowDeleteConfirm(false);
                     setIsDeleting(true);
                     try {
                       await onDeleteJob(job.id);
-                      setShowDeleteConfirm(false);
+                    } catch (err) {
+                      console.error('Delete job error in JobCard:', err);
                     } finally {
                       setIsDeleting(false);
                     }
