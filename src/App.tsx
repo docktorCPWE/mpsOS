@@ -14,6 +14,7 @@ import {
   testConnection,
   subscribeToJobs,
   saveJobToFirestore,
+  deleteJobFromFirestore,
   seedInitialJobsToFirestore,
   subscribeToStaff,
   saveStaffToFirestore,
@@ -2300,6 +2301,56 @@ export default function App() {
     }));
   };
 
+  // 11c. Handle Permanently Deleting a Project Plan / Job (Only Greg, Kyle, or Jason)
+  const handleDeleteJob = async (jobId: string) => {
+    if (!canUserDeleteDelegatedItem(currentStaff)) {
+      console.warn('Unauthorized attempt to delete project by:', currentStaff.name);
+      alert('Only Greg Hyatt, Kyle Edmonson, or Jason Barnett are authorized to delete projects.');
+      return;
+    }
+
+    const targetJob = jobs.find(j => j.id === jobId || isTargetJob(j, jobId));
+    if (!targetJob) return;
+
+    const realJobId = targetJob.id;
+    const jobNumber = targetJob.job_number;
+    const customerName = targetJob.customer_name;
+
+    // 1. Remove from local state
+    const remainingJobs = jobs.filter(j => j.id !== realJobId);
+    updateJobsState(remainingJobs);
+
+    // 2. If open in modal, close it
+    if (selectedJobForDetail && (selectedJobForDetail.id === realJobId || selectedJobForDetail.job_number === jobNumber)) {
+      setSelectedJobForDetail(null);
+    }
+
+    // 3. Delete from Firestore permanently
+    try {
+      await deleteJobFromFirestore(realJobId);
+      console.log(`[Firestore] Successfully deleted job #${jobNumber} (${realJobId}) from Firestore`);
+    } catch (err) {
+      console.error('[Firestore] Error deleting job from Firestore:', err);
+    }
+
+    // 4. Dispatch a system notification
+    setNotifications(prev => [
+      {
+        id: `notif-del-${Date.now()}`,
+        senderId: currentStaff.id,
+        senderName: currentStaff.name,
+        title: `🗑️ Project Deleted: #${jobNumber}`,
+        message: `${currentStaff.name} permanently deleted project #${jobNumber} (${customerName}) and all associated files.`,
+        jobId: realJobId,
+        jobNumber: jobNumber,
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'general'
+      },
+      ...prev
+    ]);
+  };
+
   // 12. Handle Updating Customer Contact Info (Email, Phone, Address, Name)
   const handleUpdateCustomerContact = (
     targetCustomerName: string,
@@ -2541,6 +2592,7 @@ export default function App() {
             onApproveTaskReview={handleApproveTaskReview}
             onRequestTaskRevision={handleRequestTaskRevision}
             onDeleteDelegatedTask={handleDeleteDelegatedTask}
+            onDeleteJob={handleDeleteJob}
             onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
             onSaveDefaultLayout={handleUpdatePreferredLayout}
             onUpdateCustomerContact={handleUpdateCustomerContact}
@@ -2618,6 +2670,7 @@ export default function App() {
           onApproveTaskReview={handleApproveTaskReview}
           onRequestTaskRevision={handleRequestTaskRevision}
           onDeleteDelegatedTask={handleDeleteDelegatedTask}
+          onDeleteJob={handleDeleteJob}
           currentStaff={currentStaff}
           staffList={staffList}
           initialTab={jobDetailInitialTab}

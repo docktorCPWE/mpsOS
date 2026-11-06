@@ -25,6 +25,7 @@ interface DrafterDashboardProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   onDeleteDelegatedTask?: (jobId: string, taskId: string) => void;
+  onDeleteJob?: (jobId: string) => void;
   onOpenKyleInbox?: () => void;
   onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'list' | 'table') => void;
   onUpdateCustomerContact?: (customerName: string, updatedContact: {
@@ -69,6 +70,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onApproveTaskReview,
   onRequestTaskRevision,
   onDeleteDelegatedTask,
+  onDeleteJob,
   onOpenKyleInbox,
   onSaveDefaultLayout,
   onUpdateCustomerContact,
@@ -81,6 +83,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const canDelete = canUserDeleteDelegatedItem(currentStaff);
   const [taskToDelete, setTaskToDelete] = useState<{ task: DelegatedWorkItem; job?: Job } | null>(null);
+  const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
+  const [isDeletingJob, setIsDeletingJob] = useState(false);
 
   // Add Job Note Modal state
   const [addJobNoteModalJob, setAddJobNoteModalJob] = useState<Job | null>(null);
@@ -2315,6 +2319,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               onOpenDelegateModal={onOpenDelegateModal}
               onOpenCompleteTaskModal={onOpenCompleteTaskModal}
               onUpdateCustomerContact={onUpdateCustomerContact}
+              onDeleteJob={onDeleteJob}
+              currentStaff={currentStaff}
             />
           ))}
 
@@ -2382,17 +2388,32 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                               </span>
                             )}
                           </div>
-                          {isRunning ? (
-                            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
-                              <Clock className="w-3 h-3 text-emerald-600 animate-spin" />
-                              Timer Active
-                            </span>
-                          ) : job.roadblock ? (
-                            <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3 text-red-600" />
-                              Roadblock
-                            </span>
-                          ) : null}
+                          <div className="flex items-center gap-1">
+                            {isRunning ? (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
+                                <Clock className="w-3 h-3 text-emerald-600 animate-spin" />
+                                Timer Active
+                              </span>
+                            ) : job.roadblock ? (
+                              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-red-600" />
+                                Roadblock
+                              </span>
+                            ) : null}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setJobToDelete(job);
+                                }}
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
+                                title="Delete Project (Greg, Kyle, Jason only)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         <div>
@@ -2532,12 +2553,27 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           ) : (
                             <span>{(job.time_logs || []).length} sessions</span>
                           )}
-                          <button
-                            onClick={() => onSelectJob(job)}
-                            className="text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-0.5 cursor-pointer"
-                          >
-                            Open Project <ArrowRight className="w-3 h-3" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {canDelete && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setJobToDelete(job);
+                                }}
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
+                                title="Delete Project (Greg, Kyle, Jason only)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onSelectJob(job)}
+                              className="text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-0.5 cursor-pointer"
+                            >
+                              Open Project <ArrowRight className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2818,6 +2854,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       </button>
                     )}
 
+                    {/* Delete Project (Greg, Kyle, Jason Only) */}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => setJobToDelete(job)}
+                        className="p-2 rounded-xl bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 hover:border-red-200 transition cursor-pointer"
+                        title="Delete Project (Greg, Kyle, Jason only)"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+
                     {/* Open Plan Modal */}
                     <button
                       onClick={() => onSelectJob(job)}
@@ -3075,6 +3123,16 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                               Delegate
                             </button>
                           )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => setJobToDelete(job)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition cursor-pointer shrink-0"
+                              title="Delete Project (Greg, Kyle, Jason only)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => onSelectJob(job)}
                             className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3.5 py-1.5 rounded-lg shadow-xs text-xs flex items-center gap-1.5 cursor-pointer shrink-0 transition active:scale-95"
@@ -3317,6 +3375,68 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete Item & Attachments</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Permanently Delete Project Plan (Greg, Kyle, Jason Only) */}
+      {jobToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-red-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0 border border-red-200 shadow-2xs">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Permanently Delete Project?</h3>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">
+                  Plan #{jobToDelete.job_number.replace(/^#/, '')} • {jobToDelete.customer_name}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-red-50/70 border border-red-200/80 rounded-xl p-3.5 space-y-2 text-xs text-red-950">
+              <p className="font-bold text-slate-900">
+                Project: <span className="text-red-700 font-mono">{jobToDelete.project_name || jobToDelete.customer_name}</span>
+              </p>
+              <p className="text-slate-600 leading-relaxed">
+                Are you sure you want to permanently delete this project? This will permanently remove the project card, all associated time logs ({(jobToDelete.time_logs || []).length}), deliverable files ({(jobToDelete.deliverables || []).length}), comments, and delegated tasks from the database. This action cannot be undone.
+              </p>
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-medium pt-1 border-t border-red-200/60">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Only Greg Hyatt, Kyle Edmonson, or Jason Barnett can delete projects.</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isDeletingJob}
+                onClick={() => setJobToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingJob}
+                onClick={async () => {
+                  if (onDeleteJob && jobToDelete) {
+                    setIsDeletingJob(true);
+                    try {
+                      await onDeleteJob(jobToDelete.id);
+                      setJobToDelete(null);
+                    } finally {
+                      setIsDeletingJob(false);
+                    }
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-600/20 transition cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingJob ? 'Deleting Project...' : 'Permanently Delete Project'}</span>
               </button>
             </div>
           </div>
