@@ -21,10 +21,11 @@ import {
   Sparkles,
   Paperclip,
   Check,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import { Job, DelegatedWorkItem, DeliverableFile, StaffUser } from '../types';
-import { STAFF_USERS } from '../data/mockData';
+import { STAFF_USERS, canUserDeleteDelegatedItem } from '../data/mockData';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { UniversalFileViewerModal, ViewableFile } from './UniversalFileViewerModal';
 import { downloadFileFromUrl } from '../utils/attachmentUtils';
@@ -39,6 +40,7 @@ interface KyleDelegationInboxModalProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNote?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNote: string) => void;
   onOpenRevisionModal?: (task: DelegatedWorkItem, job?: Job) => void;
+  onDeleteDelegatedTask?: (jobId: string, taskId: string) => void;
 }
 
 export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> = ({
@@ -51,6 +53,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
   onApproveTaskReview,
   onRequestTaskRevision,
   onOpenRevisionModal,
+  onDeleteDelegatedTask,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<'pending' | 'revisions' | 'approved' | 'all'>('pending');
   const [drafterFilter, setDrafterFilter] = useState<string>('all');
@@ -60,6 +63,10 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
   const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
   const [revisionModalTask, setRevisionModalTask] = useState<{ task: DelegatedWorkItem; job?: Job } | null>(null);
   const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
+  const [confirmDeleteTask, setConfirmDeleteTask] = useState<DelegatedWorkItem | null>(null);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
+
+  const canDelete = canUserDeleteDelegatedItem(currentStaff);
 
   if (!isOpen) return null;
 
@@ -272,7 +279,7 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                 const isApproved = task.status === 'Completed' && Boolean(task.isReviewed);
 
                 return (
-                  <button
+                  <div
                     key={task.id}
                     onClick={() => {
                       setSelectedTaskId(task.id);
@@ -332,14 +339,29 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                         <span>{task.assignedTo}</span>
                       </div>
 
-                      {task.attachments && task.attachments.length > 0 && (
-                        <span className="flex items-center gap-1 font-mono text-blue-400">
-                          <Paperclip className="w-3 h-3" />
-                          <span>{task.attachments.length} file{task.attachments.length === 1 ? '' : 's'}</span>
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {task.attachments && task.attachments.length > 0 && (
+                          <span className="flex items-center gap-1 font-mono text-blue-400">
+                            <Paperclip className="w-3 h-3" />
+                            <span>{task.attachments.length} file{task.attachments.length === 1 ? '' : 's'}</span>
+                          </span>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteTask(task);
+                            }}
+                            className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-950/60 rounded transition cursor-pointer"
+                            title="Delete Delegated Item & Files"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })
             )}
@@ -370,18 +392,31 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
                       </div>
                     </div>
 
-                    {activeParentJob && (
-                      <button
-                        onClick={() => {
-                          onSelectJob(activeParentJob);
-                          onClose();
-                        }}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                      >
-                        <span>Open Blueprint</span>
-                        <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteTask(activeTask)}
+                          className="text-xs bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/80 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                          title="Delete Delegated Task & Attachments"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                          <span>Delete Task</span>
+                        </button>
+                      )}
+                      {activeParentJob && (
+                        <button
+                          onClick={() => {
+                            onSelectJob(activeParentJob);
+                            onClose();
+                          }}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <span>Open Blueprint</span>
+                          <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Email meta grid */}
@@ -581,6 +616,72 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
           onClose={() => setPreviewFile(null)}
           subtitle={activeTask ? `${activeTask.componentTitle} • Job #${activeTask.jobNumber}` : undefined}
         />
+      )}
+
+      {/* Delete Delegated Task Confirmation Modal */}
+      {confirmDeleteTask && (
+        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-red-500/40 w-full max-w-md rounded-2xl p-6 shadow-2xl text-slate-100 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white">Delete Delegated Task & Files</h3>
+                <p className="text-xs text-slate-400 font-mono">
+                  Job #{confirmDeleteTask.jobNumber?.replace(/^#/, '')} • {confirmDeleteTask.customerName}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to delete <strong className="text-white">"{confirmDeleteTask.componentTitle}"</strong> assigned to <strong className="text-white">{confirmDeleteTask.assignedTo}</strong>?
+            </p>
+
+            <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-[11px] text-red-300 space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-red-200">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                <span>Permanent Database Deletion:</span>
+              </p>
+              <p>
+                This will permanently delete this delegated task and all linked reference/review files and deliverables from Firestore. Active timers for this item will be stopped. Only Greg, Kyle, and Jason are authorized to delete items.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingTask}
+                onClick={() => setConfirmDeleteTask(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingTask}
+                onClick={async () => {
+                  setIsDeletingTask(true);
+                  try {
+                    if (onDeleteDelegatedTask) {
+                      onDeleteDelegatedTask(confirmDeleteTask.jobId, confirmDeleteTask.id);
+                    }
+                    if (selectedTaskId === confirmDeleteTask.id) {
+                      setSelectedTaskId(null);
+                    }
+                    setConfirmDeleteTask(null);
+                  } finally {
+                    setIsDeletingTask(false);
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold bg-red-600 hover:bg-red-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-red-950/50 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingTask ? 'Deleting...' : 'Permanently Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

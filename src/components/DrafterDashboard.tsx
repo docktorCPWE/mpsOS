@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, Calendar } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, Calendar, Trash2 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
@@ -24,6 +24,7 @@ interface DrafterDashboardProps {
   onUpdateTaskStatus?: (jobId: string, taskId: string, newStatus: DelegatedWorkItem['status']) => void;
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
+  onDeleteDelegatedTask?: (jobId: string, taskId: string) => void;
   onOpenKyleInbox?: () => void;
   onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'list' | 'table') => void;
   onUpdateCustomerContact?: (customerName: string, updatedContact: {
@@ -67,6 +68,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onUpdateTaskStatus,
   onApproveTaskReview,
   onRequestTaskRevision,
+  onDeleteDelegatedTask,
   onOpenKyleInbox,
   onSaveDefaultLayout,
   onUpdateCustomerContact,
@@ -77,6 +79,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onAddJobNote,
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
+  const canDelete = canUserDeleteDelegatedItem(currentStaff);
+  const [taskToDelete, setTaskToDelete] = useState<{ task: DelegatedWorkItem; job?: Job } | null>(null);
 
   // Add Job Note Modal state
   const [addJobNoteModalJob, setAddJobNoteModalJob] = useState<Job | null>(null);
@@ -1213,8 +1217,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       )}
                     </div>
 
-                    {/* Dynamic Status Badge (Neatly right aligned, never squashed) */}
-                    <div className="shrink-0">
+                    {/* Dynamic Status Badge + Delete Action for Greg/Kyle/Jason */}
+                    <div className="shrink-0 flex items-center gap-1.5">
                       {isApproved ? (
                         <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1 shadow-2xs">
                           <CheckCircle className="w-3 h-3 text-emerald-600" />
@@ -1243,6 +1247,17 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                         <span className="text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs">
                           Pending
                         </span>
+                      )}
+
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => setTaskToDelete({ task, job: parentJob })}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer border border-transparent hover:border-red-200"
+                          title="Delete delegated item and attached files (Greg, Kyle, Jason only)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1726,6 +1741,16 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                           className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded transition cursor-pointer"
                         >
                           Open Plan
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => setTaskToDelete({ task, job: parentJob })}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer border border-transparent hover:border-red-200"
+                          title="Delete delegated item & attached files (Greg, Kyle, Jason only)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
@@ -3240,6 +3265,62 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           subtitle={`Attached to Task: ${previewingAttachment.taskTitle}${previewingAttachment.jobNumber ? ` • Job #${previewingAttachment.jobNumber}` : ''}`}
           onClose={() => setPreviewingAttachment(null)}
         />
+      )}
+
+      {/* Confirmation Modal: Delete Delegated Item & Attached Files (Greg, Kyle, Jason Only) */}
+      {taskToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-red-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0 border border-red-200 shadow-2xs">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Delete Delegated Work Item?</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Plan #{taskToDelete.task.jobNumber.replace(/^#/, '')} • {taskToDelete.task.customerName || taskToDelete.job?.customer_name || ''}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-red-50/70 border border-red-200/80 rounded-xl p-3.5 space-y-2 text-xs text-red-950">
+              <p className="font-bold text-slate-900">
+                Component: <span className="text-red-700 font-mono">"{taskToDelete.task.componentTitle}"</span>
+              </p>
+              <p className="text-slate-600 leading-relaxed">
+                Are you sure you want to delete this delegated item? This will permanently remove the item from the board and delete all{' '}
+                <strong>{(taskToDelete.task.attachments || []).length} attached reference/working file(s)</strong> from the database to save space.
+              </p>
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-medium pt-1 border-t border-red-200/60">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Only Greg Hyatt, Kyle Edmonson, or Jason Barnett can delete this item.</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setTaskToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteDelegatedTask && taskToDelete) {
+                    onDeleteDelegatedTask(taskToDelete.task.jobId || taskToDelete.job?.id || '', taskToDelete.task.id);
+                  }
+                  setTaskToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-600/20 transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Item & Attachments</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

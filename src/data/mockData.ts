@@ -163,6 +163,21 @@ export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): bo
   return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
 }
 
+export function canUserDeleteDelegatedItem(userNameOrStaff?: string | StaffUser | null): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    const id = (userNameOrStaff.id || '').toLowerCase();
+    const email = (userNameOrStaff.email || '').toLowerCase();
+    const name = (userNameOrStaff.name || '').toLowerCase();
+
+    if (id === 'staff-greg' || id === 'staff-kyle' || id === 'staff-jason') return true;
+    if (email === 'arkcwd@gmail.com' || email.includes('kyle') || email.includes('jason')) return true;
+    return name.includes('greg') || name.includes('kyle') || name.includes('jason');
+  }
+  const name = String(userNameOrStaff).toLowerCase();
+  return name.includes('greg') || name.includes('kyle') || name.includes('jason');
+}
+
 export function isJobArchived(job: Job): boolean {
   return Boolean(job.is_archived || job.invoice_status === 'Paid');
 }

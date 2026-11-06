@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -18,6 +18,7 @@ import {
   subscribeToStaff,
   saveStaffToFirestore,
   deleteStaffFromFirestore,
+  deleteDelegatedTaskFromFirestore,
   seedStaffToFirestore,
   subscribeToChat,
   saveChatMessageToFirestore,
@@ -2205,6 +2206,100 @@ export default function App() {
     }
   };
 
+  // 11b. Handle Deleting a Delegated Task and All its Attachments (Only Greg, Kyle, or Jason)
+  const handleDeleteDelegatedTask = async (jobId: string, taskId: string) => {
+    if (!canUserDeleteDelegatedItem(currentStaff)) {
+      console.warn('Unauthorized attempt to delete delegated task by:', currentStaff.name);
+      return;
+    }
+
+    const targetJob = jobs.find(j => 
+      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+      (jobId && isTargetJob(j, jobId)) ||
+      (jobId && j.id === jobId)
+    );
+    if (!targetJob) return;
+
+    const targetJobId = targetJob.id;
+    const taskToDelete = (targetJob.delegated_tasks || []).find(t => t.id === taskId);
+    const taskTitle = taskToDelete ? taskToDelete.componentTitle : 'Delegated Component';
+    const attachmentCount = taskToDelete?.attachments?.length || 0;
+    const deletedAttachmentIds = new Set((taskToDelete?.attachments || []).map(a => a.id));
+    const deletedAttachmentNames = new Set((taskToDelete?.attachments || []).map(a => a.name.toLowerCase()));
+    const nowIso = new Date().toISOString();
+
+    const updatedJobs = jobs.map(j => {
+      if (j.id === targetJobId) {
+        const remainingTasks = (j.delegated_tasks || []).filter(t => t.id !== taskId);
+
+        // Remove any deliverables linked to this task or its attachments
+        const remainingDeliverables = (j.deliverables || []).filter(del => {
+          if (Array.from(deletedAttachmentIds).some(attId => del.id === `deliv-att-${attId}` || del.id === attId)) {
+            return false;
+          }
+          if (del.fileName && deletedAttachmentNames.has(del.fileName.toLowerCase())) {
+            return false;
+          }
+          if (taskTitle && del.changeNotes && del.changeNotes.toLowerCase().includes(`"${taskTitle.toLowerCase()}"`)) {
+            return false;
+          }
+          return true;
+        });
+
+        // Clear active timer if running on this delegated task
+        const isTimerOnThisTask = Boolean(
+          j.active_timer_start && (
+            j.active_timer_delegated_task_id === taskId ||
+            (taskTitle && j.active_timer_task && j.active_timer_task.toLowerCase().includes(taskTitle.toLowerCase()))
+          )
+        );
+
+        return {
+          ...j,
+          delegated_tasks: remainingTasks,
+          deliverables: remainingDeliverables,
+          active_timer_start: isTimerOnThisTask ? undefined : j.active_timer_start,
+          active_timer_task: isTimerOnThisTask ? undefined : j.active_timer_task,
+          active_timer_drafter_id: isTimerOnThisTask ? undefined : j.active_timer_drafter_id,
+          active_timer_drafter_name: isTimerOnThisTask ? undefined : j.active_timer_drafter_name,
+          active_timer_delegated_task_id: isTimerOnThisTask ? undefined : j.active_timer_delegated_task_id,
+          audit_logs: [
+            {
+              id: `a-${Date.now()}`,
+              action: 'Delegated Task Deleted',
+              performedBy: currentStaff.name,
+              timestamp: nowIso,
+              details: `Permanently deleted delegated component "${taskTitle}" and all ${attachmentCount} associated file attachments.`
+            },
+            ...j.audit_logs
+          ]
+        };
+      }
+      return j;
+    });
+
+    updateJobsState(updatedJobs, targetJobId);
+
+    // Call dedicated Firestore deletion helper for instant cloud cleanup
+    deleteDelegatedTaskFromFirestore(targetJobId, taskId).catch(err => {
+      console.warn('[Firestore] Notice during delegated task deletion:', err);
+    });
+
+    // Keep selectedJobForDetail synchronized if currently open
+    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
+      const freshJob = updatedJobs.find(j => j.id === targetJobId);
+      if (freshJob) {
+        setSelectedJobForDetail(freshJob);
+      }
+    }
+
+    // Clean any lingering notifications related to this task
+    updateNotificationsState(prev => prev.filter(n => {
+      const isTaskNotif = n.jobId === targetJobId && n.title.toLowerCase().includes(taskTitle.toLowerCase());
+      return !isTaskNotif;
+    }));
+  };
+
   // 12. Handle Updating Customer Contact Info (Email, Phone, Address, Name)
   const handleUpdateCustomerContact = (
     targetCustomerName: string,
@@ -2445,6 +2540,7 @@ export default function App() {
             onUpdateTaskStatus={handleUpdateTaskStatus}
             onApproveTaskReview={handleApproveTaskReview}
             onRequestTaskRevision={handleRequestTaskRevision}
+            onDeleteDelegatedTask={handleDeleteDelegatedTask}
             onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
             onSaveDefaultLayout={handleUpdatePreferredLayout}
             onUpdateCustomerContact={handleUpdateCustomerContact}
@@ -2521,6 +2617,7 @@ export default function App() {
           onUpdateTaskStatus={handleUpdateTaskStatus}
           onApproveTaskReview={handleApproveTaskReview}
           onRequestTaskRevision={handleRequestTaskRevision}
+          onDeleteDelegatedTask={handleDeleteDelegatedTask}
           currentStaff={currentStaff}
           staffList={staffList}
           initialTab={jobDetailInitialTab}
@@ -2610,6 +2707,7 @@ export default function App() {
         }}
         onApproveTaskReview={handleApproveTaskReview}
         onRequestTaskRevision={handleRequestTaskRevision}
+        onDeleteDelegatedTask={handleDeleteDelegatedTask}
         onOpenRevisionModal={(task, job) => {
           if (job) {
             setSelectedJobForDetail(job);

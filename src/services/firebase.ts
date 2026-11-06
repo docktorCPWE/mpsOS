@@ -243,6 +243,71 @@ export async function deleteFileFromJobInFirestore(
   }
 }
 
+/**
+ * Permanently deletes a delegated work item and all of its attached files/deliverables
+ * from a job document in Firestore to minimize document payload size.
+ */
+export async function deleteDelegatedTaskFromFirestore(
+  jobId: string,
+  taskId: string
+): Promise<void> {
+  const path = `jobs/${jobId}`;
+  try {
+    const jobDocRef = doc(db, 'jobs', jobId);
+    const snap = await getDoc(jobDocRef);
+    if (!snap.exists()) return;
+
+    const currentJob = snap.data() as Job;
+    const taskToDelete = (currentJob.delegated_tasks || []).find(t => t.id === taskId);
+    if (!taskToDelete) return;
+
+    const taskTitle = taskToDelete.componentTitle;
+    const deletedAttachmentIds = new Set((taskToDelete.attachments || []).map(a => a.id));
+    const deletedAttachmentNames = new Set((taskToDelete.attachments || []).map(a => a.name.toLowerCase()));
+
+    const updatedTasks = (currentJob.delegated_tasks || []).filter(t => t.id !== taskId);
+
+    const updatedDeliverables = (currentJob.deliverables || []).filter(del => {
+      if (Array.from(deletedAttachmentIds).some(attId => del.id === `deliv-att-${attId}` || del.id === attId)) {
+        return false;
+      }
+      if (del.fileName && deletedAttachmentNames.has(del.fileName.toLowerCase())) {
+        return false;
+      }
+      if (taskTitle && del.changeNotes && del.changeNotes.toLowerCase().includes(`"${taskTitle.toLowerCase()}"`)) {
+        return false;
+      }
+      return true;
+    });
+
+    const isTimerOnThisTask = Boolean(
+      currentJob.active_timer_start && (
+        currentJob.active_timer_delegated_task_id === taskId ||
+        (taskTitle && currentJob.active_timer_task && currentJob.active_timer_task.toLowerCase().includes(taskTitle.toLowerCase()))
+      )
+    );
+
+    const updates: Record<string, any> = {
+      delegated_tasks: updatedTasks,
+      deliverables: updatedDeliverables
+    };
+
+    if (isTimerOnThisTask) {
+      updates.active_timer_start = deleteField();
+      updates.active_timer_task = deleteField();
+      updates.active_timer_drafter_id = deleteField();
+      updates.active_timer_drafter_name = deleteField();
+      updates.active_timer_delegated_task_id = deleteField();
+    }
+
+    await updateDoc(jobDocRef, updates);
+    console.log(`[Firestore] Deleted delegated task ${taskId} ("${taskTitle}") and all attachments from job ${jobId}. Document size reduced.`);
+  } catch (err) {
+    console.error('[Firestore] Failed to delete delegated task from Firestore:', err);
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
 export async function seedInitialJobsToFirestore(initialJobs: Job[]): Promise<void> {
   const path = 'jobs';
   try {
