@@ -30,7 +30,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry } from '../types';
-import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS } from '../data/mockData';
+import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS, isStaffDeleted } from '../data/mockData';
 
 // Root owner accounts with master system privileges
 export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.com'];
@@ -403,10 +403,11 @@ export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
 }
 
 export async function purgeRemovedMockStaff(): Promise<void> {
-  // Purge deprecated mock staff documents (staff-aaron, staff-james) if lingering in Firestore
+  // Purge deprecated mock or deleted staff documents (staff-aaron, staff-james, staff-james-barnett) if lingering in Firestore
   try {
     await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
     await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+    await deleteDoc(doc(db, 'staff', 'staff-james-barnett')).catch(() => {});
     const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
     if (staffSnap) {
       for (const d of staffSnap.docs) {
@@ -416,13 +417,17 @@ export async function purgeRemovedMockStaff(): Promise<void> {
         if (
           d.id === 'staff-aaron' ||
           d.id === 'staff-james' ||
+          d.id === 'staff-james-barnett' ||
           emailLower === 'aaron@myplanstore.com' ||
           emailLower === 'james@myplanstore.com' ||
+          emailLower === 'james.barnett@myplanstore.com' ||
           nameLower === 'aaron' ||
-          nameLower === 'james'
+          nameLower === 'james' ||
+          nameLower === 'james barnett' ||
+          isStaffDeleted({ id: d.id, email: emailLower, name: nameLower })
         ) {
           await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-          console.log(`[Firestore] Purged mock staff doc: ${d.id}`);
+          console.log(`[Firestore] Purged deleted/mock staff doc: ${d.id}`);
         }
       }
     }
@@ -528,11 +533,12 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
       }
     }
 
-    // 2. Preserve and verify all real staff users (Greg, Kyle, Jason, Drew, Ethan, James Barnett)
+    // 2. Preserve and verify real staff users (Greg, Kyle, Jason, Drew, Ethan)
     try {
-      // Purge only obsolete mock placeholder docs (staff-aaron, legacy staff-james without -barnett)
+      // Purge obsolete mock/deleted placeholder docs (staff-aaron, staff-james, staff-james-barnett)
       await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
       await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
+      await deleteDoc(doc(db, 'staff', 'staff-james-barnett')).catch(() => {});
       const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
       if (staffSnap) {
         for (const d of staffSnap.docs) {
@@ -541,18 +547,25 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
           const nameLower = (s.name || '').trim().toLowerCase();
           if (
             d.id === 'staff-aaron' ||
-            (d.id === 'staff-james' && !d.id.includes('barnett')) ||
+            d.id === 'staff-james' ||
+            d.id === 'staff-james-barnett' ||
             emailLower === 'aaron@myplanstore.com' ||
-            (nameLower === 'aaron')
+            emailLower === 'james@myplanstore.com' ||
+            emailLower === 'james.barnett@myplanstore.com' ||
+            nameLower === 'aaron' ||
+            nameLower === 'james' ||
+            nameLower === 'james barnett' ||
+            isStaffDeleted({ id: d.id, email: emailLower, name: nameLower })
           ) {
             await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-            console.log(`[Firestore] Purged obsolete placeholder staff doc: ${d.id}`);
+            console.log(`[Firestore] Purged deleted/obsolete staff doc: ${d.id}`);
           }
         }
       }
 
-      // Ensure all 6 core staff exist in Firestore
+      // Ensure valid active core staff exist in Firestore if needed
       for (const core of STAFF_USERS) {
+        if (isStaffDeleted(core)) continue;
         const staffRef = doc(db, 'staff', core.id);
         const snap = await getDoc(staffRef).catch(() => null);
         if (!snap || !snap.exists()) {
@@ -565,7 +578,7 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
 
     // 3. Scan jobs collection: delete all test jobs and remove test cards/deliverables from real jobs
     try {
-      const isDummyJames = (val?: string) => Boolean(val && val.trim().toLowerCase() === 'james' && !val.toLowerCase().includes('barnett'));
+      const isDummyJames = (val?: string) => Boolean(val && (val.trim().toLowerCase() === 'james' || val.trim().toLowerCase() === 'james barnett'));
       const isDummyAaron = (val?: string) => Boolean(val && val.trim().toLowerCase() === 'aaron');
 
       const jobsSnap = await getDocs(collection(db, 'jobs'));

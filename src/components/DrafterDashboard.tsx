@@ -3,7 +3,7 @@ import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckC
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
@@ -366,8 +366,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       ...allDelegatedTasks.map(t => canonicalizeDrafterName(t.assignedTo || ''))
     ])
   ).filter(Boolean).filter(name => {
-    const lower = name.trim().toLowerCase();
-    return lower !== 'aaron';
+    return !isStaffDeleted({ name });
   });
 
   // Helper function to get all drafters who have touched, worked on, been assigned, or been tagged in a job

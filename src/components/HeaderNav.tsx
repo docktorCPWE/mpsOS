@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut, ChevronDown } from 'lucide-react';
 import { Job, StaffUser, AppNotification } from '../types';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, isJobArchived, canUserManageStaff, canUserCreateJob, isStaffDeleted } from '../data/mockData';
 import { formatTimeOnly } from '../utils/timeCardExport';
 import { User as FirebaseUser } from 'firebase/auth';
 
@@ -301,7 +301,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
                     <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
                       {((staffList && staffList.length > 0) ? staffList : STAFF_USERS)
-                        .filter(s => s.id !== 'staff-aaron' && s.id !== 'staff-james' && s.email !== 'aaron@myplanstore.com' && s.email !== 'james@myplanstore.com' && s.name.trim().toLowerCase() !== 'aaron' && s.name.trim().toLowerCase() !== 'james')
+                        .filter(s => !isStaffDeleted(s))
                         .map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
                         return (

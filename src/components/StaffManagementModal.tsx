@@ -33,6 +33,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { StaffUser, StaffDepartment, Job } from '../types';
+import { isStaffDeleted } from '../data/mockData';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -386,6 +387,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
   // Filtered staff list
   const filteredStaff = staffList.filter(s => {
+    if (isStaffDeleted(s)) return false;
     if (filterRole !== 'all' && s.role !== filterRole) return false;
     if (filterDepartment !== 'all' && s.department !== filterDepartment) return false;
     if (searchQuery) {
@@ -400,9 +402,10 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   });
 
   // Calculate high-level stats
-  const totalStaffCount = staffList.length;
-  const activeStaffCount = staffList.filter(s => s.status !== 'inactive').length;
-  const financialStaffCount = staffList.filter(s => s.canAccessFinancials).length;
+  const activeValidStaff = staffList.filter(s => !isStaffDeleted(s));
+  const totalStaffCount = activeValidStaff.length;
+  const activeStaffCount = activeValidStaff.filter(s => s.status !== 'inactive').length;
+  const financialStaffCount = activeValidStaff.filter(s => s.canAccessFinancials).length;
   const delegatorStaffCount = staffList.filter(s => s.canDelegate).length;
   const adminStaffCount = staffList.filter(s => s.role === 'admin').length;
 

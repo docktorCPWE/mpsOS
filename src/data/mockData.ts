@@ -106,26 +106,6 @@ export const STAFF_USERS: StaffUser[] = [
     canEditJobPhases: false,
     canManageRoadblocks: false,
     canAccessPayroll: false
-  },
-  {
-    id: 'staff-james-barnett',
-    name: 'James Barnett',
-    email: 'james.barnett@myplanstore.com',
-    title: 'Architectural Drafter & CAD Specialist',
-    phone: '(555) 789-0123',
-    role: 'drafter',
-    department: 'Drafting',
-    hourlyRate: 85,
-    status: 'active',
-    joinedDate: '2022-08-15',
-    canAccessFinancials: false,
-    canDelegate: false,
-    canViewAllProjects: false,
-    canManageStaff: false,
-    canManageInvoices: false,
-    canEditJobPhases: false,
-    canManageRoadblocks: false,
-    canAccessPayroll: false
   }
 ];
 
@@ -1160,27 +1140,99 @@ export function saveStoredDelegatedLayout(staffId: string | undefined, layout: D
   }
 }
 
+export const DELETED_STAFF_STORAGE_KEY = 'my_plan_store_os_deleted_staff_ids_v1';
+
+export const PERMANENTLY_EXCLUDED_STAFF_IDS = new Set([
+  'staff-aaron',
+  'staff-james',
+  'staff-james-barnett'
+]);
+
+export const PERMANENTLY_EXCLUDED_STAFF_EMAILS = new Set([
+  'aaron@myplanstore.com',
+  'james@myplanstore.com',
+  'james.barnett@myplanstore.com'
+]);
+
+export const PERMANENTLY_EXCLUDED_STAFF_NAMES = new Set([
+  'aaron',
+  'james',
+  'james barnett'
+]);
+
+export function getDeletedStaffIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_STAFF_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const set = new Set<string>([...PERMANENTLY_EXCLUDED_STAFF_IDS, ...(Array.isArray(parsed) ? parsed : [])]);
+    return Array.from(set);
+  } catch {
+    return Array.from(PERMANENTLY_EXCLUDED_STAFF_IDS);
+  }
+}
+
+export function addDeletedStaffId(staffIdOrInfo: string | { id?: string; email?: string; name?: string }): void {
+  try {
+    const current = getDeletedStaffIds();
+    const set = new Set<string>(current);
+    if (typeof staffIdOrInfo === 'string') {
+      const clean = staffIdOrInfo.trim();
+      set.add(clean);
+      set.add(clean.toLowerCase());
+    } else if (staffIdOrInfo) {
+      if (staffIdOrInfo.id) {
+        set.add(staffIdOrInfo.id);
+        set.add(staffIdOrInfo.id.toLowerCase());
+      }
+      if (staffIdOrInfo.email) {
+        set.add(staffIdOrInfo.email.toLowerCase().trim());
+      }
+      if (staffIdOrInfo.name) {
+        set.add(staffIdOrInfo.name.toLowerCase().trim());
+      }
+    }
+    localStorage.setItem(DELETED_STAFF_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // ignore
+  }
+}
+
+export function isStaffDeleted(staff?: { id?: string; email?: string; name?: string } | null): boolean {
+  if (!staff) return false;
+  const id = (staff.id || '').toLowerCase().trim();
+  const email = (staff.email || '').toLowerCase().trim();
+  const name = (staff.name || '').toLowerCase().trim();
+
+  if (PERMANENTLY_EXCLUDED_STAFF_IDS.has(id) || PERMANENTLY_EXCLUDED_STAFF_EMAILS.has(email) || PERMANENTLY_EXCLUDED_STAFF_NAMES.has(name)) {
+    return true;
+  }
+  if (name === 'james barnett' || email === 'james.barnett@myplanstore.com' || id === 'staff-james-barnett') {
+    return true;
+  }
+
+  const deletedList = getDeletedStaffIds();
+  return deletedList.some(del => {
+    const d = del.toLowerCase().trim();
+    return d === id || d === email || d === name;
+  });
+}
+
 export function getStoredStaff(): StaffUser[] {
   try {
     const raw = localStorage.getItem(STAFF_STORAGE_KEY);
+    const validCoreStaff = STAFF_USERS.filter(s => !isStaffDeleted(s));
     if (!raw) {
-      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(STAFF_USERS));
-      return STAFF_USERS;
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(validCoreStaff));
+      return validCoreStaff;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure mock staff-aaron or staff-james are stripped
-      const filtered = parsed.filter(
-        (s: StaffUser) => s.id !== 'staff-aaron' &&
-                          s.id !== 'staff-james' &&
-                          s.email !== 'aaron@myplanstore.com' &&
-                          s.email !== 'james@myplanstore.com' &&
-                          s.name.trim().toLowerCase() !== 'aaron' &&
-                          s.name.trim().toLowerCase() !== 'james'
-      );
-      // Ensure each core team member is present; if already present, PRESERVE their customized permissions
+      // Ensure any deleted staff (James Barnett, Aaron, etc.) are stripped
+      const filtered = parsed.filter((s: StaffUser) => !isStaffDeleted(s));
+      // Ensure each valid core team member is present; if already present, PRESERVE their customized permissions
       const result = [...filtered];
-      for (const core of STAFF_USERS) {
+      for (const core of validCoreStaff) {
+        if (isStaffDeleted(core)) continue;
         const index = result.findIndex(
           s => s.id === core.id ||
                (s.email && core.email && s.email.toLowerCase() === core.email.toLowerCase()) ||
@@ -1206,27 +1258,30 @@ export function getStoredStaff(): StaffUser[] {
         }
       }
 
-      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(result));
-      return result;
+      const finalClean = result.filter(s => !isStaffDeleted(s));
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(finalClean));
+      return finalClean;
     }
-    return STAFF_USERS;
+    return validCoreStaff;
   } catch (err) {
     console.error('Failed to load stored staff:', err);
-    return STAFF_USERS;
+    return STAFF_USERS.filter(s => !isStaffDeleted(s));
   }
 }
 
 export function saveStoredStaff(staff: StaffUser[]) {
   try {
-    localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(staff));
+    const clean = staff.filter(s => !isStaffDeleted(s));
+    localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(clean));
   } catch (err) {
     console.error('Failed to save staff:', err);
   }
 }
 
 export function resetStoredStaff(): StaffUser[] {
-  localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(STAFF_USERS));
-  return STAFF_USERS;
+  const validCoreStaff = STAFF_USERS.filter(s => !isStaffDeleted(s));
+  localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(validCoreStaff));
+  return validCoreStaff;
 }
 
 export function getStoredJobs(): Job[] {
@@ -1247,7 +1302,8 @@ export function getStoredJobs(): Job[] {
     if (Array.isArray(parsed)) {
       const isDummyJames = (val?: string) => {
         if (!val) return false;
-        return val.trim().toLowerCase() === 'james';
+        const lower = val.trim().toLowerCase();
+        return lower === 'james' || lower === 'james barnett';
       };
       const isDummyAaron = (val?: string) => {
         if (!val) return false;
@@ -1729,17 +1785,20 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
   const todayStr = getLocalDateString(new Date(nowMs));
   let wasReconciled = false;
 
-  // 0. Remove any dummy shifts created for mock Aaron or mock James (preserve real James Barnett)
+  // 0. Remove any dummy shifts created for mock Aaron or deleted James Barnett
   const isDummyShift = (s: TimeCardShift) => {
     const name = (s.staffName || '').trim().toLowerCase();
     const id = (s.id || '').toLowerCase();
     const staffId = (s.staffId || '').toLowerCase();
     return staffId === 'staff-aaron' ||
            staffId === 'staff-james' ||
+           staffId === 'staff-james-barnett' ||
            id.startsWith('shift-aaron-') ||
            id.startsWith('shift-james-') ||
+           id.startsWith('shift-staff-james-barnett-') ||
            name === 'aaron' ||
-           name === 'james';
+           name === 'james' ||
+           name === 'james barnett';
   };
 
   const nonDummyShifts = shifts.filter(s => {

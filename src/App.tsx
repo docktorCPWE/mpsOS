@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, addDeletedStaffId } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -79,8 +79,14 @@ export default function App() {
   const [nowTimestamp, setNowTimestamp] = useState<number>(Date.now());
   
   // Staff User, Notifications & Time Cards State
-  const [staffList, setStaffList] = useState<StaffUser[]>(STAFF_USERS);
-  const [currentStaff, setCurrentStaff] = useState<StaffUser>(STAFF_USERS[0]); // Default: Greg Hyatt (Owner)
+  const [staffList, setStaffList] = useState<StaffUser[]>(() => {
+    const list = getStoredStaff();
+    return list.filter(s => !isStaffDeleted(s));
+  });
+  const [currentStaff, setCurrentStaff] = useState<StaffUser>(() => {
+    const list = getStoredStaff().filter(s => !isStaffDeleted(s));
+    return list[0] || STAFF_USERS[0];
+  }); // Default: Greg Hyatt (Owner)
   const [notifications, setNotifications] = useState<AppNotification[]>(() => getStoredNotifications());
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -190,27 +196,28 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          // Ensure all core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
-          const merged = [...cloudStaff];
+          const activeCloudStaff = cloudStaff.filter(s => !isStaffDeleted(s));
+          // Ensure all active core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
+          const merged = [...activeCloudStaff];
           for (const core of STAFF_USERS) {
+            if (isStaffDeleted(core)) continue;
             const exists = merged.some(s => s.id === core.id || s.name.toLowerCase() === core.name.toLowerCase() || (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')));
             if (!exists) {
               merged.push(core);
             }
           }
 
-          // Filter out mock staff-aaron placeholder
-          const cleanMerged = merged.filter(s => 
-            s.id !== 'staff-aaron' && 
-            s.email !== 'aaron@myplanstore.com' && 
-            s.name.trim().toLowerCase() !== 'aaron'
-          );
+          // Filter out mock or deleted staff
+          const cleanMerged = merged.filter(s => !isStaffDeleted(s));
 
           setStaffList(cleanMerged);
           saveStoredStaff(cleanMerged);
 
           // Update currentStaff if matching cloud record has latest edits to capabilities
           setCurrentStaff(prevCurrent => {
+            if (isStaffDeleted(prevCurrent)) {
+              return cleanMerged[0] || STAFF_USERS[0];
+            }
             const updatedMatch = cleanMerged.find(s => s.id === prevCurrent.id) ||
                                  cleanMerged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
                                  cleanMerged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
@@ -220,7 +227,7 @@ export default function App() {
         }
       },
       () => {
-        seedStaffToFirestore(STAFF_USERS);
+        seedStaffToFirestore(STAFF_USERS.filter(s => !isStaffDeleted(s)));
       }
     );
 
@@ -1273,7 +1280,13 @@ export default function App() {
   };
 
   const handleDeleteStaff = (staffId: string) => {
-    const updated = staffList.filter(s => s.id !== staffId);
+    const target = staffList.find(s => s.id === staffId);
+    if (target) {
+      addDeletedStaffId({ id: target.id, email: target.email, name: target.name });
+    } else {
+      addDeletedStaffId(staffId);
+    }
+    const updated = staffList.filter(s => s.id !== staffId && !isStaffDeleted(s));
     setStaffList(updated);
     saveStoredStaff(updated);
     if (currentStaff.id === staffId && updated.length > 0) {
@@ -1911,7 +1924,7 @@ export default function App() {
         } else if (liveTimerSec > 0 && j.active_timer_start) {
           const liveLog: TimeLog = {
             id: `log-live-${Date.now()}`,
-            drafterName: currentStaff.name || j.active_timer_drafter_name || 'James Barnett',
+            drafterName: currentStaff.name || j.active_timer_drafter_name || 'Kyle',
             startTime: j.active_timer_start,
             endTime: nowIso,
             durationSeconds: liveTimerSec,
