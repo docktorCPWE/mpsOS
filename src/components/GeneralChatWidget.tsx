@@ -32,6 +32,7 @@ interface GeneralChatWidgetProps {
   onClose: () => void;
   messages: ChatMessage[];
   currentStaff: StaffUser;
+  staffList?: StaffUser[];
   jobs: Job[];
   onSendMessage: (text: string, mentions?: string[], referencedJobNumbers?: string[], replyToId?: string) => void;
   onDeleteMessage?: (messageId: string) => void;
@@ -45,6 +46,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   onClose,
   messages,
   currentStaff,
+  staffList,
   jobs,
   onSendMessage,
   onDeleteMessage,
@@ -52,6 +54,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   onSelectJob,
   onMarkAsRead
 }) => {
+  const effectiveStaffList = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const [inputText, setInputText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -164,7 +167,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
     // Detect mentions from text
     const foundMentions: string[] = [];
-    STAFF_USERS.forEach(s => {
+    effectiveStaffList.forEach(s => {
       const regex = new RegExp(`@${s.name}`, 'i');
       if (regex.test(inputText)) {
         foundMentions.push(s.name);
@@ -293,7 +296,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   });
 
   // Filtered staff for @ autocomplete
-  const filteredStaff = STAFF_USERS.filter(s => {
+  const filteredStaff = effectiveStaffList.filter(s => {
     if (!mentionQuery) return true;
     const q = mentionQuery.toLowerCase();
     return s.name.toLowerCase().includes(q) || s.title.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
@@ -322,7 +325,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       // Check if this part matches an @Staff
       if (part.startsWith('@')) {
         const staffNameTrimmed = part.slice(1).trim();
-        const isMatchedStaff = STAFF_USERS.some(s => s.name.toLowerCase() === staffNameTrimmed.toLowerCase());
+        const isMatchedStaff = effectiveStaffList.some(s => s.name.toLowerCase() === staffNameTrimmed.toLowerCase());
         const isMe = staffNameTrimmed.toLowerCase() === currentStaff.name.toLowerCase();
 
         if (isMatchedStaff) {
@@ -805,7 +808,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                 Tag a Drafter / Manager
               </span>
               <span className="text-[10px] text-slate-400 font-mono">
-                {filteredStaff.length} of {STAFF_USERS.length} staff
+                {filteredStaff.length} of {effectiveStaffList.length} staff
               </span>
             </div>
             <div className="relative">

@@ -244,6 +244,10 @@ export interface StaffUser {
   canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
   canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
   preferredLayout?: 'grid' | 'board' | 'list' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Lists, Table)
+  // Real-time Session Presence
+  isOnline?: boolean;
+  lastSeenAt?: string;           // ISO timestamp of last heartbeat
+  lastLoginAt?: string;          // ISO timestamp of most recent sign-in
 }
 
 export interface PayrollEntry {

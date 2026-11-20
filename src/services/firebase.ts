@@ -8,6 +8,8 @@ import {
   sendPasswordResetEmail,
   onAuthStateChanged,
   updateProfile,
+  setPersistence,
+  browserSessionPersistence,
   User
 } from 'firebase/auth';
 import {
@@ -30,15 +32,49 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry, TimeCardShift } from '../types';
-import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS, isStaffDeleted, sanitizeAndReconcileTimeCards } from '../data/mockData';
+import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS, isStaffDeleted, removeDeletedStaffId, sanitizeAndReconcileTimeCards } from '../data/mockData';
 
 // Root owner accounts with master system privileges
 export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.com'];
+
+// Session-scoped login marker so closing the browser/tab always ends the login session
+// and legacy browserLocalPersistence sessions from earlier visits are cleanly signed out.
+export const AUTH_SESSION_STORAGE_KEY = 'mps_auth_session_active_v1';
+
+export function markAuthSessionActive(uid?: string): void {
+  try {
+    sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, uid || 'active');
+  } catch {
+    // ignore
+  }
+}
+
+export function hasActiveAuthSession(): boolean {
+  try {
+    return Boolean(sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
+export function clearAuthSessionMarker(): void {
+  try {
+    sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    localStorage.removeItem('my_plan_store_os_active_staff_id_v1');
+  } catch {
+    // ignore
+  }
+}
 
 // Initialize Firebase App & Firestore with strict databaseId
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+
+// Default Firebase Auth to browserSessionPersistence (clears when tab/browser closes)
+setPersistence(auth, browserSessionPersistence).catch((err) => {
+  console.warn('[Auth] Session persistence setup notice:', err);
+});
 
 export enum OperationType {
   CREATE = 'create',
@@ -402,8 +438,30 @@ export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
   }
 }
 
+export async function updateStaffPresenceInFirestore(
+  staffId: string,
+  isOnline: boolean,
+  options?: { markLogin?: boolean }
+): Promise<void> {
+  if (!db || !staffId) return;
+  try {
+    const nowIso = new Date().toISOString();
+    const payload: Record<string, any> = {
+      isOnline,
+      lastSeenAt: nowIso
+    };
+    if (options?.markLogin) {
+      payload.lastLoginAt = nowIso;
+    }
+    await setDoc(doc(db, 'staff', staffId), payload, { merge: true });
+  } catch (err) {
+    console.warn('[Firestore] Presence update notice:', err);
+  }
+}
+
 export async function purgeRemovedMockStaff(): Promise<void> {
-  // Purge deprecated mock or deleted staff documents (staff-aaron, staff-james, staff-james-barnett) if lingering in Firestore
+  // Purge ONLY deprecated mock placeholder staff documents (staff-aaron, staff-james, staff-james-barnett)
+  // NEVER delete real authenticated accounts (e.g. jamesb.dwg@gmail.com, aaronp.dwg@gmail.com) by name!
   try {
     await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
     await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
@@ -413,21 +471,16 @@ export async function purgeRemovedMockStaff(): Promise<void> {
       for (const d of staffSnap.docs) {
         const s = d.data();
         const emailLower = (s.email || '').trim().toLowerCase();
-        const nameLower = (s.name || '').trim().toLowerCase();
         if (
           d.id === 'staff-aaron' ||
           d.id === 'staff-james' ||
           d.id === 'staff-james-barnett' ||
           emailLower === 'aaron@myplanstore.com' ||
           emailLower === 'james@myplanstore.com' ||
-          emailLower === 'james.barnett@myplanstore.com' ||
-          nameLower === 'aaron' ||
-          nameLower === 'james' ||
-          nameLower === 'james barnett' ||
-          isStaffDeleted({ id: d.id, email: emailLower, name: nameLower })
+          emailLower === 'james.barnett@myplanstore.com'
         ) {
           await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-          console.log(`[Firestore] Purged deleted/mock staff doc: ${d.id}`);
+          console.log(`[Firestore] Purged obsolete mock staff doc: ${d.id}`);
         }
       }
     }
@@ -533,9 +586,10 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
       }
     }
 
-    // 2. Preserve and verify real staff users (Greg, Kyle, Jason, Drew, Ethan)
+    // 2. Preserve and verify real staff users (core + all real authenticated accounts)
     try {
-      // Purge obsolete mock/deleted placeholder docs (staff-aaron, staff-james, staff-james-barnett)
+      // Purge ONLY obsolete legacy placeholder docs (staff-aaron, staff-james, staff-james-barnett)
+      // NEVER delete real authenticated user profiles (e.g. jamesb.dwg@gmail.com, aaronp.dwg@gmail.com)
       await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
       await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
       await deleteDoc(doc(db, 'staff', 'staff-james-barnett')).catch(() => {});
@@ -544,21 +598,16 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
         for (const d of staffSnap.docs) {
           const s = d.data();
           const emailLower = (s.email || '').trim().toLowerCase();
-          const nameLower = (s.name || '').trim().toLowerCase();
           if (
             d.id === 'staff-aaron' ||
             d.id === 'staff-james' ||
             d.id === 'staff-james-barnett' ||
             emailLower === 'aaron@myplanstore.com' ||
             emailLower === 'james@myplanstore.com' ||
-            emailLower === 'james.barnett@myplanstore.com' ||
-            nameLower === 'aaron' ||
-            nameLower === 'james' ||
-            nameLower === 'james barnett' ||
-            isStaffDeleted({ id: d.id, email: emailLower, name: nameLower })
+            emailLower === 'james.barnett@myplanstore.com'
           ) {
             await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-            console.log(`[Firestore] Purged deleted/obsolete staff doc: ${d.id}`);
+            console.log(`[Firestore] Purged obsolete mock staff doc: ${d.id}`);
           }
         }
       }
@@ -578,9 +627,6 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
 
     // 3. Scan jobs collection: delete all test jobs and remove test cards/deliverables from real jobs
     try {
-      const isDummyJames = (val?: string) => Boolean(val && (val.trim().toLowerCase() === 'james' || val.trim().toLowerCase() === 'james barnett'));
-      const isDummyAaron = (val?: string) => Boolean(val && val.trim().toLowerCase() === 'aaron');
-
       const jobsSnap = await getDocs(collection(db, 'jobs'));
       for (const d of jobsSnap.docs) {
         const j = d.data() as Job;
@@ -593,23 +639,11 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
         let needsUpdate = false;
         const updates: Record<string, any> = {};
 
-        if (isDummyJames(j.assigned_drafter) || isDummyAaron(j.assigned_drafter)) {
-          updates.assigned_drafter = 'Kyle';
-          needsUpdate = true;
-        }
-
         // Clean out any testing delegated cards
         if (Array.isArray(j.delegated_tasks) && j.delegated_tasks.length > 0) {
           const originalLen = j.delegated_tasks.length;
-          const cleanTasks = j.delegated_tasks
-            .filter(dt => !isTestDelegatedTask(dt))
-            .map(dt => {
-              if (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) {
-                return { ...dt, assignedTo: 'Kyle' };
-              }
-              return dt;
-            });
-          if (cleanTasks.length !== originalLen || cleanTasks.some((t, i) => t.assignedTo !== j.delegated_tasks![i].assignedTo)) {
+          const cleanTasks = j.delegated_tasks.filter(dt => !isTestDelegatedTask(dt));
+          if (cleanTasks.length !== originalLen) {
             updates.delegated_tasks = cleanTasks;
             needsUpdate = true;
             console.log(`[Firestore] Removed ${originalLen - cleanTasks.length} test cards from job: ${d.id}`);
@@ -759,8 +793,10 @@ export async function registerWithEmail(
   pass: string,
   fullName: string
 ): Promise<User> {
+  await setPersistence(auth, browserSessionPersistence);
   const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
   const user = userCredential.user;
+  markAuthSessionActive(user.uid);
 
   // Set profile display name
   if (fullName.trim()) {
@@ -778,11 +814,17 @@ export async function loginWithEmail(
   email: string,
   pass: string
 ): Promise<User> {
+  await setPersistence(auth, browserSessionPersistence);
   const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
+  markAuthSessionActive(userCredential.user.uid);
   return userCredential.user;
 }
 
-export async function logoutUser(): Promise<void> {
+export async function logoutUser(staffId?: string): Promise<void> {
+  if (staffId) {
+    await updateStaffPresenceInFirestore(staffId, false).catch(() => {});
+  }
+  clearAuthSessionMarker();
   await signOut(auth);
 }
 
@@ -802,10 +844,13 @@ export async function sendPasswordReset(email: string): Promise<void> {
 export async function checkEmailVerified(): Promise<boolean> {
   if (!auth.currentUser) return false;
   await auth.currentUser.reload();
+  if (auth.currentUser.emailVerified) {
+    markAuthSessionActive(auth.currentUser.uid);
+  }
   return auth.currentUser.emailVerified;
 }
 
-// Maps authenticated Firebase user to a StaffUser record in the OS
+// Maps authenticated Firebase user to a StaffUser record in the OS and updates live presence
 export async function syncAuthToStaffUser(
   user: User,
   existingStaffList: StaffUser[]
@@ -816,8 +861,10 @@ export async function syncAuthToStaffUser(
   const isKyle = userEmail.includes('kyle') || userName.includes('kyle');
   const isJason = userEmail.includes('jason') || userName.includes('jason');
   const isDrew = userEmail.includes('drew') || userName.includes('drew');
+  const isEthan = userEmail === 'ethanp.dwg@gmail.com' || userEmail.includes('ethan') || userName.includes('ethan');
+  const nowIso = new Date().toISOString();
 
-  // 1. Check if staff member already exists in memory with this email or name
+  // 1. Check if staff member already exists in memory with this email or canonical role
   let matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
 
   if (!matched && isOwnerEmail) {
@@ -833,6 +880,9 @@ export async function syncAuthToStaffUser(
   if (!matched && isDrew) {
     matched = existingStaffList.find(s => s.name.toLowerCase().includes('drew') || s.id === 'staff-drew');
   }
+  if (!matched && isEthan) {
+    matched = existingStaffList.find(s => s.name.toLowerCase().includes('ethan') || s.id === 'staff-ethan');
+  }
 
   // 2. If not found in memory, try to look up in Firestore directly
   if (!matched && db) {
@@ -840,11 +890,11 @@ export async function syncAuthToStaffUser(
       const directDocRef = doc(db, 'staff', `staff-${user.uid.slice(0, 8)}`);
       const directSnap = await getDoc(directDocRef);
       if (directSnap.exists()) {
-        matched = directSnap.data() as StaffUser;
+        matched = { ...(directSnap.data() as StaffUser), id: directSnap.id };
       } else {
         const staffSnap = await getDocs(collection(db, 'staff'));
         staffSnap.forEach((d) => {
-          const s = d.data() as StaffUser;
+          const s = { ...(d.data() as StaffUser), id: d.id };
           if (s.email && s.email.toLowerCase().trim() === userEmail) {
             matched = s;
           } else if (isKyle && s.name.toLowerCase().includes('kyle')) {
@@ -852,6 +902,8 @@ export async function syncAuthToStaffUser(
           } else if (isJason && s.name.toLowerCase().includes('jason')) {
             matched = s;
           } else if (isDrew && s.name.toLowerCase().includes('drew')) {
+            matched = s;
+          } else if (isEthan && s.name.toLowerCase().includes('ethan')) {
             matched = s;
           }
         });
@@ -862,20 +914,27 @@ export async function syncAuthToStaffUser(
   }
 
   if (matched) {
+    // Ensure a real signed-in account is never locally marked deleted
+    removeDeletedStaffId({ id: matched.id, email: userEmail });
+
     // If user is owner, ensure superadmin privileges
-    if (isOwnerEmail && (!matched.canManageStaff || matched.role !== 'admin')) {
+    if (isOwnerEmail) {
       const updated: StaffUser = {
         ...matched,
         email: userEmail,
         role: 'admin',
-        title: 'System Owner & Principal',
+        title: matched.title || 'Owner & Principal Architect',
         canAccessFinancials: true,
         canDelegate: true,
         canViewAllProjects: true,
         canManageStaff: true,
         canManageInvoices: true,
         canEditJobPhases: true,
-        canManageRoadblocks: true
+        canManageRoadblocks: true,
+        canAccessPayroll: true,
+        isOnline: true,
+        lastSeenAt: nowIso,
+        lastLoginAt: nowIso
       };
       await saveStaffToFirestore(updated);
       return updated;
@@ -894,37 +953,51 @@ export async function syncAuthToStaffUser(
         canManageStaff: matched.canManageStaff !== undefined ? matched.canManageStaff : true,
         canManageInvoices: matched.canManageInvoices !== undefined ? matched.canManageInvoices : true,
         canEditJobPhases: matched.canEditJobPhases !== undefined ? matched.canEditJobPhases : true,
-        canManageRoadblocks: matched.canManageRoadblocks !== undefined ? matched.canManageRoadblocks : true
+        canManageRoadblocks: matched.canManageRoadblocks !== undefined ? matched.canManageRoadblocks : true,
+        isOnline: true,
+        lastSeenAt: nowIso,
+        lastLoginAt: nowIso
       };
-      if (userEmail && (!matched.email || matched.email !== userEmail)) {
-        await saveStaffToFirestore(updatedKyle);
-      }
+      await saveStaffToFirestore(updatedKyle);
       return updatedKyle;
     }
-    // For other staff, preserve their existing capabilities completely
-    return matched;
+    // For Ethan, Drew, Jason, and all other staff: preserve capabilities & update live presence
+    const updatedMatched: StaffUser = {
+      ...matched,
+      email: matched.email || userEmail,
+      canViewAllProjects: (isJason || isDrew || isEthan) ? true : matched.canViewAllProjects,
+      isOnline: true,
+      lastSeenAt: nowIso,
+      lastLoginAt: nowIso
+    };
+    await saveStaffToFirestore(updatedMatched);
+    return updatedMatched;
   }
 
   // Create new staff profile for verified user only if not found at all
   const newStaff: StaffUser = {
-    id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : `staff-${user.uid.slice(0, 8)}`,
-    name: user.displayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : user.email?.split('@')[0] || 'Staff Member'),
+    id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : isEthan ? 'staff-ethan' : `staff-${user.uid.slice(0, 8)}`,
+    name: user.displayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : isEthan ? 'Ethan Pierce' : user.email?.split('@')[0] || 'Staff Member'),
     email: userEmail,
-    title: isOwnerEmail ? 'System Owner & Principal' : isKyle ? 'Lead Project Manager & Senior Drafter' : isJason ? 'Project Manager & Operations' : isDrew ? 'Admin & Billing Specialist' : 'Architectural Drafter',
+    title: isOwnerEmail ? 'System Owner & Principal' : isKyle ? 'Lead Project Manager & Senior Drafter' : isJason ? 'Project Manager & Operations' : isDrew ? 'Admin & Billing Specialist' : isEthan ? 'Junior Drafter & CAD Specialist' : 'Architectural Drafter',
     role: isOwnerEmail || isJason || isDrew ? 'admin' : isKyle ? 'drafter_lead' : 'drafter',
     department: isOwnerEmail || isKyle ? 'Management' : isJason ? 'Operations' : isDrew ? 'Finance' : 'Drafting',
     hourlyRate: isOwnerEmail ? 150 : isJason ? 120 : isKyle ? 110 : isDrew ? 90 : 75,
     status: 'active',
     joinedDate: new Date().toISOString().split('T')[0],
-    canAccessFinancials: isOwnerEmail || isKyle || isJason || isDrew,
+    canAccessFinancials: isOwnerEmail || isKyle || isJason || isDrew || isEthan,
     canDelegate: isOwnerEmail || isKyle || isJason,
-    canViewAllProjects: isOwnerEmail || isKyle || isJason || isDrew,
+    canViewAllProjects: isOwnerEmail || isKyle || isJason || isDrew || isEthan,
     canManageStaff: isOwnerEmail || isKyle || isJason,
-    canManageInvoices: isOwnerEmail || isKyle || isJason || isDrew,
+    canManageInvoices: isOwnerEmail || isKyle || isJason || isDrew || isEthan,
     canEditJobPhases: isOwnerEmail || isKyle || isJason,
-    canManageRoadblocks: isOwnerEmail || isKyle || isJason
+    canManageRoadblocks: isOwnerEmail || isKyle || isJason,
+    isOnline: true,
+    lastSeenAt: nowIso,
+    lastLoginAt: nowIso
   };
 
+  removeDeletedStaffId({ id: newStaff.id, email: newStaff.email });
   await saveStaffToFirestore(newStaff);
   return newStaff;
 }

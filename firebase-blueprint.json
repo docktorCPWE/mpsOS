@@ -66,7 +66,10 @@
         "is_active": { "type": "boolean", "description": "Whether staff member is currently active" },
         "can_mark_completed": { "type": "boolean", "description": "Permission to approve projects as Completed" },
         "can_access_financials": { "type": "boolean", "description": "Permission to view and generate billing rates and invoices" },
-        "preferred_layout": { "type": "string", "description": "User's default preferred layout: 'grid', 'board', or 'table'" }
+        "preferred_layout": { "type": "string", "description": "User's default preferred layout: 'grid', 'board', or 'table'" },
+        "isOnline": { "type": "boolean", "description": "Whether the staff member currently has an active logged-in session" },
+        "lastSeenAt": { "type": "string", "description": "Last active heartbeat ISO timestamp" },
+        "lastLoginAt": { "type": "string", "description": "Most recent login ISO timestamp" }
       },
       "required": ["id", "name", "role"]
     },

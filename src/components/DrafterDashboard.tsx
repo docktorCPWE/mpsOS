@@ -3,7 +3,7 @@ import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckC
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
-import { STAFF_USERS, canViewAllProjectCards, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
@@ -159,15 +159,17 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const isAllCardsAuthorized = canViewAllProjectCards(currentStaff);
   const isIndividualDrafter = !isAllCardsAuthorized;
 
-  // Authorization for team workload matrix: Kyle, Jason, Drew, Greg, and delegated leads
+  // Authorization for team workload matrix: Greg, Kyle, Jason, Drew, Ethan, and delegated leads
   const canViewWorkloadMatrix = Boolean(
     currentStaff?.canDelegate || 
     isAllCardsAuthorized || 
+    canViewTeamProfiles(currentStaff) ||
     currentStaff?.canAccessFinancials || 
     currentStaff?.name.toLowerCase().includes('drew') ||
     currentStaff?.name.toLowerCase().includes('jason') ||
     currentStaff?.name.toLowerCase().includes('kyle') ||
-    currentStaff?.name.toLowerCase().includes('greg')
+    currentStaff?.name.toLowerCase().includes('greg') ||
+    currentStaff?.name.toLowerCase().includes('ethan')
   );
 
   // Initialize selectedDrafter: If current logged-in user is an individual drafter,

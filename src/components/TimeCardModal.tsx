@@ -23,7 +23,7 @@ import {
   Save
 } from 'lucide-react';
 import { StaffUser, TimeCardShift, Job } from '../types';
-import { isStaffExemptFromClock } from '../data/mockData';
+import { isStaffExemptFromClock, canViewTeamProfiles } from '../data/mockData';
 import { 
   formatTimeOnly, 
   formatDateOnly, 
@@ -62,7 +62,7 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
   onUpdateTimeCards
 }) => {
   const isJason = isStaffExemptFromClock(currentStaff);
-  const isManagerOrAdmin = isJason || currentStaff.role === 'admin' || currentStaff.canAccessFinancials || currentStaff.canManageStaff;
+  const isManagerOrAdmin = isJason || canViewTeamProfiles(currentStaff) || currentStaff.role === 'admin' || currentStaff.canAccessFinancials || currentStaff.canManageStaff;
 
   // View tab: 'single_employee' or 'team_matrix' (for managers/Jason)
   const [activeTab, setActiveTab] = useState<'single_employee' | 'team_matrix'>(

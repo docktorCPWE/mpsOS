@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, addDeletedStaffId } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, addDeletedStaffId, removeDeletedStaffId, canViewTeamProfiles, canUserManageStaff } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -30,6 +30,9 @@ import {
   subscribeToAuth,
   syncAuthToStaffUser,
   logoutUser,
+  hasActiveAuthSession,
+  markAuthSessionActive,
+  updateStaffPresenceInFirestore,
   purgeRemovedMockStaff,
   subscribeToDevTimeEntries,
   saveDevTimeEntryToFirestore,
@@ -109,6 +112,7 @@ export default function App() {
 
   // Firebase Authentication State
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+  const [authenticatedStaff, setAuthenticatedStaff] = useState<StaffUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isDemoModeBypassed, setIsDemoModeBypassed] = useState<boolean>(false);
 
@@ -128,6 +132,12 @@ export default function App() {
   const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
   const devCardsCloudDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
+  const staffListRef = useRef<StaffUser[]>(staffList);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    staffListRef.current = staffList;
+  }, [staffList]);
 
   const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
     setSelectedJobForDetail(job);
@@ -320,28 +330,119 @@ export default function App() {
     };
   }, []);
 
-  // Listen to Firebase Auth state & sync authenticated staff user
+  // Listen to Firebase Auth state & enforce session-scoped login (no stale cookies keeping users logged in)
   useEffect(() => {
     const unsubscribeAuth = subscribeToAuth(async (user) => {
+      if (user && !hasActiveAuthSession()) {
+        // User reopened browser/tab with a stale persistent session from an earlier visit:
+        // sign them out cleanly so reopening the app requires logging back in.
+        console.log('[Auth] Cleared stale previous-browser session for:', user.email);
+        try {
+          const staleMatch = staffListRef.current.find(
+            s => (s.email || '').toLowerCase().trim() === (user.email || '').toLowerCase().trim()
+          );
+          await logoutUser(staleMatch?.id);
+        } catch (err) {
+          console.warn('[Auth] Stale session cleanup notice:', err);
+        }
+        setAuthUser(null);
+        setAuthenticatedStaff(null);
+        setIsAuthLoading(false);
+        return;
+      }
+
       setAuthUser(user);
       setIsAuthLoading(false);
+
+      if (!user) {
+        setAuthenticatedStaff(null);
+        return;
+      }
+
       if (user && user.emailVerified) {
         try {
-          const matched = await syncAuthToStaffUser(user, staffList);
+          const matched = await syncAuthToStaffUser(user, staffListRef.current);
           const layoutPref = matched.preferredLayout || getStoredPreferredLayout(matched.id || matched.email);
-          setCurrentStaff({ ...matched, preferredLayout: layoutPref });
-          saveStoredActiveStaffId(matched.id);
+          const hydratedStaff = { ...matched, preferredLayout: layoutPref };
+          setAuthenticatedStaff(hydratedStaff);
+          setCurrentStaff(hydratedStaff);
+          saveStoredActiveStaffId(hydratedStaff.id);
         } catch (err) {
           console.warn('[Auth] Staff profile sync notice:', err);
         }
       }
     });
     return () => unsubscribeAuth();
-  }, [staffList]);
+  }, []);
+
+  // Real-time online presence heartbeat + clean offline on tab close + inactivity auto-sign-out (8h)
+  useEffect(() => {
+    const staffId = authenticatedStaff?.id;
+    if (!authUser || !authUser.emailVerified || !staffId) return;
+
+    const IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours of complete inactivity
+    lastActivityRef.current = Date.now();
+
+    const sendHeartbeat = () => {
+      updateStaffPresenceInFirestore(staffId, true).catch(() => {});
+    };
+
+    const recordActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    sendHeartbeat();
+    const heartbeatInterval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
+        console.log('[Auth] Signing out due to extended inactivity.');
+        logoutUser(staffId).catch(() => {});
+        setAuthUser(null);
+        setAuthenticatedStaff(null);
+        return;
+      }
+      sendHeartbeat();
+    }, 45 * 1000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
+          logoutUser(staffId).catch(() => {});
+          setAuthUser(null);
+          setAuthenticatedStaff(null);
+          return;
+        }
+        sendHeartbeat();
+      }
+    };
+
+    const handlePageClose = () => {
+      updateStaffPresenceInFirestore(staffId, false).catch(() => {});
+    };
+
+    window.addEventListener('pointerdown', recordActivity, { passive: true });
+    window.addEventListener('keydown', recordActivity, { passive: true });
+    window.addEventListener('touchstart', recordActivity, { passive: true });
+    window.addEventListener('focus', sendHeartbeat);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageClose);
+    window.addEventListener('beforeunload', handlePageClose);
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      window.removeEventListener('pointerdown', recordActivity);
+      window.removeEventListener('keydown', recordActivity);
+      window.removeEventListener('touchstart', recordActivity);
+      window.removeEventListener('focus', sendHeartbeat);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageClose);
+      window.removeEventListener('beforeunload', handlePageClose);
+    };
+  }, [authUser?.uid, authUser?.emailVerified, authenticatedStaff?.id]);
 
   const handleSignOut = async () => {
-    await logoutUser();
+    await logoutUser(authenticatedStaff?.id || currentStaff?.id);
     setAuthUser(null);
+    setAuthenticatedStaff(null);
     setIsDemoModeBypassed(false);
   };
 
@@ -1350,6 +1451,7 @@ export default function App() {
 
   // Staff Management handlers
   const handleAddStaff = (newStaff: StaffUser) => {
+    removeDeletedStaffId({ id: newStaff.id, email: newStaff.email });
     const updated = [...staffList, newStaff];
     setStaffList(updated);
     saveStoredStaff(updated);
@@ -1378,6 +1480,11 @@ export default function App() {
   };
 
   const handleSelectStaff = (staff: StaffUser) => {
+    // Only authorized leadership / visibility roles (Greg, Kyle, Jason, Drew, Ethan) can switch/inspect other profiles
+    const realViewer = authenticatedStaff || currentStaff;
+    if (staff.id !== realViewer.id && !canViewTeamProfiles(realViewer)) {
+      return;
+    }
     const layoutPref = staff.preferredLayout || getStoredPreferredLayout(staff.id || staff.email);
     const staffWithPref = { ...staff, preferredLayout: layoutPref };
     setCurrentStaff(staffWithPref);
@@ -2611,11 +2718,16 @@ export default function App() {
       <AuthScreen
         currentUser={authUser}
         onAuthenticated={async (user) => {
+          markAuthSessionActive(user.uid);
           setAuthUser(user);
           setIsDemoModeBypassed(false);
           try {
-            const matched = await syncAuthToStaffUser(user, staffList);
-            setCurrentStaff(matched);
+            const matched = await syncAuthToStaffUser(user, staffListRef.current);
+            const layoutPref = matched.preferredLayout || getStoredPreferredLayout(matched.id || matched.email);
+            const hydrated = { ...matched, preferredLayout: layoutPref };
+            setAuthenticatedStaff(hydrated);
+            setCurrentStaff(hydrated);
+            saveStoredActiveStaffId(hydrated.id);
           } catch (err) {
             console.warn('[Auth] Staff profile sync notice:', err);
           }
@@ -2651,8 +2763,11 @@ export default function App() {
         userRole={userRole}
         setUserRole={setUserRole}
         currentStaff={currentStaff}
+        authenticatedStaff={authenticatedStaff}
         setCurrentStaff={handleSelectStaff}
         staffList={staffList}
+        timeCards={timeCards}
+        nowTimestamp={nowTimestamp}
         selectedCustomerId={selectedCustomerId}
         setSelectedCustomerId={setSelectedCustomerId}
         jobs={jobs}
@@ -2934,6 +3049,7 @@ export default function App() {
         onClose={() => setIsChatOpen(false)}
         messages={chatMessages}
         currentStaff={currentStaff}
+        staffList={staffList}
         jobs={jobs}
         onSendMessage={handleSendChatMessage}
         onDeleteMessage={handleDeleteChatMessage}
@@ -2949,6 +3065,9 @@ export default function App() {
         staffList={staffList}
         currentStaff={currentStaff}
         jobs={jobs}
+        timeCards={timeCards}
+        nowTimestamp={nowTimestamp}
+        readOnly={!canUserManageStaff(authenticatedStaff || currentStaff)}
         onAddStaff={handleAddStaff}
         onUpdateStaff={handleUpdateStaff}
         onDeleteStaff={handleDeleteStaff}

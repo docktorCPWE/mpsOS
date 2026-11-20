@@ -143,6 +143,65 @@ export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): bo
   return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.toLowerCase().includes(n.toLowerCase()));
 }
 
+/**
+ * Authorized leadership & visibility roles who can see all visible team member profiles,
+ * live online/logged-in presence, and inspect team boards:
+ * Greg Hyatt, Kyle Edmonson, Jason Barnett, Drew Lupkey, and Ethan Pierce.
+ */
+export function canViewTeamProfiles(userNameOrStaff?: string | StaffUser | null): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    const id = (userNameOrStaff.id || '').toLowerCase();
+    const email = (userNameOrStaff.email || '').toLowerCase().trim();
+    const name = (userNameOrStaff.name || '').toLowerCase().trim();
+    if (
+      id === 'staff-greg' ||
+      id === 'staff-kyle' ||
+      id === 'staff-jason' ||
+      id === 'staff-drew' ||
+      id === 'staff-ethan' ||
+      email === 'arkcwd@gmail.com' ||
+      email === 'greg.hyatt@myplanstore.com' ||
+      email === 'kyle@myplanstore.com' ||
+      email === 'jason@myplanstore.com' ||
+      email === 'drew@myplanstore.com' ||
+      email === 'ethanp.dwg@gmail.com' ||
+      userNameOrStaff.canViewAllProjects === true ||
+      userNameOrStaff.canManageStaff === true ||
+      userNameOrStaff.role === 'admin' ||
+      userNameOrStaff.role === 'drafter_lead'
+    ) {
+      return true;
+    }
+    return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.includes(n.toLowerCase()));
+  }
+  const name = String(userNameOrStaff).toLowerCase().trim();
+  return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.includes(n.toLowerCase()));
+}
+
+export const ONLINE_PRESENCE_TTL_MS = 3 * 60 * 1000; // 3 minutes without heartbeat => offline
+
+export function isStaffCurrentlyOnline(staff?: StaffUser | null, nowMs: number = Date.now()): boolean {
+  if (!staff || !staff.isOnline || !staff.lastSeenAt) return false;
+  const lastSeenMs = new Date(staff.lastSeenAt).getTime();
+  if (Number.isNaN(lastSeenMs)) return false;
+  return (nowMs - lastSeenMs) <= ONLINE_PRESENCE_TTL_MS;
+}
+
+export function formatRelativeLastSeen(isoTimestamp?: string, nowMs: number = Date.now()): string {
+  if (!isoTimestamp) return 'No recent session';
+  const ts = new Date(isoTimestamp).getTime();
+  if (Number.isNaN(ts)) return 'No recent session';
+  const diffSec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d ago`;
+}
+
 export function canUserDeleteDelegatedItem(userNameOrStaff?: string | StaffUser | null): boolean {
   if (!userNameOrStaff) return false;
   if (typeof userNameOrStaff === 'object') {
@@ -1140,8 +1199,10 @@ export function saveStoredDelegatedLayout(staffId: string | undefined, layout: D
   }
 }
 
-export const DELETED_STAFF_STORAGE_KEY = 'my_plan_store_os_deleted_staff_ids_v1';
+export const DELETED_STAFF_STORAGE_KEY = 'my_plan_store_os_deleted_staff_ids_v2';
 
+// Strictly exclude ONLY legacy placeholder mock IDs and mock placeholder emails,
+// NEVER real authenticated accounts (e.g. jamesb.dwg@gmail.com or aaronp.dwg@gmail.com) by name.
 export const PERMANENTLY_EXCLUDED_STAFF_IDS = new Set([
   'staff-aaron',
   'staff-james',
@@ -1152,12 +1213,6 @@ export const PERMANENTLY_EXCLUDED_STAFF_EMAILS = new Set([
   'aaron@myplanstore.com',
   'james@myplanstore.com',
   'james.barnett@myplanstore.com'
-]);
-
-export const PERMANENTLY_EXCLUDED_STAFF_NAMES = new Set([
-  'aaron',
-  'james',
-  'james barnett'
 ]);
 
 export function getDeletedStaffIds(): string[] {
@@ -1177,9 +1232,12 @@ export function addDeletedStaffId(staffIdOrInfo: string | { id?: string; email?:
     const set = new Set<string>(current);
     if (typeof staffIdOrInfo === 'string') {
       const clean = staffIdOrInfo.trim();
-      set.add(clean);
-      set.add(clean.toLowerCase());
+      if (clean) {
+        set.add(clean);
+        set.add(clean.toLowerCase());
+      }
     } else if (staffIdOrInfo) {
+      // Track deletions by exact ID and email only — never generic full name so real re-registered accounts stay visible
       if (staffIdOrInfo.id) {
         set.add(staffIdOrInfo.id);
         set.add(staffIdOrInfo.id.toLowerCase());
@@ -1187,11 +1245,28 @@ export function addDeletedStaffId(staffIdOrInfo: string | { id?: string; email?:
       if (staffIdOrInfo.email) {
         set.add(staffIdOrInfo.email.toLowerCase().trim());
       }
-      if (staffIdOrInfo.name) {
-        set.add(staffIdOrInfo.name.toLowerCase().trim());
-      }
     }
     localStorage.setItem(DELETED_STAFF_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // ignore
+  }
+}
+
+export function removeDeletedStaffId(staffIdOrInfo: string | { id?: string; email?: string }): void {
+  try {
+    const raw = localStorage.getItem(DELETED_STAFF_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    const toRemove = new Set<string>();
+    if (typeof staffIdOrInfo === 'string') {
+      toRemove.add(staffIdOrInfo.trim().toLowerCase());
+    } else {
+      if (staffIdOrInfo.id) toRemove.add(staffIdOrInfo.id.trim().toLowerCase());
+      if (staffIdOrInfo.email) toRemove.add(staffIdOrInfo.email.trim().toLowerCase());
+    }
+    const next = parsed.filter((item: string) => !toRemove.has(String(item).trim().toLowerCase()));
+    localStorage.setItem(DELETED_STAFF_STORAGE_KEY, JSON.stringify(next));
   } catch {
     // ignore
   }
@@ -1201,19 +1276,16 @@ export function isStaffDeleted(staff?: { id?: string; email?: string; name?: str
   if (!staff) return false;
   const id = (staff.id || '').toLowerCase().trim();
   const email = (staff.email || '').toLowerCase().trim();
-  const name = (staff.name || '').toLowerCase().trim();
 
-  if (PERMANENTLY_EXCLUDED_STAFF_IDS.has(id) || PERMANENTLY_EXCLUDED_STAFF_EMAILS.has(email) || PERMANENTLY_EXCLUDED_STAFF_NAMES.has(name)) {
-    return true;
-  }
-  if (name === 'james barnett' || email === 'james.barnett@myplanstore.com' || id === 'staff-james-barnett') {
+  if ((id && PERMANENTLY_EXCLUDED_STAFF_IDS.has(id)) || (email && PERMANENTLY_EXCLUDED_STAFF_EMAILS.has(email))) {
     return true;
   }
 
   const deletedList = getDeletedStaffIds();
   return deletedList.some(del => {
     const d = del.toLowerCase().trim();
-    return d === id || d === email || d === name;
+    if (!d) return false;
+    return (Boolean(id) && d === id) || (Boolean(email) && d === email);
   });
 }
 
@@ -1300,52 +1372,22 @@ export function getStoredJobs(): Job[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const isDummyJames = (val?: string) => {
-        if (!val) return false;
-        const lower = val.trim().toLowerCase();
-        return lower === 'james' || lower === 'james barnett';
-      };
-      const isDummyAaron = (val?: string) => {
-        if (!val) return false;
-        return val.trim().toLowerCase() === 'aaron';
-      };
-
-      // Filter out testing jobs, test cards, test deliverables, and remove dummy James/Aaron assignments
+      // Filter out testing jobs, test cards, test deliverables while preserving real drafter assignments
       const cleaned = parsed
         .filter((j: Job) => !isTestJob(j))
         .map((j: Job) => {
-          let updated = { ...j };
-          if (isDummyJames(updated.assigned_drafter) || isDummyAaron(updated.assigned_drafter)) {
-            updated.assigned_drafter = 'Kyle';
-          }
-          if (updated.time_logs && updated.time_logs.length > 0) {
-            updated.time_logs = updated.time_logs.map(tl => 
-              (isDummyJames(tl.drafterName) || isDummyAaron(tl.drafterName)) ? { ...tl, drafterName: 'Kyle' } : tl
-            );
-          }
+          const updated = { ...j };
           // Remove all testing cards from delegated tasks
           if (updated.delegated_tasks && updated.delegated_tasks.length > 0) {
-            updated.delegated_tasks = updated.delegated_tasks
-              .filter(dt => !isTestDelegatedTask(dt))
-              .map(dt => 
-                (isDummyJames(dt.assignedTo) || isDummyAaron(dt.assignedTo)) ? { ...dt, assignedTo: 'Kyle' } : dt
-              );
+            updated.delegated_tasks = updated.delegated_tasks.filter(dt => !isTestDelegatedTask(dt));
           }
           // Remove testing deliverables
           if (updated.deliverables && updated.deliverables.length > 0) {
-            updated.deliverables = updated.deliverables
-              .filter(d => !isTestDeliverable(d))
-              .map(d =>
-                (isDummyJames(d.authorDrafter) || isDummyAaron(d.authorDrafter)) ? { ...d, authorDrafter: 'Kyle' } : d
-              );
+            updated.deliverables = updated.deliverables.filter(d => !isTestDeliverable(d));
           }
           // Remove testing comments
           if (updated.comments && updated.comments.length > 0) {
-            updated.comments = updated.comments
-              .filter(c => !isTestComment(c))
-              .map(c =>
-                (isDummyJames(c.author) || isDummyAaron(c.author)) ? { ...c, author: 'Kyle' } : c
-              );
+            updated.comments = updated.comments.filter(c => !isTestComment(c));
           }
           // Reset any dangling timer fields left running from testing
           if (updated.active_timer_start && (isTestJob(updated) || isTestDelegatedTask({ neededWorkDescription: updated.active_timer_task }))) {
@@ -1785,9 +1827,8 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
   const todayStr = getLocalDateString(new Date(nowMs));
   let wasReconciled = false;
 
-  // 0. Remove any dummy shifts created for mock Aaron or deleted James Barnett
+  // 0. Remove only legacy mock shifts (never real authenticated drafter shifts by name)
   const isDummyShift = (s: TimeCardShift) => {
-    const name = (s.staffName || '').trim().toLowerCase();
     const id = (s.id || '').toLowerCase();
     const staffId = (s.staffId || '').toLowerCase();
     return staffId === 'staff-aaron' ||
@@ -1795,10 +1836,7 @@ export function sanitizeAndReconcileTimeCards(shifts: TimeCardShift[], nowMs: nu
            staffId === 'staff-james-barnett' ||
            id.startsWith('shift-aaron-') ||
            id.startsWith('shift-james-') ||
-           id.startsWith('shift-staff-james-barnett-') ||
-           name === 'aaron' ||
-           name === 'james' ||
-           name === 'james barnett';
+           id.startsWith('shift-staff-james-barnett-');
   };
 
   const nonDummyShifts = shifts.filter(s => {

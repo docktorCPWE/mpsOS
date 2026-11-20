@@ -32,8 +32,9 @@ import {
   Clock,
   Briefcase
 } from 'lucide-react';
-import { StaffUser, StaffDepartment, Job } from '../types';
-import { isStaffDeleted } from '../data/mockData';
+import { StaffUser, StaffDepartment, Job, TimeCardShift } from '../types';
+import { isStaffDeleted, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
+import { isShiftForStaff } from '../utils/timeCardExport';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -41,6 +42,9 @@ interface StaffManagementModalProps {
   staffList: StaffUser[];
   currentStaff: StaffUser;
   jobs: Job[];
+  timeCards?: TimeCardShift[];
+  nowTimestamp?: number;
+  readOnly?: boolean;
   onAddStaff: (newStaff: StaffUser) => void;
   onUpdateStaff: (updatedStaff: StaffUser) => void;
   onDeleteStaff: (staffId: string) => void;
@@ -174,6 +178,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   staffList,
   currentStaff,
   jobs,
+  timeCards = [],
+  nowTimestamp = Date.now(),
+  readOnly = false,
   onAddStaff,
   onUpdateStaff,
   onDeleteStaff,
@@ -346,6 +353,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     staff: StaffUser, 
     permKey: keyof Pick<StaffUser, 'canAccessFinancials' | 'canDelegate' | 'canViewAllProjects' | 'canManageStaff' | 'canManageInvoices' | 'canEditJobPhases' | 'canManageRoadblocks' | 'canAccessPayroll'>
   ) => {
+    if (readOnly) return;
     // Prevent locking out Greg Hyatt
     if (staff.name.toLowerCase().includes('greg hyatt') && permKey === 'canManageStaff') {
       alert('Greg Hyatt is the Owner and primary Super Admin. His staff management permission cannot be disabled.');
@@ -362,6 +370,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
   // Quick Status Toggle (Active/Inactive)
   const handleToggleStatus = (staff: StaffUser) => {
+    if (readOnly) return;
     if (staff.name.toLowerCase().includes('greg hyatt')) {
       alert('Cannot deactivate the Owner / Founder account.');
       return;
@@ -421,40 +430,46 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-white tracking-tight">Staff & Permissions Management</h2>
+                <h2 className="text-lg font-bold text-white tracking-tight">
+                  {readOnly ? 'Team Profiles & Live Presence Directory' : 'Staff & Permissions Management'}
+                </h2>
                 <span className="text-[10px] font-mono uppercase bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                  Owner Level Control
+                  {readOnly ? 'Team Visibility' : 'Owner Level Control'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Logged in as <strong>{currentStaff.name}</strong> • Configure team members, access roles, and OS feature permissions.
+                Logged in as <strong>{currentStaff.name}</strong> • {readOnly ? 'View all visible team profiles and live login/shift status.' : 'Configure team members, access roles, and OS feature permissions.'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Reset to Default Staff Button */}
-            <button
-              onClick={() => {
-                if (confirm('Reset staff directory to original default profiles? Any custom staff will be refreshed.')) {
-                  onResetStaff();
-                  showToast('Staff roster reset to system defaults.');
-                }
-              }}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition border border-slate-800"
-              title="Reset Staff Directory to Defaults"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
+            {!readOnly && (
+              <>
+                {/* Reset to Default Staff Button */}
+                <button
+                  onClick={() => {
+                    if (confirm('Reset staff directory to original default profiles? Any custom staff will be refreshed.')) {
+                      onResetStaff();
+                      showToast('Staff roster reset to system defaults.');
+                    }
+                  }}
+                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition border border-slate-800"
+                  title="Reset Staff Directory to Defaults"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
 
-            {/* Add New Staff Button */}
-            <button
-              onClick={handleOpenCreate}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Add Staff Member</span>
-            </button>
+                {/* Add New Staff Button */}
+                <button
+                  onClick={handleOpenCreate}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Add Staff Member</span>
+                </button>
+              </>
+            )}
 
             {/* Close Modal Button */}
             <button
@@ -606,6 +621,10 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
               {filteredStaff.map((staff) => {
                 const isOwner = staff.name.toLowerCase().includes('greg hyatt');
                 const isCurrent = staff.id === currentStaff.id;
+                const isOnline = isStaffCurrentlyOnline(staff, nowTimestamp);
+                const activeShift = timeCards.find(
+                  tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
+                );
 
                 // Count active assigned jobs
                 const assignedJobCount = jobs.filter(j => 
@@ -623,7 +642,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       {/* Top Row: Avatar & Badges */}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-slate-950 shadow-md ${
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-slate-950 shadow-md relative ${
                             staff.role === 'admin' 
                               ? 'bg-amber-400' 
                               : staff.role === 'drafter_lead' 
@@ -631,9 +650,15 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                               : 'bg-blue-400'
                           }`}>
                             {staff.name.split(' ').map(n => n[0]).join('')}
+                            <span
+                              className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-slate-950 ${
+                                isOnline ? 'bg-emerald-400' : 'bg-slate-600'
+                              }`}
+                              title={isOnline ? 'Online right now' : 'Offline'}
+                            />
                           </div>
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <h3 className="font-bold text-sm text-white">{staff.name}</h3>
                               {isOwner && (
                                 <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono font-bold">
@@ -647,19 +672,41 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                               )}
                             </div>
                             <p className="text-xs text-slate-400 leading-tight mt-0.5">{staff.title}</p>
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              {isOnline ? (
+                                <span className="text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded-full">
+                                  ● Online Now
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded-full">
+                                  Offline{staff.lastSeenAt ? ` • ${formatRelativeLastSeen(staff.lastSeenAt, nowTimestamp)}` : ''}
+                                </span>
+                              )}
+                              {activeShift && (
+                                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full ${
+                                  activeShift.status === 'on_break'
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                }`}>
+                                  {activeShift.status === 'on_break' ? 'On Break' : 'Clocked In'}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
                         {/* Status Switch Badge */}
                         <button
-                          onClick={() => handleToggleStatus(staff)}
-                          disabled={isOwner}
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold border transition cursor-pointer ${
+                          onClick={() => !readOnly && handleToggleStatus(staff)}
+                          disabled={isOwner || readOnly}
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold border transition ${
+                            readOnly ? 'cursor-default' : 'cursor-pointer'
+                          } ${
                             staff.status === 'inactive'
                               ? 'bg-red-950 text-red-400 border-red-800 hover:bg-red-900'
                               : 'bg-emerald-950 text-emerald-300 border-emerald-800 hover:bg-emerald-900'
                           }`}
-                          title={isOwner ? 'Owner account is permanently active' : 'Click to toggle Active/Inactive'}
+                          title={isOwner ? 'Owner account is permanently active' : readOnly ? 'Account status' : 'Click to toggle Active/Inactive'}
                         >
                           {staff.status === 'inactive' ? 'INACTIVE' : 'ACTIVE'}
                         </button>
@@ -748,26 +795,28 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         {assignedJobCount} active assigned {assignedJobCount === 1 ? 'plan' : 'plans'}
                       </span>
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleOpenEdit(staff)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
-                          title="Edit Profile & Permissions"
-                        >
-                          <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                          <span>Edit</span>
-                        </button>
-
-                        {!isOwner && (
+                      {!readOnly && (
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => setStaffToDelete(staff)}
-                            className="p-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 rounded-lg transition border border-slate-700 hover:border-red-800 cursor-pointer"
-                            title="Delete Staff Member"
+                            onClick={() => handleOpenEdit(staff)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
+                            title="Edit Profile & Permissions"
                           >
-                            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                            <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Edit</span>
                           </button>
-                        )}
-                      </div>
+
+                          {!isOwner && (
+                            <button
+                              onClick={() => setStaffToDelete(staff)}
+                              className="p-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 rounded-lg transition border border-slate-700 hover:border-red-800 cursor-pointer"
+                              title="Delete Staff Member"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -963,24 +1012,28 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
                           {/* Actions */}
                           <td className="p-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => handleOpenEdit(staff)}
-                                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
-                                title="Edit Full Profile"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              {!isOwner && (
+                            {readOnly ? (
+                              <span className="text-[10px] font-mono text-slate-500">View Only</span>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1.5">
                                 <button
-                                  onClick={() => setStaffToDelete(staff)}
-                                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                                  title="Delete Staff Member"
+                                  onClick={() => handleOpenEdit(staff)}
+                                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+                                  title="Edit Full Profile"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Edit3 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                            </div>
+                                {!isOwner && (
+                                  <button
+                                    onClick={() => setStaffToDelete(staff)}
+                                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                    title="Delete Staff Member"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
