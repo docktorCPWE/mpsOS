@@ -185,6 +185,25 @@
         "recorded_by": { "type": "string", "description": "Name of manager or admin who recorded the entry" }
       },
       "required": ["id", "employee_name", "period_start", "period_end", "payment_date", "amount", "check_number"]
+    },
+    "TimeCardShift": {
+      "title": "TimeCardShift",
+      "description": "Employee shift clock-in, break, and clock-out time card record synchronized across devices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique shift ID" },
+        "staffId": { "type": "string", "description": "Staff user ID" },
+        "staffName": { "type": "string", "description": "Staff full name" },
+        "date": { "type": "string", "description": "Local shift date YYYY-MM-DD" },
+        "clockInTime": { "type": "string", "description": "Clock-in ISO timestamp" },
+        "clockOutTime": { "type": "string", "description": "Clock-out ISO timestamp (omitted while active)" },
+        "status": { "type": "string", "description": "Shift status: clocked_in, on_break, or clocked_out" },
+        "totalWorkSeconds": { "type": "number", "description": "Total net worked seconds" },
+        "totalBreakSeconds": { "type": "number", "description": "Total break seconds" },
+        "notes": { "type": "string", "description": "Optional shift notes" },
+        "missedClockOut": { "type": "boolean", "description": "Flag for auto-closed runaway shift" }
+      },
+      "required": ["id", "staffId", "staffName", "date", "clockInTime", "status"]
     }
   },
   "firestore": {
@@ -223,6 +242,10 @@
     "/payroll_entries/{entryId}": {
       "schema": "PayrollEntry",
       "description": "Employee payroll check records and compensation ledger"
+    },
+    "/time_cards/{shiftId}": {
+      "schema": "TimeCardShift",
+      "description": "Real-time employee shift clock-in, break, and clock-out time cards synced across devices"
     }
   }
 }

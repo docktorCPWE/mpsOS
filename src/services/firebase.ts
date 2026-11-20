@@ -29,8 +29,8 @@ import {
   deleteField
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry } from '../types';
-import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS, isStaffDeleted } from '../data/mockData';
+import { Job, StaffUser, ChatMessage, GregDevTimeEntry, GregDevProjectCard, PayrollEntry, TimeCardShift } from '../types';
+import { isTestJob, isTestDelegatedTask, isTestDeliverable, isTestComment, STAFF_USERS, isStaffDeleted, sanitizeAndReconcileTimeCards } from '../data/mockData';
 
 // Root owner accounts with master system privileges
 export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.com'];
@@ -659,28 +659,16 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
       console.warn('[Firestore] Notice during jobs purge:', e);
     }
 
-    // 4. Scan dev_project_cards & reset any active test timers
+    // 4. Scan dev_project_cards & clean ONLY explicit test notes (NEVER stop active running timers!)
     try {
       const devCardsSnap = await getDocs(collection(db, 'dev_project_cards'));
       for (const d of devCardsSnap.docs) {
         const card = d.data();
-        let cardNeedsUpdate = false;
-        const updates: Record<string, any> = {};
-
-        if (card.is_active || card.active_timer_start) {
-          updates.is_active = false;
-          updates.active_timer_start = null;
-          cardNeedsUpdate = true;
-        }
-
         const notes = (card.current_notes || card.currentNotes || '').toLowerCase();
-        if (notes.includes('dsp testing') || notes.includes('testing')) {
-          updates.current_notes = 'Stem separation & frequency DSP processing';
-          cardNeedsUpdate = true;
-        }
-
-        if (cardNeedsUpdate) {
-          await updateDoc(doc(db, 'dev_project_cards', d.id), updates);
+        if (notes.includes('dsp testing')) {
+          await updateDoc(doc(db, 'dev_project_cards', d.id), {
+            current_notes: 'Stem separation & frequency DSP processing'
+          });
         }
       }
     } catch (e) {
@@ -971,9 +959,7 @@ export function subscribeToDevTimeEntries(callback: (entries: GregDevTimeEntry[]
           createdAt: d.created_at || d.createdAt || new Date().toISOString()
         });
       });
-      if (items.length > 0) {
-        callback(items);
-      }
+      callback(items);
     }, (err) => {
       console.warn('[Firestore] dev_time_entries subscription error:', err);
     });
@@ -1001,7 +987,7 @@ export async function saveDevTimeEntryToFirestore(entry: GregDevTimeEntry): Prom
       billable_amount: entry.billableAmount,
       shift_id: entry.shiftId || '',
       created_at: entry.createdAt
-    });
+    }, { merge: true });
   } catch (err) {
     console.warn('[Firestore] error saving dev time entry:', err);
   }
@@ -1023,18 +1009,21 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
     const colRef = collection(db, 'dev_project_cards');
     return onSnapshot(colRef, (snapshot) => {
       const items: GregDevProjectCard[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        const rawStart = d.active_timer_start ?? d.activeTimerStart ?? undefined;
         items.push({
-          id: doc.id,
+          id: docSnap.id,
           projectType: d.project_type || d.projectType,
           colorTheme: d.color_theme || d.colorTheme || 'indigo',
           isActive: Boolean(d.is_active ?? d.isActive),
           isPausedByBreak: Boolean(d.is_paused_by_break ?? d.isPausedByBreak),
-          activeTimerStart: d.active_timer_start || d.activeTimerStart,
+          activeTimerStart: rawStart ? String(rawStart) : undefined,
           todaySeconds: d.today_seconds || d.todaySeconds || 0,
           totalSeconds: d.total_seconds || d.totalSeconds || 0,
-          currentNotes: d.current_notes || d.currentNotes || ''
+          currentNotes: d.current_notes || d.currentNotes || '',
+          lastStartedAt: d.last_started_at || d.lastStartedAt || undefined,
+          lastStoppedAt: d.last_stopped_at || d.lastStoppedAt || undefined
         });
       });
       if (items.length > 0) {
@@ -1052,22 +1041,36 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
 export async function saveDevProjectCardsToFirestore(cards: GregDevProjectCard[]): Promise<void> {
   if (!db) return;
   try {
+    const batch = writeBatch(db);
     for (const card of cards) {
       const docRef = doc(db, 'dev_project_cards', card.id);
-      await setDoc(docRef, {
+      batch.set(docRef, {
         id: card.id,
         project_type: card.projectType,
         color_theme: card.colorTheme,
-        is_active: card.isActive,
-        is_paused_by_break: card.isPausedByBreak,
+        is_active: Boolean(card.isActive),
+        is_paused_by_break: Boolean(card.isPausedByBreak),
         active_timer_start: card.activeTimerStart || null,
-        today_seconds: card.todaySeconds,
-        total_seconds: card.totalSeconds,
-        current_notes: card.currentNotes || ''
-      });
+        today_seconds: card.todaySeconds || 0,
+        total_seconds: card.totalSeconds || 0,
+        current_notes: card.currentNotes || '',
+        last_started_at: card.lastStartedAt || null,
+        last_stopped_at: card.lastStoppedAt || null
+      }, { merge: true });
     }
+    await batch.commit();
   } catch (err) {
     console.warn('[Firestore] error saving dev project cards:', err);
+  }
+}
+
+export async function deleteDevProjectCardFromFirestore(cardId: string): Promise<void> {
+  if (!db) return;
+  const path = `dev_project_cards/${cardId}`;
+  try {
+    await deleteDoc(doc(db, 'dev_project_cards', cardId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
   }
 }
 
@@ -1185,4 +1188,117 @@ export async function seedInitialPayrollEntries(entries: PayrollEntry[]): Promis
     console.warn('[Firestore] error seeding payroll entries:', err);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Employee Shift Time Cards (Clock-In, Break, Clock-Out Real-Time Cloud Sync)
+// ---------------------------------------------------------------------------
+
+export function subscribeToTimeCards(
+  onUpdate: (shifts: TimeCardShift[]) => void,
+  onEmptyFallback?: () => void
+): () => void {
+  const path = 'time_cards';
+  if (!db) {
+    onEmptyFallback?.();
+    return () => {};
+  }
+  try {
+    return onSnapshot(
+      collection(db, path),
+      (snapshot) => {
+        if (snapshot.empty) {
+          onEmptyFallback?.();
+          return;
+        }
+        const loaded: TimeCardShift[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as TimeCardShift;
+          loaded.push({
+            id: docSnap.id,
+            staffId: d.staffId || '',
+            staffName: d.staffName || '',
+            date: d.date || '',
+            clockInTime: d.clockInTime || '',
+            clockOutTime: d.clockOutTime || undefined,
+            status: d.status || 'clocked_out',
+            breaks: Array.isArray(d.breaks) ? d.breaks : [],
+            totalWorkSeconds: typeof d.totalWorkSeconds === 'number' ? d.totalWorkSeconds : 0,
+            totalBreakSeconds: typeof d.totalBreakSeconds === 'number' ? d.totalBreakSeconds : 0,
+            notes: d.notes || '',
+            pausedProjectJobIds: Array.isArray(d.pausedProjectJobIds) ? d.pausedProjectJobIds : [],
+            missedClockOut: Boolean(d.missedClockOut)
+          });
+        });
+
+        const { shifts: reconciled } = sanitizeAndReconcileTimeCards(loaded);
+        reconciled.sort((a, b) => {
+          const timeA = a.clockInTime ? new Date(a.clockInTime).getTime() : 0;
+          const timeB = b.clockInTime ? new Date(b.clockInTime).getTime() : 0;
+          return timeB - timeA;
+        });
+        onUpdate(reconciled);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+export async function saveTimeCardToFirestore(shift: TimeCardShift): Promise<void> {
+  if (!db || !shift?.id) return;
+  const path = `time_cards/${shift.id}`;
+  try {
+    const cleanShift: Record<string, any> = JSON.parse(JSON.stringify(shift));
+    if (shift.status === 'clocked_in' || shift.status === 'on_break' || !shift.clockOutTime) {
+      cleanShift.clockOutTime = deleteField();
+    }
+    if (shift.totalWorkSeconds === undefined) {
+      cleanShift.totalWorkSeconds = 0;
+    }
+    if (shift.totalBreakSeconds === undefined) {
+      cleanShift.totalBreakSeconds = 0;
+    }
+    if (!Array.isArray(cleanShift.breaks)) {
+      cleanShift.breaks = [];
+    }
+    await setDoc(doc(db, 'time_cards', shift.id), cleanShift, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteTimeCardFromFirestore(shiftId: string): Promise<void> {
+  if (!db || !shiftId) return;
+  const path = `time_cards/${shiftId}`;
+  try {
+    await deleteDoc(doc(db, 'time_cards', shiftId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function seedTimeCardsToFirestore(shifts: TimeCardShift[]): Promise<void> {
+  if (!db || !shifts || shifts.length === 0) return;
+  const path = 'time_cards';
+  try {
+    const batch = writeBatch(db);
+    for (const shift of shifts) {
+      if (!shift?.id) continue;
+      const cleanShift: Record<string, any> = JSON.parse(JSON.stringify(shift));
+      if (shift.status === 'clocked_in' || shift.status === 'on_break' || !shift.clockOutTime) {
+        delete cleanShift.clockOutTime;
+      }
+      batch.set(doc(db, 'time_cards', shift.id), cleanShift, { merge: true });
+    }
+    await batch.commit();
+    console.log(`[Firestore] Successfully seeded ${shifts.length} time card shifts to cloud database.`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
 

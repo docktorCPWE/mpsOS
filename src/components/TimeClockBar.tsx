@@ -26,7 +26,8 @@ import {
   exportTeamTimeCardsSummaryCSV,
   getEmployeeWeeklySummary,
   getLocalDateString,
-  getWeekDateRangeLabel
+  getWeekDateRangeLabel,
+  isShiftForStaff
 } from '../utils/timeCardExport';
 import { formatSecondsToHHMMSS } from '../utils/timeUtils';
 
@@ -60,19 +61,27 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const [confirmClockOut, setConfirmClockOut] = useState(false);
 
-  // Live second ticker
+  // Live second ticker (snaps immediately when returning to mobile tab)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
+    const syncNow = () => setNowMs(Date.now());
+    const interval = setInterval(syncNow, 1000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') syncNow();
+    };
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const isJason = isStaffExemptFromClock(currentStaff);
   const todayStr = getLocalDateString(new Date(nowMs));
 
-  // Find active shift for current staff (regardless of date in case shift crossed midnight)
-  const staffShifts = timeCards.filter(s => s.staffId === currentStaff.id);
+  // Find active shift for current staff (matched across devices by staffId or name)
+  const staffShifts = timeCards.filter(s => isShiftForStaff(s, currentStaff));
   const activeShift = staffShifts.find(s => 
     s.status === 'clocked_in' || s.status === 'on_break'
   );

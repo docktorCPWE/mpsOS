@@ -33,12 +33,18 @@ import {
   purgeRemovedMockStaff,
   subscribeToDevTimeEntries,
   saveDevTimeEntryToFirestore,
+  deleteDevTimeEntryFromFirestore,
   subscribeToDevProjectCards,
   saveDevProjectCardsToFirestore,
+  deleteDevProjectCardFromFirestore,
   subscribeToPayrollEntries,
   savePayrollEntryToFirestore,
   deletePayrollEntryFromFirestore,
-  seedInitialPayrollEntries
+  seedInitialPayrollEntries,
+  subscribeToTimeCards,
+  saveTimeCardToFirestore,
+  deleteTimeCardFromFirestore,
+  seedTimeCardsToFirestore
 } from './services/firebase';
 import { User as FirebaseUser } from 'firebase/auth';
 import { DrafterDashboard } from './components/DrafterDashboard';
@@ -59,7 +65,7 @@ import { TimeCardModal } from './components/TimeCardModal';
 import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { getLocalDateString } from './utils/timeCardExport';
+import { getLocalDateString, isShiftForStaff } from './utils/timeCardExport';
 import { formatSecondsToReadable } from './utils/timeUtils';
 
 const PHASES: JobPhase[] = [
@@ -121,6 +127,7 @@ export default function App() {
   const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
   const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
   const devCardsCloudDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const hasSeededTimeCardsRef = useRef<boolean>(false);
 
   const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
     setSelectedJobForDetail(job);
@@ -128,12 +135,22 @@ export default function App() {
     setJobDetailHighlightCommentId(options?.highlightCommentId);
   };
 
-  // Live ticker for active timers
+  // Live ticker for active timers (snaps immediately when waking mobile / switching tabs)
   useEffect(() => {
-    const timer = setInterval(() => {
-      setNowTimestamp(Date.now());
-    }, 1000);
-    return () => clearInterval(timer);
+    const syncNow = () => setNowTimestamp(Date.now());
+    const timer = setInterval(syncNow, 1000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncNow();
+      }
+    };
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   // Initialize jobs, staff, chat, and time cards from local storage or cloud Firestore
@@ -239,7 +256,7 @@ export default function App() {
     });
 
     const unsubscribeDevEntries = subscribeToDevTimeEntries((entries) => {
-      if (entries && entries.length > 0) {
+      if (entries) {
         setDevEntries(entries);
         saveStoredGregDevEntries(entries);
       }
@@ -247,24 +264,35 @@ export default function App() {
 
     const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
       if (cards && cards.length > 0) {
-        setDevCards((prev) => {
-          return cards.map((c) => {
-            const local = prev.find((p) => p.id === c.id);
-            if (local) {
-              return {
-                ...c,
-                // Preserve local notes and local running timer state
-                currentNotes: local.currentNotes !== undefined ? local.currentNotes : (c.currentNotes || ''),
-                isActive: local.isActive ?? c.isActive,
-                activeTimerStart: local.activeTimerStart ?? c.activeTimerStart
-              };
-            }
-            return c;
-          });
-        });
+        // Cloud Firestore is authoritative for running/paused timer state so desktop & phone stay in sync
+        setDevCards(cards);
         saveStoredGregDevCards(cards);
       }
     });
+
+    const unsubscribeTimeCards = subscribeToTimeCards(
+      (cloudShifts) => {
+        if (cloudShifts) {
+          hasSeededTimeCardsRef.current = true;
+          setTimeCards(cloudShifts);
+          saveStoredTimeCards(cloudShifts);
+        }
+      },
+      () => {
+        if (hasSeededTimeCardsRef.current) {
+          setTimeCards([]);
+          saveStoredTimeCards([]);
+          return;
+        }
+        hasSeededTimeCardsRef.current = true;
+        const localShifts = getStoredTimeCards();
+        if (localShifts && localShifts.length > 0) {
+          seedTimeCardsToFirestore(localShifts).catch(err =>
+            console.warn('[Firestore] Time cards initial seed notice:', err)
+          );
+        }
+      }
+    );
 
     const unsubscribePayroll = subscribeToPayrollEntries(
       (cloudPayroll) => {
@@ -287,6 +315,7 @@ export default function App() {
       unsubscribeChat();
       unsubscribeDevEntries();
       unsubscribeDevCards();
+      unsubscribeTimeCards();
       unsubscribePayroll();
     };
   }, []);
@@ -536,7 +565,8 @@ export default function App() {
           };
         }
         return j;
-      })
+      }),
+      jobId
     );
 
     setTimerPromptJob(null);
@@ -652,7 +682,8 @@ export default function App() {
           };
         }
         return j;
-      })
+      }),
+      jobId
     );
 
     setStopTimerPromptJob(null);
@@ -723,13 +754,13 @@ export default function App() {
     }
   };
 
-  // Time card & punch clock handlers
+  // Time card & punch clock handlers (synced in real time to Firestore across desktop & mobile)
   const handleClockIn = (notes?: string) => {
     if (isStaffExemptFromClock(currentStaff)) {
       return;
     }
     const todayStr = getLocalDateString(new Date());
-    const active = timeCards.find(s => s.staffId === currentStaff.id && (s.status === 'clocked_in' || s.status === 'on_break'));
+    const active = timeCards.find(s => isShiftForStaff(s, currentStaff) && (s.status === 'clocked_in' || s.status === 'on_break'));
     if (active) return;
 
     const newShift: TimeCardShift = {
@@ -748,6 +779,7 @@ export default function App() {
     const updated = [newShift, ...timeCards];
     setTimeCards(updated);
     saveStoredTimeCards(updated);
+    saveTimeCardToFirestore(newShift).catch(err => console.warn('[Firestore] Clock-in sync error:', err));
   };
 
   const handleStartBreak = () => {
@@ -828,9 +860,10 @@ export default function App() {
     }
 
     // Update timecard shift status to on_break
-    const existingActiveShift = timeCards.find(s => s.staffId === currentStaff.id && (s.status === 'clocked_in' || !s.clockOutTime));
+    const existingActiveShift = timeCards.find(s => isShiftForStaff(s, currentStaff) && (s.status === 'clocked_in' || !s.clockOutTime));
     
     let updatedCards: TimeCardShift[];
+    let modifiedShift: TimeCardShift | null = null;
     if (existingActiveShift) {
       updatedCards = timeCards.map(s => {
         if (s.id === existingActiveShift.id) {
@@ -838,12 +871,13 @@ export default function App() {
             id: `brk-${Date.now()}`,
             startTime: new Date().toISOString()
           };
-          return {
+          modifiedShift = {
             ...s,
             status: 'on_break' as const,
             breaks: [...(s.breaks || []), newBreak],
             pausedProjectJobIds: pausedJobIds
           };
+          return modifiedShift;
         }
         return s;
       });
@@ -863,11 +897,15 @@ export default function App() {
         notes: 'Break started',
         pausedProjectJobIds: pausedJobIds
       };
+      modifiedShift = newShift;
       updatedCards = [newShift, ...timeCards];
     }
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
+    if (modifiedShift) {
+      saveTimeCardToFirestore(modifiedShift).catch(err => console.warn('[Firestore] Break start sync error:', err));
+    }
 
     // For Greg Hyatt: Pause any active Dev Project Card timers during shift break
     if (isUserGregHyatt(currentStaff)) {
@@ -933,7 +971,7 @@ export default function App() {
     const resumedJobNumbers: string[] = [];
 
     // Find shift to get paused jobs
-    const activeShift = timeCards.find(s => s.staffId === currentStaff.id && s.status === 'on_break');
+    const activeShift = timeCards.find(s => isShiftForStaff(s, currentStaff) && s.status === 'on_break');
     const pausedJobIds = activeShift?.pausedProjectJobIds || [];
 
     // Helper to determine if a paused job belongs to this returning staff member
@@ -983,8 +1021,9 @@ export default function App() {
     }
 
     // Update timecard shift: close the open break and set status to clocked_in
+    const resumedShifts: TimeCardShift[] = [];
     const updatedCards = timeCards.map(s => {
-      if (s.staffId === currentStaff.id && s.status === 'on_break') {
+      if (isShiftForStaff(s, currentStaff) && s.status === 'on_break') {
         const closedBreaks = (s.breaks || []).map(b => {
           if (!b.endTime) {
             const endMs = Date.now();
@@ -998,18 +1037,23 @@ export default function App() {
           return b;
         });
 
-        return {
+        const updatedShift: TimeCardShift = {
           ...s,
           status: 'clocked_in' as const,
           breaks: closedBreaks,
           pausedProjectJobIds: []
         };
+        resumedShifts.push(updatedShift);
+        return updatedShift;
       }
       return s;
     });
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
+    resumedShifts.forEach(sh => {
+      saveTimeCardToFirestore(sh).catch(err => console.warn('[Firestore] Resume break sync error:', err));
+    });
 
     // For Greg Hyatt: Automatically resume Dev Project Card timers that were paused by break
     if (isUserGregHyatt(currentStaff)) {
@@ -1115,8 +1159,9 @@ export default function App() {
 
     // Finalize active timecard shift
     const endMs = Date.now();
+    const closedShifts: TimeCardShift[] = [];
     const updatedCards = timeCards.map(s => {
-      if (s.staffId === currentStaff.id && (s.status === 'clocked_in' || s.status === 'on_break')) {
+      if (isShiftForStaff(s, currentStaff) && (s.status === 'clocked_in' || s.status === 'on_break')) {
         // Close open break if on break
         const finalBreaks = (s.breaks || []).map(b => {
           if (!b.endTime) {
@@ -1134,7 +1179,7 @@ export default function App() {
         const shiftGrossSec = Math.max(0, Math.floor((endMs - new Date(s.clockInTime).getTime()) / 1000));
         const totalWorkSec = Math.max(0, shiftGrossSec - totalBreakSec);
 
-        return {
+        const finalizedShift: TimeCardShift = {
           ...s,
           clockOutTime: new Date(endMs).toISOString(),
           status: 'clocked_out' as const,
@@ -1144,12 +1189,17 @@ export default function App() {
           notes: notes || s.notes || 'Completed shift',
           pausedProjectJobIds: []
         };
+        closedShifts.push(finalizedShift);
+        return finalizedShift;
       }
       return s;
     });
 
     setTimeCards(updatedCards);
     saveStoredTimeCards(updatedCards);
+    closedShifts.forEach(sh => {
+      saveTimeCardToFirestore(sh).catch(err => console.warn('[Firestore] Clock-out sync error:', err));
+    });
 
     // For Greg Hyatt: Stop and finalize all active or paused Dev Project Card timers upon clocking out
     if (isUserGregHyatt(currentStaff)) {
@@ -1209,6 +1259,93 @@ export default function App() {
     } else {
       setPausedJobsNotice(null);
     }
+  };
+
+  // Sync manual edits or deletions from TimeCardModal directly to Firestore
+  const handleSyncTimeCards = (updated: TimeCardShift[]) => {
+    const prevCards = timeCards;
+    setTimeCards(updated);
+    saveStoredTimeCards(updated);
+
+    // Sync added or edited shifts
+    updated.forEach(shift => {
+      const existing = prevCards.find(p => p.id === shift.id);
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(shift)) {
+        saveTimeCardToFirestore(shift).catch(err => console.warn('[Firestore] Time card edit sync error:', err));
+      }
+    });
+
+    // Sync deleted shifts
+    prevCards.forEach(prevShift => {
+      if (!updated.some(u => u.id === prevShift.id)) {
+        deleteTimeCardFromFirestore(prevShift.id).catch(err => console.warn('[Firestore] Time card delete sync error:', err));
+      }
+    });
+  };
+
+  // Sync Greg Dev Project Cards immediately on timer/card changes, and debounced on typing notes
+  const handleSyncDevCards = (updated: GregDevProjectCard[]) => {
+    const prevCards = devCards;
+    setDevCards(updated);
+    saveStoredGregDevCards(updated);
+
+    // Delete any dismissed/removed cards from Firestore immediately
+    const removedIds = prevCards
+      .filter(p => !updated.some(u => u.id === p.id))
+      .map(p => p.id);
+    removedIds.forEach(cardId => {
+      deleteDevProjectCardFromFirestore(cardId).catch(err => console.warn('[Firestore] Dev card delete error:', err));
+    });
+
+    // Check if any card was added or any timer state changed (isActive / isPausedByBreak / activeTimerStart / totals)
+    const hasImmediateStateChange =
+      removedIds.length > 0 ||
+      updated.length !== prevCards.length ||
+      updated.some(u => {
+        const p = prevCards.find(c => c.id === u.id);
+        if (!p) return true;
+        return (
+          Boolean(p.isActive) !== Boolean(u.isActive) ||
+          Boolean(p.isPausedByBreak) !== Boolean(u.isPausedByBreak) ||
+          (p.activeTimerStart || '') !== (u.activeTimerStart || '') ||
+          (p.todaySeconds || 0) !== (u.todaySeconds || 0) ||
+          (p.totalSeconds || 0) !== (u.totalSeconds || 0)
+        );
+      });
+
+    if (devCardsCloudDebounceRef.current) {
+      clearTimeout(devCardsCloudDebounceRef.current);
+      devCardsCloudDebounceRef.current = null;
+    }
+
+    if (hasImmediateStateChange) {
+      saveDevProjectCardsToFirestore(updated).catch(err => console.warn('Firestore immediate dev card save error:', err));
+    } else {
+      // Notes-only typing change: debounce to prevent write storms while typing
+      devCardsCloudDebounceRef.current = setTimeout(() => {
+        saveDevProjectCardsToFirestore(updated).catch(err => console.warn('Firestore dev card notes save error:', err));
+      }, 600);
+    }
+  };
+
+  // Sync Greg Dev Time Entries (adds, edits, deletions) directly to Firestore
+  const handleSyncDevEntries = (updated: GregDevTimeEntry[]) => {
+    const prevEntries = devEntries;
+    setDevEntries(updated);
+    saveStoredGregDevEntries(updated);
+
+    updated.forEach(entry => {
+      const existing = prevEntries.find(p => p.id === entry.id);
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(entry)) {
+        saveDevTimeEntryToFirestore(entry).catch(err => console.warn('[Firestore] Dev entry save error:', err));
+      }
+    });
+
+    prevEntries.forEach(prevEntry => {
+      if (!updated.some(u => u.id === prevEntry.id)) {
+        deleteDevTimeEntryFromFirestore(prevEntry.id).catch(err => console.warn('[Firestore] Dev entry delete error:', err));
+      }
+    });
   };
 
   // Staff Management handlers
@@ -2572,7 +2709,7 @@ export default function App() {
       {/* Greg Hyatt Dedicated Project Dev Time Cards (MPS OS Dev, BigX Media Dev, Sound Extraction Dev, Other Dev, FB Media Dev) */}
       {isUserGregHyatt(currentStaff) && userRole !== 'customer' && (() => {
         const activeGregShift = timeCards.find(
-          s => (s.staffId === currentStaff.id || s.staffName.toLowerCase().includes('greg hyatt')) && 
+          s => (isShiftForStaff(s, currentStaff) || s.staffName.toLowerCase().includes('greg hyatt')) && 
                (s.status === 'clocked_in' || s.status === 'on_break')
         );
         const isClockedIn = Boolean(activeGregShift);
@@ -2585,21 +2722,8 @@ export default function App() {
             isOnBreak={isOnBreak}
             devCards={devCards}
             devEntries={devEntries}
-            onUpdateDevCards={(updated) => {
-              setDevCards(updated);
-              saveStoredGregDevCards(updated);
-              // Debounce saving dev cards to Firestore to prevent frequent write-snapshot feedback loops while typing
-              if (devCardsCloudDebounceRef.current) {
-                clearTimeout(devCardsCloudDebounceRef.current);
-              }
-              devCardsCloudDebounceRef.current = setTimeout(() => {
-                saveDevProjectCardsToFirestore(updated).catch((err) => console.warn('Firestore dev card save error:', err));
-              }, 1200);
-            }}
-            onUpdateDevEntries={(updated) => {
-              setDevEntries(updated);
-              saveStoredGregDevEntries(updated);
-            }}
+            onUpdateDevCards={handleSyncDevCards}
+            onUpdateDevEntries={handleSyncDevEntries}
             onOpenReviewModal={() => setIsDevReviewModalOpen(true)}
             activeShiftId={activeGregShift?.id}
           />
@@ -2840,10 +2964,7 @@ export default function App() {
         timeCards={timeCards}
         jobs={jobs}
         initialSelectedStaffId={timeCardModalStaffId}
-        onUpdateTimeCards={(updated) => {
-          setTimeCards(updated);
-          saveStoredTimeCards(updated);
-        }}
+        onUpdateTimeCards={handleSyncTimeCards}
       />
 
       {/* MODAL 10: Greg Hyatt Dev Project Time Entries Review & CSV Export Modal */}
@@ -2852,10 +2973,7 @@ export default function App() {
         onClose={() => setIsDevReviewModalOpen(false)}
         currentStaff={currentStaff}
         devEntries={devEntries}
-        onUpdateDevEntries={(updated) => {
-          setDevEntries(updated);
-          saveStoredGregDevEntries(updated);
-        }}
+        onUpdateDevEntries={handleSyncDevEntries}
       />
 
     </div>

@@ -7,6 +7,23 @@ import { TimeCardShift, StaffUser, Job, EmployeeWeeklySummary, TimeCardBreak } f
 export const ARKANSAS_TIMEZONE = 'America/Chicago';
 
 /**
+ * Matches a TimeCardShift to a StaffUser across devices by canonical staffId or full name
+ */
+export function isShiftForStaff(shift: TimeCardShift, staff?: StaffUser | null): boolean {
+  if (!shift || !staff) return false;
+  if (shift.staffId && staff.id && shift.staffId === staff.id) return true;
+  const shiftName = (shift.staffName || '').trim().toLowerCase();
+  const staffName = (staff.name || '').trim().toLowerCase();
+  if (shiftName && staffName && shiftName === staffName) return true;
+  // Handle shorthand first-name legacy records like "Kyle" -> "Kyle Edmonson"
+  if (shiftName && staffName) {
+    const staffFirst = staffName.split(' ')[0];
+    if (shiftName === staffFirst && staffFirst.length >= 3) return true;
+  }
+  return false;
+}
+
+/**
  * Returns a date formatted as YYYY-MM-DD in Arkansas Central Time (prevents UTC timezone date jumps)
  */
 export function getLocalDateString(d: Date = new Date()): string {
@@ -264,9 +281,9 @@ export function getEmployeeWeeklySummary(
   const weekStart = getStartOfWeek(targetDate);
   const weekEnd = getEndOfWeek(targetDate);
 
-  // CRITICAL FIX: Filter shifts strictly to this employee AND within the specified week!
+  // Filter shifts strictly to this employee AND within the specified week
   const staffShifts = allShifts.filter(s => 
-    s.staffId === staff.id && isDateInWeek(s.date, weekStart, weekEnd)
+    isShiftForStaff(s, staff) && isDateInWeek(s.date, weekStart, weekEnd)
   );
 
   let totalWorkSec = 0;
@@ -314,7 +331,7 @@ export function getEmployeeAllTimeSummary(
   jobs: Job[],
   nowMs: number = Date.now()
 ): EmployeeWeeklySummary {
-  const staffShifts = allShifts.filter(s => s.staffId === staff.id);
+  const staffShifts = allShifts.filter(s => isShiftForStaff(s, staff));
 
   let totalWorkSec = 0;
   let totalBreakSec = 0;

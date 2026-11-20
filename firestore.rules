@@ -80,5 +80,12 @@ service cloud.firestore {
       allow create, update: if isValidId(entryId);
       allow delete: if isValidId(entryId);
     }
+
+    // Employee Shift Time Cards (Clock-In, Break, Clock-Out synced across devices)
+    match /time_cards/{shiftId} {
+      allow read: if true;
+      allow create, update: if isValidId(shiftId);
+      allow delete: if isValidId(shiftId);
+    }
   }
 }

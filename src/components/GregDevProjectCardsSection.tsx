@@ -600,12 +600,20 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     }, 2800);
   };
 
-  // Live second ticker for running project timers
+  // Live second ticker for running project timers (snaps immediately when waking mobile / switching tabs)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
+    const syncNow = () => setNowMs(Date.now());
+    const interval = setInterval(syncNow, 1000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') syncNow();
+    };
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const triggerToast = (msg: string) => {
@@ -648,11 +656,11 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
   // Start timer on a specific card
   const handleStartTimer = (cardId: string, notesOverride?: string) => {
     if (!isClockedIn) {
-      alert('Please clock in on your primary shift time card first before starting a dev project timer.');
+      triggerToast('Please clock in on your primary shift time card first before starting a dev project timer.');
       return;
     }
     if (isOnBreak) {
-      alert('You are currently on break. Please click "Return From Break" on the shift bar to resume work.');
+      triggerToast('You are currently on break. Please click "Return From Break" on the shift bar to resume work.');
       return;
     }
 

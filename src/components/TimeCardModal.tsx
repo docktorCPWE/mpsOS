@@ -34,7 +34,8 @@ import {
   getEmployeeAllTimeSummary,
   getWeekDateRangeLabel,
   exportSingleEmployeeTimeCardCSV,
-  exportTeamTimeCardsSummaryCSV
+  exportTeamTimeCardsSummaryCSV,
+  isShiftForStaff
 } from '../utils/timeCardExport';
 
 interface TimeCardModalProps {
@@ -97,8 +98,8 @@ export const TimeCardModal: React.FC<TimeCardModalProps> = ({
 
   // Shifts for selected employee sorted by date descending
   const selectedStaffShifts = timeCards
-    .filter(s => s.staffId === targetStaff.id)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .filter(s => isShiftForStaff(s, targetStaff))
+    .sort((a, b) => new Date(b.clockInTime || b.date).getTime() - new Date(a.clockInTime || a.date).getTime());
 
   // Weekly calculations for the selected staff
   const staffSummary = getEmployeeWeeklySummary(targetStaff, timeCards, jobs);
