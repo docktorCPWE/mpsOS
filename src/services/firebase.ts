@@ -40,13 +40,46 @@ export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.co
 // Session-scoped login marker so closing the browser/tab always ends the login session
 // and legacy browserLocalPersistence sessions from earlier visits are cleanly signed out.
 export const AUTH_SESSION_STORAGE_KEY = 'mps_auth_session_active_v1';
+export const DEVICE_SESSION_ID_STORAGE_KEY = 'mps_device_session_id_v1';
 
 // In-memory session flag guards against both async onAuthStateChanged timing races
 // and environments where sessionStorage may be restricted.
 let inMemoryAuthSessionActive = false;
+let inMemoryDeviceSessionId: string | null = null;
+
+export function getDeviceSessionId(): string {
+  if (inMemoryDeviceSessionId) return inMemoryDeviceSessionId;
+  try {
+    const existing = sessionStorage.getItem(DEVICE_SESSION_ID_STORAGE_KEY);
+    if (existing) {
+      inMemoryDeviceSessionId = existing;
+      return existing;
+    }
+    const fresh = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    sessionStorage.setItem(DEVICE_SESSION_ID_STORAGE_KEY, fresh);
+    inMemoryDeviceSessionId = fresh;
+    return fresh;
+  } catch {
+    const fallback = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    inMemoryDeviceSessionId = fallback;
+    return fallback;
+  }
+}
+
+export function resetDeviceSessionId(): string {
+  const fresh = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  inMemoryDeviceSessionId = fresh;
+  try {
+    sessionStorage.setItem(DEVICE_SESSION_ID_STORAGE_KEY, fresh);
+  } catch {
+    // ignore
+  }
+  return fresh;
+}
 
 export function markAuthSessionActive(uid?: string): void {
   inMemoryAuthSessionActive = true;
+  getDeviceSessionId();
   try {
     sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, uid || 'active');
   } catch {
@@ -468,27 +501,14 @@ export async function updateStaffPresenceInFirestore(
 
 export async function purgeRemovedMockStaff(): Promise<void> {
   // Purge ONLY deprecated mock placeholder staff documents (staff-aaron, staff-james, staff-james-barnett)
-  // NEVER delete real authenticated accounts (e.g. jamesb.dwg@gmail.com, aaronp.dwg@gmail.com) by name!
+  // that have never authenticated. NEVER delete real accounts by email!
   try {
-    await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
-    await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
-    await deleteDoc(doc(db, 'staff', 'staff-james-barnett')).catch(() => {});
-    const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
-    if (staffSnap) {
-      for (const d of staffSnap.docs) {
-        const s = d.data();
-        const emailLower = (s.email || '').trim().toLowerCase();
-        if (
-          d.id === 'staff-aaron' ||
-          d.id === 'staff-james' ||
-          d.id === 'staff-james-barnett' ||
-          emailLower === 'aaron@myplanstore.com' ||
-          emailLower === 'james@myplanstore.com' ||
-          emailLower === 'james.barnett@myplanstore.com'
-        ) {
-          await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-          console.log(`[Firestore] Purged obsolete mock staff doc: ${d.id}`);
-        }
+    const legacyIds = ['staff-aaron', 'staff-james', 'staff-james-barnett'];
+    for (const legacyId of legacyIds) {
+      const snap = await getDoc(doc(db, 'staff', legacyId)).catch(() => null);
+      if (snap && snap.exists() && !snap.data()?.lastLoginAt) {
+        await deleteDoc(doc(db, 'staff', legacyId)).catch(() => {});
+        console.log(`[Firestore] Purged obsolete mock staff doc: ${legacyId}`);
       }
     }
   } catch (err) {
@@ -596,26 +616,13 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
     // 2. Preserve and verify real staff users (core + all real authenticated accounts)
     try {
       // Purge ONLY obsolete legacy placeholder docs (staff-aaron, staff-james, staff-james-barnett)
-      // NEVER delete real authenticated user profiles (e.g. jamesb.dwg@gmail.com, aaronp.dwg@gmail.com)
-      await deleteDoc(doc(db, 'staff', 'staff-aaron')).catch(() => {});
-      await deleteDoc(doc(db, 'staff', 'staff-james')).catch(() => {});
-      await deleteDoc(doc(db, 'staff', 'staff-james-barnett')).catch(() => {});
-      const staffSnap = await getDocs(collection(db, 'staff')).catch(() => null);
-      if (staffSnap) {
-        for (const d of staffSnap.docs) {
-          const s = d.data();
-          const emailLower = (s.email || '').trim().toLowerCase();
-          if (
-            d.id === 'staff-aaron' ||
-            d.id === 'staff-james' ||
-            d.id === 'staff-james-barnett' ||
-            emailLower === 'aaron@myplanstore.com' ||
-            emailLower === 'james@myplanstore.com' ||
-            emailLower === 'james.barnett@myplanstore.com'
-          ) {
-            await deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
-            console.log(`[Firestore] Purged obsolete mock staff doc: ${d.id}`);
-          }
+      // that have never authenticated. NEVER delete real accounts by email!
+      const legacyIds = ['staff-aaron', 'staff-james', 'staff-james-barnett'];
+      for (const legacyId of legacyIds) {
+        const snap = await getDoc(doc(db, 'staff', legacyId)).catch(() => null);
+        if (snap && snap.exists() && !snap.data()?.lastLoginAt) {
+          await deleteDoc(doc(db, 'staff', legacyId)).catch(() => {});
+          console.log(`[Firestore] Purged obsolete mock staff doc: ${legacyId}`);
         }
       }
 
@@ -678,18 +685,7 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
           }
         }
 
-        // Reset dangling active timers stuck running from test executions
-        if (j.active_timer_start) {
-          const isTaskTimerTest = isTestDelegatedTask({ neededWorkDescription: j.active_timer_task });
-          if (isTaskTimerTest) {
-            updates.active_timer_start = deleteField();
-            updates.active_timer_task = deleteField();
-            updates.active_timer_drafter_id = deleteField();
-            updates.active_timer_drafter_name = deleteField();
-            updates.active_timer_delegated_task_id = deleteField();
-            needsUpdate = true;
-          }
-        }
+        // Never stop active timers on real jobs during startup cleanup (test jobs are already deleted above)
 
         if (needsUpdate) {
           await updateDoc(doc(db, 'jobs', d.id), updates);
@@ -795,30 +791,111 @@ export function subscribeToAuth(
   });
 }
 
+const PENDING_SIGNUP_NAME_PREFIX = 'mps_pending_signup_name_';
+
+export function savePendingSignupName(email: string, fullName: string): void {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = fullName.trim();
+  if (!cleanEmail || !cleanName) return;
+  try {
+    sessionStorage.setItem(`${PENDING_SIGNUP_NAME_PREFIX}${cleanEmail}`, cleanName);
+  } catch {
+    // ignore
+  }
+}
+
+export function getPendingSignupName(email: string): string | null {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+  try {
+    return sessionStorage.getItem(`${PENDING_SIGNUP_NAME_PREFIX}${cleanEmail}`);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingSignupName(email: string): void {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return;
+  try {
+    sessionStorage.removeItem(`${PENDING_SIGNUP_NAME_PREFIX}${cleanEmail}`);
+  } catch {
+    // ignore
+  }
+}
+
+export interface RegisterEmailResult {
+  user: User;
+  reactivated: boolean;
+  needsVerification: boolean;
+}
+
 export async function registerWithEmail(
   email: string,
   pass: string,
   fullName: string
-): Promise<User> {
+): Promise<RegisterEmailResult> {
+  const cleanEmail = email.trim();
+  const cleanName = fullName.trim();
   // Mark active BEFORE calling Firebase Auth so onAuthStateChanged never treats this fresh sign-up as stale
   markAuthSessionActive('pending');
   try {
     await setPersistence(auth, browserSessionPersistence);
-    const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+    const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
     const user = userCredential.user;
     markAuthSessionActive(user.uid);
+    removeDeletedStaffId({ id: `staff-${user.uid.slice(0, 8)}`, email: cleanEmail });
 
     // Set profile display name
-    if (fullName.trim()) {
-      await updateProfile(user, { displayName: fullName.trim() });
+    if (cleanName) {
+      await updateProfile(user, { displayName: cleanName });
     }
 
     // Send email verification link
     await sendEmailVerification(user);
     console.log('[Auth] Verification email sent to:', user.email);
 
-    return user;
-  } catch (err) {
+    return { user, reactivated: false, needsVerification: true };
+  } catch (err: any) {
+    // If the email already exists in Firebase Auth (e.g. from staging after their staff profile was deleted),
+    // automatically reactivate their account if the password matches, or guide them to a 1-click password reset!
+    if (err?.code === 'auth/email-already-in-use') {
+      if (cleanName) {
+        savePendingSignupName(cleanEmail, cleanName);
+      }
+      try {
+        await setPersistence(auth, browserSessionPersistence);
+        const existingCred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+        const existingUser = existingCred.user;
+        markAuthSessionActive(existingUser.uid);
+        removeDeletedStaffId({ id: `staff-${existingUser.uid.slice(0, 8)}`, email: cleanEmail });
+
+        if (cleanName && existingUser.displayName !== cleanName) {
+          await updateProfile(existingUser, { displayName: cleanName }).catch(() => {});
+        }
+
+        if (!existingUser.emailVerified) {
+          try {
+            await sendEmailVerification(existingUser);
+            console.log('[Auth] Sent fresh verification email for reactivated account:', existingUser.email);
+          } catch (verifyErr) {
+            console.warn('[Auth] Verification email notice for reactivated account:', verifyErr);
+          }
+          return { user: existingUser, reactivated: true, needsVerification: true };
+        }
+
+        return { user: existingUser, reactivated: true, needsVerification: false };
+      } catch (signInErr: any) {
+        clearAuthSessionMarker();
+        const recoveryErr: any = new Error(
+          'This email already has a saved login from an earlier or staging session. Reset your password to choose a new password and automatically re-create your staff profile.'
+        );
+        recoveryErr.code = 'auth/existing-account-needs-reset';
+        recoveryErr.originalCode = signInErr?.code || 'auth/email-already-in-use';
+        throw recoveryErr;
+      }
+    }
+
     clearAuthSessionMarker();
     throw err;
   }
@@ -841,12 +918,42 @@ export async function loginWithEmail(
   }
 }
 
-export async function logoutUser(staffId?: string): Promise<void> {
-  if (staffId) {
+export async function logoutUser(
+  staffId?: string,
+  options?: { skipPresenceUpdate?: boolean }
+): Promise<void> {
+  if (staffId && !options?.skipPresenceUpdate) {
     await updateStaffPresenceInFirestore(staffId, false).catch(() => {});
   }
   clearAuthSessionMarker();
   await signOut(auth);
+}
+
+/**
+ * Broadcasts a remote sign-out signal to all other active sessions/devices for this staff member
+ * (for example when clocking out from mobile after forgetting to clock out on desktop).
+ */
+export async function triggerRemoteLogoutInFirestore(
+  staffId: string,
+  originSessionId: string,
+  reason: string = 'clock_out'
+): Promise<string> {
+  const nowIso = new Date().toISOString();
+  if (!db || !staffId) return nowIso;
+  try {
+    await setDoc(
+      doc(db, 'staff', staffId),
+      {
+        forceLogoutAt: nowIso,
+        forceLogoutOriginSessionId: originSessionId,
+        forceLogoutReason: reason
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[Firestore] Remote logout broadcast notice:', err);
+  }
+  return nowIso;
 }
 
 export async function resendVerificationEmail(): Promise<void> {
@@ -877,7 +984,9 @@ export async function syncAuthToStaffUser(
   existingStaffList: StaffUser[]
 ): Promise<StaffUser> {
   const userEmail = (user.email || '').toLowerCase().trim();
-  const userName = (user.displayName || '').toLowerCase().trim();
+  const pendingName = getPendingSignupName(userEmail);
+  const resolvedDisplayName = (pendingName || user.displayName || '').trim();
+  const userName = resolvedDisplayName.toLowerCase();
   const isOwnerEmail = ROOT_OWNER_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
   const isKyle = userEmail.includes('kyle') || userName.includes('kyle');
   const isJason = userEmail.includes('jason') || userName.includes('jason');
@@ -885,28 +994,16 @@ export async function syncAuthToStaffUser(
   const isEthan = userEmail === 'ethanp.dwg@gmail.com' || userEmail.includes('ethan') || userName.includes('ethan');
   const nowIso = new Date().toISOString();
 
-  // 1. Check if staff member already exists in memory with this email or canonical role
-  let matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
-
-  if (!matched && isOwnerEmail) {
-    matched = existingStaffList.find(s => s.name.toLowerCase().includes('greg hyatt')) ||
-              existingStaffList.find(s => s.role === 'admin' && s.canManageStaff === true);
-  }
-  if (!matched && isKyle) {
-    matched = existingStaffList.find(s => s.name.toLowerCase().includes('kyle') || s.id === 'staff-kyle');
-  }
-  if (!matched && isJason) {
-    matched = existingStaffList.find(s => s.name.toLowerCase().includes('jason') || s.id === 'staff-jason');
-  }
-  if (!matched && isDrew) {
-    matched = existingStaffList.find(s => s.name.toLowerCase().includes('drew') || s.id === 'staff-drew');
-  }
-  if (!matched && isEthan) {
-    matched = existingStaffList.find(s => s.name.toLowerCase().includes('ethan') || s.id === 'staff-ethan');
+  // If the user provided a fresh name during reactivation/sign-up, sync it to Firebase Auth profile too
+  if (pendingName && user.displayName !== pendingName) {
+    await updateProfile(user, { displayName: pendingName }).catch(() => {});
   }
 
-  // 2. If not found in memory, try to look up in Firestore directly
-  if (!matched && db) {
+  let matched: StaffUser | undefined;
+  let checkedFirestore = false;
+
+  // 1. Check Firestore directly first so deleted staff profiles are accurately detected and re-created fresh
+  if (db) {
     try {
       const directDocRef = doc(db, 'staff', `staff-${user.uid.slice(0, 8)}`);
       const directSnap = await getDoc(directDocRef);
@@ -918,25 +1015,51 @@ export async function syncAuthToStaffUser(
           const s = { ...(d.data() as StaffUser), id: d.id };
           if (s.email && s.email.toLowerCase().trim() === userEmail) {
             matched = s;
-          } else if (isKyle && s.name.toLowerCase().includes('kyle')) {
+          } else if (!matched && isOwnerEmail && (s.name.toLowerCase().includes('greg hyatt') || (s.role === 'admin' && s.canManageStaff === true))) {
             matched = s;
-          } else if (isJason && s.name.toLowerCase().includes('jason')) {
+          } else if (!matched && isKyle && (s.name.toLowerCase().includes('kyle') || s.id === 'staff-kyle')) {
             matched = s;
-          } else if (isDrew && s.name.toLowerCase().includes('drew')) {
+          } else if (!matched && isJason && (s.name.toLowerCase().includes('jason') || s.id === 'staff-jason')) {
             matched = s;
-          } else if (isEthan && s.name.toLowerCase().includes('ethan')) {
+          } else if (!matched && isDrew && (s.name.toLowerCase().includes('drew') || s.id === 'staff-drew')) {
+            matched = s;
+          } else if (!matched && isEthan && (s.name.toLowerCase().includes('ethan') || s.id === 'staff-ethan')) {
             matched = s;
           }
         });
       }
+      checkedFirestore = true;
     } catch (err) {
       console.warn('[Firestore] Error looking up staff for auth user:', err);
+    }
+  }
+
+  // 2. Fall back to in-memory staff list only if Firestore lookup was unavailable
+  if (!matched && !checkedFirestore) {
+    matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
+
+    if (!matched && isOwnerEmail) {
+      matched = existingStaffList.find(s => s.name.toLowerCase().includes('greg hyatt')) ||
+                existingStaffList.find(s => s.role === 'admin' && s.canManageStaff === true);
+    }
+    if (!matched && isKyle) {
+      matched = existingStaffList.find(s => s.name.toLowerCase().includes('kyle') || s.id === 'staff-kyle');
+    }
+    if (!matched && isJason) {
+      matched = existingStaffList.find(s => s.name.toLowerCase().includes('jason') || s.id === 'staff-jason');
+    }
+    if (!matched && isDrew) {
+      matched = existingStaffList.find(s => s.name.toLowerCase().includes('drew') || s.id === 'staff-drew');
+    }
+    if (!matched && isEthan) {
+      matched = existingStaffList.find(s => s.name.toLowerCase().includes('ethan') || s.id === 'staff-ethan');
     }
   }
 
   if (matched) {
     // Ensure a real signed-in account is never locally marked deleted
     removeDeletedStaffId({ id: matched.id, email: userEmail });
+    clearPendingSignupName(userEmail);
 
     // If user is owner, ensure superadmin privileges
     if (isOwnerEmail) {
@@ -945,6 +1068,7 @@ export async function syncAuthToStaffUser(
         email: userEmail,
         role: 'admin',
         title: matched.title || 'Owner & Principal Architect',
+        status: 'active',
         canAccessFinancials: true,
         canDelegate: true,
         canViewAllProjects: true,
@@ -965,9 +1089,10 @@ export async function syncAuthToStaffUser(
       const updatedKyle: StaffUser = {
         ...matched,
         email: matched.email || userEmail,
-        name: matched.name || user.displayName || 'Kyle Edmonson',
+        name: matched.name || resolvedDisplayName || 'Kyle Edmonson',
         title: matched.title || 'Lead Project Manager & Senior Drafter',
         role: matched.role || 'drafter_lead',
+        status: 'active',
         canAccessFinancials: matched.canAccessFinancials !== undefined ? matched.canAccessFinancials : true,
         canDelegate: matched.canDelegate !== undefined ? matched.canDelegate : true,
         canViewAllProjects: matched.canViewAllProjects !== undefined ? matched.canViewAllProjects : true,
@@ -985,6 +1110,7 @@ export async function syncAuthToStaffUser(
     // For Ethan, Drew, Jason, and all other staff: preserve capabilities & update live presence
     const updatedMatched: StaffUser = {
       ...matched,
+      name: pendingName || matched.name || resolvedDisplayName || user.email?.split('@')[0] || 'Staff Member',
       email: matched.email || userEmail,
       canViewAllProjects: (isJason || isDrew || isEthan) ? true : matched.canViewAllProjects,
       isOnline: true,
@@ -995,10 +1121,10 @@ export async function syncAuthToStaffUser(
     return updatedMatched;
   }
 
-  // Create new staff profile for verified user only if not found at all
+  // Create fresh active staff profile for verified user (covers both brand-new signups & previously deleted accounts re-registering)
   const newStaff: StaffUser = {
     id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : isEthan ? 'staff-ethan' : `staff-${user.uid.slice(0, 8)}`,
-    name: user.displayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : isEthan ? 'Ethan Pierce' : user.email?.split('@')[0] || 'Staff Member'),
+    name: resolvedDisplayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : isEthan ? 'Ethan Pierce' : user.email?.split('@')[0] || 'Staff Member'),
     email: userEmail,
     title: isOwnerEmail ? 'System Owner & Principal' : isKyle ? 'Lead Project Manager & Senior Drafter' : isJason ? 'Project Manager & Operations' : isDrew ? 'Admin & Billing Specialist' : isEthan ? 'Junior Drafter & CAD Specialist' : 'Architectural Drafter',
     role: isOwnerEmail || isJason || isDrew ? 'admin' : isKyle ? 'drafter_lead' : 'drafter',
@@ -1019,6 +1145,7 @@ export async function syncAuthToStaffUser(
   };
 
   removeDeletedStaffId({ id: newStaff.id, email: newStaff.email });
+  clearPendingSignupName(userEmail);
   await saveStaffToFirestore(newStaff);
   return newStaff;
 }
@@ -1105,19 +1232,22 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
       const items: GregDevProjectCard[] = [];
       snapshot.forEach((docSnap) => {
         const d = docSnap.data();
-        const rawStart = d.active_timer_start ?? d.activeTimerStart ?? undefined;
+        // Prefer canonical snake_case fields; only fall back to legacy camelCase when snake_case is undefined
+        const rawStart = d.active_timer_start !== undefined ? d.active_timer_start : d.activeTimerStart;
+        const rawIsActive = d.is_active !== undefined ? d.is_active : d.isActive;
+        const rawIsPaused = d.is_paused_by_break !== undefined ? d.is_paused_by_break : d.isPausedByBreak;
         items.push({
           id: docSnap.id,
-          projectType: d.project_type || d.projectType,
+          projectType: d.project_type || d.projectType || 'Other Dev',
           colorTheme: d.color_theme || d.colorTheme || 'indigo',
-          isActive: Boolean(d.is_active ?? d.isActive),
-          isPausedByBreak: Boolean(d.is_paused_by_break ?? d.isPausedByBreak),
+          isActive: Boolean(rawIsActive),
+          isPausedByBreak: Boolean(rawIsPaused),
           activeTimerStart: rawStart ? String(rawStart) : undefined,
-          todaySeconds: d.today_seconds || d.todaySeconds || 0,
-          totalSeconds: d.total_seconds || d.totalSeconds || 0,
-          currentNotes: d.current_notes || d.currentNotes || '',
-          lastStartedAt: d.last_started_at || d.lastStartedAt || undefined,
-          lastStoppedAt: d.last_stopped_at || d.lastStoppedAt || undefined
+          todaySeconds: Number(d.today_seconds ?? d.todaySeconds ?? 0) || 0,
+          totalSeconds: Number(d.total_seconds ?? d.totalSeconds ?? 0) || 0,
+          currentNotes: typeof (d.current_notes ?? d.currentNotes) === 'string' ? (d.current_notes ?? d.currentNotes) : '',
+          lastStartedAt: (d.last_started_at ?? d.lastStartedAt) || undefined,
+          lastStoppedAt: (d.last_stopped_at ?? d.lastStoppedAt) || undefined
         });
       });
       if (items.length > 0) {
@@ -1132,29 +1262,70 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
   }
 }
 
-export async function saveDevProjectCardsToFirestore(cards: GregDevProjectCard[]): Promise<void> {
-  if (!db) return;
+function buildSanitizedDevCardPayload(card: GregDevProjectCard): Record<string, any> {
+  return {
+    id: card.id,
+    project_type: card.projectType || 'Other Dev',
+    color_theme: card.colorTheme || 'indigo',
+    is_active: Boolean(card.isActive),
+    is_paused_by_break: Boolean(card.isPausedByBreak),
+    active_timer_start: card.activeTimerStart ? String(card.activeTimerStart) : null,
+    today_seconds: typeof card.todaySeconds === 'number' && !isNaN(card.todaySeconds) ? card.todaySeconds : 0,
+    total_seconds: typeof card.totalSeconds === 'number' && !isNaN(card.totalSeconds) ? card.totalSeconds : 0,
+    current_notes: typeof card.currentNotes === 'string' ? card.currentNotes : '',
+    last_started_at: card.lastStartedAt ? String(card.lastStartedAt) : null,
+    last_stopped_at: card.lastStoppedAt ? String(card.lastStoppedAt) : null,
+    // Clear any legacy camelCase ghost fields so snake_case is the sole source of truth
+    isActive: deleteField(),
+    isPausedByBreak: deleteField(),
+    activeTimerStart: deleteField()
+  };
+}
+
+/**
+ * Saves a single dev project card document cleanly without touching any other card's running timer.
+ */
+export async function saveSingleDevProjectCardToFirestore(card: GregDevProjectCard): Promise<void> {
+  if (!db || !card?.id) return;
   try {
-    const batch = writeBatch(db);
-    for (const card of cards) {
-      const docRef = doc(db, 'dev_project_cards', card.id);
-      batch.set(docRef, {
-        id: card.id,
-        project_type: card.projectType,
-        color_theme: card.colorTheme,
-        is_active: Boolean(card.isActive),
-        is_paused_by_break: Boolean(card.isPausedByBreak),
-        active_timer_start: card.activeTimerStart || null,
-        today_seconds: card.todaySeconds || 0,
-        total_seconds: card.totalSeconds || 0,
-        current_notes: card.currentNotes || '',
-        last_started_at: card.lastStartedAt || null,
-        last_stopped_at: card.lastStoppedAt || null
-      }, { merge: true });
-    }
-    await batch.commit();
+    const docRef = doc(db, 'dev_project_cards', card.id);
+    await setDoc(docRef, buildSanitizedDevCardPayload(card), { merge: true });
   } catch (err) {
-    console.warn('[Firestore] error saving dev project cards:', err);
+    console.error('[Firestore] error saving single dev project card:', card.id, err);
+  }
+}
+
+/**
+ * Updates ONLY the notes text of a dev project card — NEVER touches is_active or active_timer_start,
+ * preventing blur/debounce races from ever stopping a running timer.
+ */
+export async function updateDevCardNotesInFirestore(cardId: string, notes: string): Promise<void> {
+  if (!db || !cardId) return;
+  try {
+    const docRef = doc(db, 'dev_project_cards', cardId);
+    await setDoc(
+      docRef,
+      {
+        id: cardId,
+        current_notes: typeof notes === 'string' ? notes : ''
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[Firestore] error saving dev card notes:', cardId, err);
+  }
+}
+
+export async function saveDevProjectCardsToFirestore(cards: GregDevProjectCard[]): Promise<void> {
+  if (!db || !Array.isArray(cards) || cards.length === 0) return;
+  try {
+    await Promise.all(
+      cards
+        .filter(card => Boolean(card?.id))
+        .map(card => saveSingleDevProjectCardToFirestore(card))
+    );
+  } catch (err) {
+    console.error('[Firestore] error saving dev project cards:', err);
   }
 }
 

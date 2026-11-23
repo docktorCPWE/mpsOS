@@ -15,12 +15,16 @@ interface AuthScreenProps {
   currentUser: FirebaseUser | null;
   onAuthenticated: (user: FirebaseUser) => void;
   onBypassDemo?: () => void;
+  remoteLogoutNotice?: string | null;
+  onDismissRemoteLogoutNotice?: () => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   currentUser,
   onAuthenticated,
-  onBypassDemo
+  onBypassDemo,
+  remoteLogoutNotice,
+  onDismissRemoteLogoutNotice
 }) => {
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot_password'>(
     currentUser && !currentUser.emailVerified ? 'signin' : 'signin'
@@ -34,6 +38,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [existingAccountRecoveryEmail, setExistingAccountRecoveryEmail] = useState<string | null>(null);
+  const [isSendingRecoveryReset, setIsSendingRecoveryReset] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
@@ -67,6 +73,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
+    setExistingAccountRecoveryEmail(null);
     setIsLoading(true);
 
     try {
@@ -87,6 +94,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
+    setExistingAccountRecoveryEmail(null);
 
     if (password !== confirmPassword) {
       setErrorMessage('Passwords do not match. Please re-type your password.');
@@ -101,12 +109,48 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsLoading(true);
 
     try {
-      const user = await registerWithEmail(email, password, fullName);
-      setSuccessMessage(`Verification link sent! A confirmation link has been sent to ${user.email}.`);
+      const result = await registerWithEmail(email, password, fullName);
+      if (!result.needsVerification) {
+        setSuccessMessage('Account re-created and verified! Entering My Plan Store OS...');
+        onAuthenticated(result.user);
+      } else if (result.reactivated) {
+        setSuccessMessage(`Account reactivated! A fresh verification link has been sent to ${result.user.email}.`);
+      } else {
+        setSuccessMessage(`Verification link sent! A confirmation link has been sent to ${result.user.email}.`);
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/existing-account-needs-reset' || err?.code === 'auth/email-already-in-use') {
+        setExistingAccountRecoveryEmail(email.trim());
+      } else {
+        setErrorMessage(parseFirebaseError(err));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSendRecoveryReset = async () => {
+    const targetEmail = (existingAccountRecoveryEmail || email).trim();
+    if (!targetEmail) return;
+
+    setIsSendingRecoveryReset(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await sendPasswordReset(targetEmail);
+      setExistingAccountRecoveryEmail(null);
+      setEmail(targetEmail);
+      setPassword('');
+      setConfirmPassword('');
+      setMode('signin');
+      setSuccessMessage(
+        `Password reset link sent to ${targetEmail}! Open the link in your inbox to set a new password, then sign in below — your staff profile will be re-created automatically.`
+      );
     } catch (err: any) {
       setErrorMessage(parseFirebaseError(err));
     } finally {
-      setIsLoading(false);
+      setIsSendingRecoveryReset(false);
     }
   };
 
@@ -119,6 +163,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     setErrorMessage(null);
     setSuccessMessage(null);
+    setExistingAccountRecoveryEmail(null);
     setIsLoading(true);
 
     try {
@@ -214,6 +259,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
         {/* Card Body */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-6 sm:p-8 backdrop-blur-md">
+
+          {remoteLogoutNotice && (
+            <div className="mb-5 p-3.5 rounded-xl bg-sky-950/70 border border-sky-500/40 text-sky-100 text-xs flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <LogOut className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-sky-200 mb-0.5">Session Ended From Another Device</div>
+                  <p className="text-sky-200/90 leading-relaxed">{remoteLogoutNotice}</p>
+                </div>
+              </div>
+              {onDismissRemoteLogoutNotice && (
+                <button
+                  type="button"
+                  onClick={onDismissRemoteLogoutNotice}
+                  className="text-sky-400 hover:text-white text-[11px] underline shrink-0 cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
 
           {/* ---------------------------------------------------- */}
           {/* VIEW: EMAIL VERIFICATION PENDING                     */}
@@ -318,7 +384,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <div className="flex border-b border-slate-800 mb-6 pb-2 gap-4">
                   <button
                     type="button"
-                    onClick={() => { setMode('signin'); setErrorMessage(null); setSuccessMessage(null); }}
+                    onClick={() => { setMode('signin'); setErrorMessage(null); setSuccessMessage(null); setExistingAccountRecoveryEmail(null); }}
                     className={`text-sm font-semibold pb-2 transition-all relative ${
                       mode === 'signin' ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'
                     }`}
@@ -331,7 +397,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => { setMode('signup'); setErrorMessage(null); setSuccessMessage(null); }}
+                    onClick={() => { setMode('signup'); setErrorMessage(null); setSuccessMessage(null); setExistingAccountRecoveryEmail(null); }}
                     className={`text-sm font-semibold pb-2 transition-all relative ${
                       mode === 'signup' ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'
                     }`}
@@ -341,6 +407,59 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       <span className="absolute bottom-[-9px] left-0 right-0 h-0.5 bg-sky-400 rounded-full" />
                     )}
                   </button>
+                </div>
+              )}
+
+              {/* Recovery Card when email was previously registered (e.g. staging) and later deleted from directory */}
+              {existingAccountRecoveryEmail && (
+                <div className="mb-5 p-4 bg-amber-950/50 border border-amber-500/40 rounded-xl space-y-3 text-xs text-amber-100">
+                  <div className="flex items-start gap-2.5">
+                    <KeyRound className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold text-amber-200">
+                        Email Already Registered — Re-Activate Your Account
+                      </div>
+                      <p className="text-amber-200/90 leading-relaxed">
+                        <span className="font-mono text-white">{existingAccountRecoveryEmail}</span> already has a saved login from an earlier or staging session. Deleting an old staff profile removes it from the team directory, but keeps the email login reserved.
+                      </p>
+                      <p className="text-amber-200/80 leading-relaxed">
+                        Click below to reset your password and pick a new one — once you sign in, your staff profile will be re-created automatically.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSendRecoveryReset}
+                      disabled={isSendingRecoveryReset}
+                      className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {isSendingRecoveryReset ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Sending Reset Link...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>Send Reset Link & Re-Activate</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail(existingAccountRecoveryEmail);
+                        setPassword('');
+                        setExistingAccountRecoveryEmail(null);
+                        setErrorMessage(null);
+                        setMode('signin');
+                      }}
+                      className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Sign In Instead
+                    </button>
+                  </div>
                 </div>
               )}
 

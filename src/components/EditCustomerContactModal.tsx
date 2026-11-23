@@ -26,8 +26,13 @@ export const EditCustomerContactModal: React.FC<EditCustomerContactModalProps> =
   onSaveContact,
   performedByRole = 'staff'
 }) => {
+  const initialEmails = (job.customer_email || '')
+    .split(/[;,]+/)
+    .map(e => e.trim())
+    .filter(Boolean);
   const [customerName, setCustomerName] = useState(job.customer_name || '');
-  const [email, setEmail] = useState(job.customer_email || '');
+  const [email, setEmail] = useState(initialEmails[0] || '');
+  const [secondaryEmail, setSecondaryEmail] = useState(initialEmails.slice(1).join('; '));
   const [phone, setPhone] = useState(job.customer_phone || '');
   const [address, setAddress] = useState(job.project_address || '');
   const [updateAllPlans, setUpdateAllPlans] = useState(true);
@@ -43,9 +48,21 @@ export const EditCustomerContactModal: React.FC<EditCustomerContactModalProps> =
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const tokens = `${email} ${secondaryEmail}`
+      .split(/[;,\s]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const combinedEmails = tokens.filter(addr => {
+      const lower = addr.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    }).join('; ');
+
     onSaveContact({
       customer_name: customerName.trim() || job.customer_name,
-      customer_email: email.trim(),
+      customer_email: combinedEmails,
       customer_phone: phone.trim(),
       project_address: address.trim(),
       updateAllPlans: updateAllPlans && otherPlansForCustomer.length > 0,
@@ -109,24 +126,41 @@ export const EditCustomerContactModal: React.FC<EditCustomerContactModalProps> =
             </div>
           )}
 
-          {/* Email Address */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-              Email Address
-            </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input
-                type="text"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="client@example.com (or multiple separated by ;)"
-                className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
-              />
+          {/* Primary & Secondary Email Addresses */}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Primary Email Address
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  inputMode="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="client@example.com"
+                  className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
+                />
+              </div>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Supports multiple email addresses separated by semicolons (e.g. <span className="font-mono text-slate-600">john@home.com; mary@home.com</span>).
-            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Second Email Address <span className="text-slate-400 font-normal normal-case">(Optional)</span>
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  inputMode="email"
+                  value={secondaryEmail}
+                  onChange={(e) => setSecondaryEmail(e.target.value)}
+                  placeholder="spouse@example.com (optional)"
+                  className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Phone Number */}

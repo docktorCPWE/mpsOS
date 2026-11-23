@@ -69,7 +69,10 @@
         "preferred_layout": { "type": "string", "description": "User's default preferred layout: 'grid', 'board', or 'table'" },
         "isOnline": { "type": "boolean", "description": "Whether the staff member currently has an active logged-in session" },
         "lastSeenAt": { "type": "string", "description": "Last active heartbeat ISO timestamp" },
-        "lastLoginAt": { "type": "string", "description": "Most recent login ISO timestamp" }
+        "lastLoginAt": { "type": "string", "description": "Most recent login ISO timestamp" },
+        "forceLogoutAt": { "type": "string", "description": "ISO timestamp instructing other signed-in sessions for this user to sign out" },
+        "forceLogoutOriginSessionId": { "type": "string", "description": "Originating device session ID that triggered remote sign-out" },
+        "forceLogoutReason": { "type": "string", "description": "Reason for remote sign-out such as clock_out" }
       },
       "required": ["id", "name", "role"]
     },

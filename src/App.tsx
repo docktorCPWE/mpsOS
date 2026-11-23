@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, addDeletedStaffId, removeDeletedStaffId, canViewTeamProfiles, canUserManageStaff } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, isLegacyMockStaffDoc, addDeletedStaffId, removeDeletedStaffId, canViewTeamProfiles, canSwitchStaffAccounts, canUserManageStaff, isStaffCurrentlyOnline, formatRelativeLastSeen } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -30,6 +30,8 @@ import {
   subscribeToAuth,
   syncAuthToStaffUser,
   logoutUser,
+  getDeviceSessionId,
+  triggerRemoteLogoutInFirestore,
   hasActiveAuthSession,
   markAuthSessionActive,
   updateStaffPresenceInFirestore,
@@ -39,6 +41,8 @@ import {
   deleteDevTimeEntryFromFirestore,
   subscribeToDevProjectCards,
   saveDevProjectCardsToFirestore,
+  saveSingleDevProjectCardToFirestore,
+  updateDevCardNotesInFirestore,
   deleteDevProjectCardFromFirestore,
   subscribeToPayrollEntries,
   savePayrollEntryToFirestore,
@@ -68,8 +72,8 @@ import { TimeCardModal } from './components/TimeCardModal';
 import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSection';
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { getLocalDateString, isShiftForStaff } from './utils/timeCardExport';
-import { formatSecondsToReadable } from './utils/timeUtils';
+import { getLocalDateString, isShiftForStaff, formatTimeOnly } from './utils/timeCardExport';
+import { formatSecondsToReadable, formatSecondsToHHMMSS, getStaffActiveWork } from './utils/timeUtils';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -100,7 +104,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
-  const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
+  const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; devProjects?: string[]; remoteSignedOut?: boolean; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
+  const [remoteLogoutNotice, setRemoteLogoutNotice] = useState<string | null>(null);
 
   // Greg Hyatt Dev Project Cards & Timesheet State
   const [devCards, setDevCards] = useState<GregDevProjectCard[]>(() => getStoredGregDevCards());
@@ -131,13 +136,26 @@ export default function App() {
   const [isTimeCardModalOpen, setIsTimeCardModalOpen] = useState(false);
   const [timeCardModalStaffId, setTimeCardModalStaffId] = useState<string | undefined>(undefined);
   const devCardsCloudDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const devCardNotesDebounceMapRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const devCardsRef = useRef<GregDevProjectCard[]>(devCards);
+  const devEntriesRef = useRef<GregDevTimeEntry[]>(devEntries);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
   const staffListRef = useRef<StaffUser[]>(staffList);
   const lastActivityRef = useRef<number>(Date.now());
+  const sessionLoginAtRef = useRef<number>(Date.now());
+  const initialForceLogoutAtRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     staffListRef.current = staffList;
   }, [staffList]);
+
+  useEffect(() => {
+    devCardsRef.current = devCards;
+  }, [devCards]);
+
+  useEffect(() => {
+    devEntriesRef.current = devEntries;
+  }, [devEntries]);
 
   const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
     setSelectedJobForDetail(job);
@@ -223,8 +241,14 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          const activeCloudStaff = cloudStaff.filter(s => !isStaffDeleted(s));
-          // Ensure all active core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
+          // Firestore is authoritative for real staff: only skip obsolete legacy mock docs,
+          // and auto-clear any stale localStorage deleted markers when a staff member re-creates their account!
+          const activeCloudStaff = cloudStaff.filter(s => !isLegacyMockStaffDoc(s));
+          activeCloudStaff.forEach(s => {
+            removeDeletedStaffId({ id: s.id, email: s.email });
+          });
+
+          // Ensure all active non-deleted core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
           const merged = [...activeCloudStaff];
           for (const core of STAFF_USERS) {
             if (isStaffDeleted(core)) continue;
@@ -234,21 +258,18 @@ export default function App() {
             }
           }
 
-          // Filter out mock or deleted staff
-          const cleanMerged = merged.filter(s => !isStaffDeleted(s));
-
-          setStaffList(cleanMerged);
-          saveStoredStaff(cleanMerged);
+          setStaffList(merged);
+          saveStoredStaff(merged);
 
           // Update currentStaff if matching cloud record has latest edits to capabilities
           setCurrentStaff(prevCurrent => {
-            if (isStaffDeleted(prevCurrent)) {
-              return cleanMerged[0] || STAFF_USERS[0];
+            if (isLegacyMockStaffDoc(prevCurrent)) {
+              return merged[0] || STAFF_USERS[0];
             }
-            const updatedMatch = cleanMerged.find(s => s.id === prevCurrent.id) ||
-                                 cleanMerged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
-                                 cleanMerged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
-                                 (prevCurrent.name.toLowerCase().includes('kyle') ? cleanMerged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
+            const updatedMatch = merged.find(s => s.id === prevCurrent.id) ||
+                                 merged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
+                                 merged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
+                                 (prevCurrent.name.toLowerCase().includes('kyle') ? merged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
             return updatedMatch ? { ...prevCurrent, ...updatedMatch } : prevCurrent;
           });
         }
@@ -373,6 +394,8 @@ export default function App() {
           const matched = await syncAuthToStaffUser(user, staffListRef.current);
           const layoutPref = matched.preferredLayout || getStoredPreferredLayout(matched.id || matched.email);
           const hydratedStaff = { ...matched, preferredLayout: layoutPref };
+          sessionLoginAtRef.current = Date.now();
+          initialForceLogoutAtRef.current = matched.forceLogoutAt || null;
           setAuthenticatedStaff(hydratedStaff);
           setCurrentStaff(hydratedStaff);
           saveStoredActiveStaffId(hydratedStaff.id);
@@ -383,6 +406,41 @@ export default function App() {
     });
     return () => unsubscribeAuth();
   }, []);
+
+  // Cross-device remote sign-out watcher: if the signed-in user clocks out from another device (e.g. mobile),
+  // automatically sign this session out cleanly so their desktop does not stay logged in.
+  useEffect(() => {
+    if (!authUser || !authUser.emailVerified || !authenticatedStaff?.id) return;
+
+    const myEmail = (authenticatedStaff.email || '').toLowerCase().trim();
+    const cloudMe = staffList.find(
+      s => s.id === authenticatedStaff.id || (myEmail.length > 0 && (s.email || '').toLowerCase().trim() === myEmail)
+    );
+    if (!cloudMe?.forceLogoutAt) return;
+
+    // Baseline existing forceLogoutAt when a fresh session initializes
+    if (initialForceLogoutAtRef.current === undefined) {
+      initialForceLogoutAtRef.current = cloudMe.forceLogoutAt;
+      return;
+    }
+
+    const isNewSignal = cloudMe.forceLogoutAt !== initialForceLogoutAtRef.current;
+    const isFromOtherDevice = cloudMe.forceLogoutOriginSessionId !== getDeviceSessionId();
+    const forceLogoutMs = new Date(cloudMe.forceLogoutAt).getTime();
+    const isAfterSessionStart = !isNaN(forceLogoutMs) && forceLogoutMs >= sessionLoginAtRef.current - 60_000;
+
+    if (isNewSignal && isFromOtherDevice && isAfterSessionStart) {
+      initialForceLogoutAtRef.current = cloudMe.forceLogoutAt;
+      console.log('[Auth] Remote sign-out triggered from another device:', cloudMe.forceLogoutAt);
+      logoutUser(undefined, { skipPresenceUpdate: true }).catch(() => {});
+      setAuthUser(null);
+      setAuthenticatedStaff(null);
+      setIsDemoModeBypassed(false);
+      setRemoteLogoutNotice(
+        'Your shift was clocked out from another device. All active timers have been stopped & saved, and this session was automatically signed out.'
+      );
+    }
+  }, [staffList, authUser?.uid, authUser?.emailVerified, authenticatedStaff?.id, authenticatedStaff?.email]);
 
   // Real-time online presence heartbeat + clean offline on tab close + inactivity auto-sign-out (8h)
   useEffect(() => {
@@ -472,7 +530,7 @@ export default function App() {
   // Sync jobs state to localStorage and Firestore whenever modified
   const updateJobsState = (
     newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
-    specificJobId?: string
+    specificJobId?: string | string[]
   ) => {
     let computedNextJobs: Job[] = [];
 
@@ -485,7 +543,9 @@ export default function App() {
       saveStoredJobs(nextJobs);
 
       // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
-      const jobsToSync = specificJobId
+      const jobsToSync = Array.isArray(specificJobId)
+        ? nextJobs.filter(j => specificJobId.some(id => isTargetJob(j, id)))
+        : specificJobId
         ? nextJobs.filter(j => isTargetJob(j, specificJobId))
         : nextJobs.filter(newJob => {
             const oldJob = prevJobs.find(j => j.id === newJob.id);
@@ -895,7 +955,7 @@ export default function App() {
   const handleStartBreak = () => {
     if (isStaffExemptFromClock(currentStaff)) return;
 
-    const curStaffLower = currentStaff.name.toLowerCase();
+    const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
     const pausedJobNumbers: string[] = [];
     const pausedJobIds: string[] = [];
 
@@ -903,69 +963,73 @@ export default function App() {
     const isJobTimerForCurrentStaff = (j: Job) => {
       if (!j.active_timer_start) return false;
       if (j.active_timer_drafter_id) return j.active_timer_drafter_id === currentStaff.id;
-      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase() === curStaffLower;
-      const assigned = (j.assigned_drafter || '').toLowerCase();
-      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase().trim() === curStaffLower;
+      const assigned = (j.assigned_drafter || '').toLowerCase().trim();
+      const assignedFirst = assigned.split(',')[0].trim();
+      if ((curStaffLower.length > 0 && assigned.includes(curStaffLower)) || (assignedFirst.length > 0 && curStaffLower.includes(assignedFirst))) return true;
       return false;
     };
 
-    // Find and pause any active project timers for this employee
-    const updatedJobs = jobs.map(j => {
-      if (isJobTimerForCurrentStaff(j)) {
-        const startMs = new Date(j.active_timer_start!).getTime();
-        const endMs = Date.now();
-        const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-        const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
-
-        pausedJobNumbers.push(j.job_number);
-        pausedJobIds.push(j.id);
-
-        const partialLog: TimeLog = {
-          id: `tl-break-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          drafterName: currentStaff.name,
-          startTime: j.active_timer_start!,
-          endTime: new Date(endMs).toISOString(),
-          durationSeconds,
-          taskDescription: `${taskNote} (Pre-Break Segment)`,
-          hourlyRate: j.hourly_rate || 85
-        };
-
-        const updatedLogs = [...(j.time_logs || []), partialLog];
-        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
-        const totalMins = Math.round(totalSec / 60);
-        const totalHours = Number((totalSec / 3600).toFixed(2));
-
-        return {
-          ...j,
-          active_timer_start: undefined,
-          active_timer_task: undefined,
-          active_timer_drafter_id: undefined,
-          active_timer_drafter_name: undefined,
-          paused_by_break: true,
-          paused_timer_task: taskNote,
-          paused_timer_drafter_id: currentStaff.id,
-          paused_timer_drafter_name: currentStaff.name,
-          time_logs: updatedLogs,
-          total_time_entries: updatedLogs.length,
-          total_duration_minutes: totalMins,
-          total_duration_hours: totalHours,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Timer Auto-Paused (Break)',
-              performedBy: currentStaff.name,
-              timestamp: new Date().toISOString(),
-              details: `Drafting timer on ${j.job_number} auto-paused for employee break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
+    // Identify jobs to pause up front so we only touch & sync those specific jobs
+    const targetJobsToPause = jobs.filter(isJobTimerForCurrentStaff);
+    targetJobsToPause.forEach(j => {
+      pausedJobNumbers.push(j.job_number);
+      pausedJobIds.push(j.id);
     });
 
-    if (pausedJobNumbers.length > 0) {
-      updateJobsState(updatedJobs);
+    if (pausedJobIds.length > 0) {
+      const endMs = Date.now();
+      updateJobsState(
+        prevJobs =>
+          prevJobs.map(j => {
+            if (!pausedJobIds.includes(j.id) || !j.active_timer_start) return j;
+            const startMs = new Date(j.active_timer_start).getTime();
+            const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+            const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
+
+            const partialLog: TimeLog = {
+              id: `tl-break-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              drafterName: currentStaff.name,
+              startTime: j.active_timer_start,
+              endTime: new Date(endMs).toISOString(),
+              durationSeconds,
+              taskDescription: `${taskNote} (Pre-Break Segment)`,
+              hourlyRate: j.hourly_rate || 85
+            };
+
+            const updatedLogs = [...(j.time_logs || []), partialLog];
+            const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+            const totalMins = Math.round(totalSec / 60);
+            const totalHours = Number((totalSec / 3600).toFixed(2));
+
+            return {
+              ...j,
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              paused_by_break: true,
+              paused_timer_task: taskNote,
+              paused_timer_drafter_id: currentStaff.id,
+              paused_timer_drafter_name: currentStaff.name,
+              time_logs: updatedLogs,
+              total_time_entries: updatedLogs.length,
+              total_duration_minutes: totalMins,
+              total_duration_hours: totalHours,
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: 'Timer Auto-Paused (Break)',
+                  performedBy: currentStaff.name,
+                  timestamp: new Date().toISOString(),
+                  details: `Drafting timer on ${j.job_number} auto-paused for employee break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
+                },
+                ...j.audit_logs
+              ]
+            };
+          }),
+        pausedJobIds
+      );
       setPausedJobsNotice({ jobNumbers: pausedJobNumbers, type: 'paused' });
     }
 
@@ -1019,10 +1083,12 @@ export default function App() {
 
     // For Greg Hyatt: Pause any active Dev Project Card timers during shift break
     if (isUserGregHyatt(currentStaff)) {
-      const runningCards = devCards.filter(c => c.isActive && c.activeTimerStart);
+      const currentDevCards = devCardsRef.current;
+      const runningCards = currentDevCards.filter(c => c.isActive && c.activeTimerStart);
       if (runningCards.length > 0) {
         const newDevLogs: GregDevTimeEntry[] = [];
-        const updatedDevCards = devCards.map(c => {
+        const pausedCardsToSave: GregDevProjectCard[] = [];
+        const updatedDevCards = currentDevCards.map(c => {
           if (c.isActive && c.activeTimerStart) {
             const startMs = new Date(c.activeTimerStart).getTime();
             const endMs = Date.now();
@@ -1049,7 +1115,7 @@ export default function App() {
             newDevLogs.push(log);
             saveDevTimeEntryToFirestore(log);
 
-            return {
+            const pausedCard: GregDevProjectCard = {
               ...c,
               isActive: false,
               isPausedByBreak: true,
@@ -1058,18 +1124,22 @@ export default function App() {
               totalSeconds: (c.totalSeconds || 0) + durationSeconds,
               lastStoppedAt: new Date(endMs).toISOString()
             };
+            pausedCardsToSave.push(pausedCard);
+            return pausedCard;
           }
           return c;
         });
 
         if (newDevLogs.length > 0) {
-          const allEntries = [...newDevLogs, ...devEntries];
+          const allEntries = [...newDevLogs, ...devEntriesRef.current];
           setDevEntries(allEntries);
           saveStoredGregDevEntries(allEntries);
         }
         setDevCards(updatedDevCards);
         saveStoredGregDevCards(updatedDevCards);
-        saveDevProjectCardsToFirestore(updatedDevCards);
+        pausedCardsToSave.forEach(card => {
+          saveSingleDevProjectCardToFirestore(card);
+        });
       }
     }
   };
@@ -1077,8 +1147,9 @@ export default function App() {
   const handleResumeFromBreak = () => {
     if (isStaffExemptFromClock(currentStaff)) return;
 
-    const curStaffLower = currentStaff.name.toLowerCase();
+    const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
     const resumedJobNumbers: string[] = [];
+    const resumedJobIds: string[] = [];
 
     // Find shift to get paused jobs
     const activeShift = timeCards.find(s => isShiftForStaff(s, currentStaff) && s.status === 'on_break');
@@ -1089,44 +1160,49 @@ export default function App() {
       if (!j.paused_by_break && !pausedJobIds.includes(j.id)) return false;
       if (pausedJobIds.includes(j.id)) return true;
       if (j.paused_timer_drafter_id) return j.paused_timer_drafter_id === currentStaff.id;
-      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase() === curStaffLower;
-      const assigned = (j.assigned_drafter || '').toLowerCase();
-      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase().trim() === curStaffLower;
+      const assigned = (j.assigned_drafter || '').toLowerCase().trim();
+      const assignedFirst = assigned.split(',')[0].trim();
+      if ((curStaffLower.length > 0 && assigned.includes(curStaffLower)) || (assignedFirst.length > 0 && curStaffLower.includes(assignedFirst))) return true;
       return false;
     };
 
-    // Automatically resume project timers
-    const updatedJobs = jobs.map(j => {
-      if (isJobPausedForCurrentStaff(j)) {
-        resumedJobNumbers.push(j.job_number);
-        const taskToResume = j.paused_timer_task || `Drafting ${j.current_status}`;
-        return {
-          ...j,
-          paused_by_break: false,
-          paused_timer_task: undefined,
-          paused_timer_drafter_id: undefined,
-          paused_timer_drafter_name: undefined,
-          active_timer_start: new Date().toISOString(),
-          active_timer_task: taskToResume,
-          active_timer_drafter_id: currentStaff.id,
-          active_timer_drafter_name: currentStaff.name,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Timer Resumed from Break',
-              performedBy: currentStaff.name,
-              timestamp: new Date().toISOString(),
-              details: `Drafting timer on ${j.job_number} automatically resumed upon returning from break (${taskToResume}).`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
+    jobs.filter(isJobPausedForCurrentStaff).forEach(j => {
+      resumedJobNumbers.push(j.job_number);
+      resumedJobIds.push(j.id);
     });
 
-    if (resumedJobNumbers.length > 0) {
-      updateJobsState(updatedJobs);
+    if (resumedJobIds.length > 0) {
+      const nowIso = new Date().toISOString();
+      updateJobsState(
+        prevJobs =>
+          prevJobs.map(j => {
+            if (!resumedJobIds.includes(j.id)) return j;
+            const taskToResume = j.paused_timer_task || `Drafting ${j.current_status}`;
+            return {
+              ...j,
+              paused_by_break: false,
+              paused_timer_task: undefined,
+              paused_timer_drafter_id: undefined,
+              paused_timer_drafter_name: undefined,
+              active_timer_start: nowIso,
+              active_timer_task: taskToResume,
+              active_timer_drafter_id: currentStaff.id,
+              active_timer_drafter_name: currentStaff.name,
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: 'Timer Resumed from Break',
+                  performedBy: currentStaff.name,
+                  timestamp: nowIso,
+                  details: `Drafting timer on ${j.job_number} automatically resumed upon returning from break (${taskToResume}).`
+                },
+                ...j.audit_logs
+              ]
+            };
+          }),
+        resumedJobIds
+      );
       setPausedJobsNotice({ jobNumbers: resumedJobNumbers, type: 'resumed' });
     }
 
@@ -1167,23 +1243,30 @@ export default function App() {
 
     // For Greg Hyatt: Automatically resume Dev Project Card timers that were paused by break
     if (isUserGregHyatt(currentStaff)) {
-      const pausedDevCards = devCards.filter(c => c.isPausedByBreak);
+      const currentDevCards = devCardsRef.current;
+      const pausedDevCards = currentDevCards.filter(c => c.isPausedByBreak);
       if (pausedDevCards.length > 0) {
-        const updatedDevCards = devCards.map(c => {
+        const nowIso = new Date().toISOString();
+        const resumedCardsToSave: GregDevProjectCard[] = [];
+        const updatedDevCards = currentDevCards.map(c => {
           if (c.isPausedByBreak) {
-            return {
+            const resumedCard: GregDevProjectCard = {
               ...c,
               isActive: true,
               isPausedByBreak: false,
-              activeTimerStart: new Date().toISOString(),
-              lastStartedAt: new Date().toISOString()
+              activeTimerStart: nowIso,
+              lastStartedAt: nowIso
             };
+            resumedCardsToSave.push(resumedCard);
+            return resumedCard;
           }
           return c;
         });
         setDevCards(updatedDevCards);
         saveStoredGregDevCards(updatedDevCards);
-        saveDevProjectCardsToFirestore(updatedDevCards);
+        resumedCardsToSave.forEach(card => {
+          saveSingleDevProjectCardToFirestore(card);
+        });
       }
     }
   };
@@ -1191,81 +1274,135 @@ export default function App() {
   const handleClockOut = (notes?: string) => {
     if (isStaffExemptFromClock(currentStaff)) return;
 
-    const curStaffLower = currentStaff.name.toLowerCase();
+    const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
     const stoppedJobNumbers: string[] = [];
+    const stoppedJobIds: string[] = [];
+    const stoppedDevProjects: string[] = [];
 
-    // Helper to determine if an active or paused timer belongs to this clocking-out staff
+    const isTaskTimerForCurrentStaff = (t: DelegatedWorkItem) => {
+      if (!t.activeTimerStart) return false;
+      const drafter = (t.activeTimerDrafterName || t.assignedTo || '').toLowerCase().trim();
+      if (!drafter || !curStaffLower) return false;
+      return drafter === curStaffLower || drafter.includes(curStaffLower) || curStaffLower.includes(drafter.split(' ')[0]);
+    };
+
+    // Helper to determine if an active or paused job timer (or delegated task timer) belongs to this clocking-out staff
     const isJobTimerForCurrentStaff = (j: Job) => {
+      const hasTaskTimer = (j.delegated_tasks || []).some(isTaskTimerForCurrentStaff);
+      if (hasTaskTimer) return true;
       if (!j.active_timer_start && !j.paused_by_break) return false;
       if (j.active_timer_drafter_id) return j.active_timer_drafter_id === currentStaff.id;
       if (j.paused_timer_drafter_id) return j.paused_timer_drafter_id === currentStaff.id;
-      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase() === curStaffLower;
-      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase() === curStaffLower;
-      const assigned = (j.assigned_drafter || '').toLowerCase();
-      if (assigned.includes(curStaffLower) || curStaffLower.includes(assigned.split(',')[0].trim())) return true;
+      if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase().trim() === curStaffLower;
+      if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase().trim() === curStaffLower;
+      const assigned = (j.assigned_drafter || '').toLowerCase().trim();
+      const assignedFirst = assigned.split(',')[0].trim();
+      if ((curStaffLower.length > 0 && assigned.includes(curStaffLower)) || (assignedFirst.length > 0 && curStaffLower.includes(assignedFirst))) return true;
       return false;
     };
 
-    // If any project timer is still running or paused for this user, stop and save it cleanly
-    const updatedJobs = jobs.map(j => {
-      if (isJobTimerForCurrentStaff(j)) {
-        stoppedJobNumbers.push(j.job_number);
-        let newLog: TimeLog | null = null;
-        let durationSeconds = 0;
-        const taskNote = j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
-
-        if (j.active_timer_start) {
-          const startMs = new Date(j.active_timer_start).getTime();
-          const endMs = Date.now();
-          durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-          newLog = {
-            id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            drafterName: currentStaff.name,
-            startTime: j.active_timer_start,
-            endTime: new Date(endMs).toISOString(),
-            durationSeconds,
-            taskDescription: `${taskNote} (Shift End Auto-Stop)`,
-            hourlyRate: j.hourly_rate || 85
-          };
-        }
-
-        const updatedLogs = newLog ? [...(j.time_logs || []), newLog] : (j.time_logs || []);
-        const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
-        const totalMins = Math.round(totalSec / 60);
-        const totalHours = Number((totalSec / 3600).toFixed(2));
-
-        return {
-          ...j,
-          active_timer_start: undefined,
-          active_timer_task: undefined,
-          active_timer_drafter_id: undefined,
-          active_timer_drafter_name: undefined,
-          paused_by_break: false,
-          paused_timer_task: undefined,
-          paused_timer_drafter_id: undefined,
-          paused_timer_drafter_name: undefined,
-          time_logs: updatedLogs,
-          total_time_entries: updatedLogs.length,
-          total_duration_minutes: totalMins,
-          total_duration_hours: totalHours,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              action: 'Timer Stopped (Clock Out)',
-              performedBy: currentStaff.name,
-              timestamp: new Date().toISOString(),
-              details: durationSeconds > 0 
-                ? `Drafting timer on ${j.job_number} automatically stopped & finalized upon shift clock-out (${Math.round(durationSeconds / 60)} mins logged).`
-                : `Drafting timer ended upon shift clock-out for "${taskNote}".`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
+    jobs.filter(isJobTimerForCurrentStaff).forEach(j => {
+      stoppedJobNumbers.push(j.job_number);
+      stoppedJobIds.push(j.id);
     });
 
-    updateJobsState(updatedJobs);
+    // Stop and save ONLY the jobs that have active/paused timers for this user
+    if (stoppedJobIds.length > 0) {
+      const stopEndMs = Date.now();
+      const stopEndIso = new Date(stopEndMs).toISOString();
+
+      updateJobsState(
+        prevJobs =>
+          prevJobs.map(j => {
+            if (!stoppedJobIds.includes(j.id)) return j;
+
+            const newLogs: TimeLog[] = [];
+            let durationSeconds = 0;
+            const taskNote = j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
+
+            if (j.active_timer_start) {
+              const startMs = new Date(j.active_timer_start).getTime();
+              durationSeconds = Math.max(1, Math.floor((stopEndMs - startMs) / 1000));
+              newLogs.push({
+                id: `tl-${stopEndMs}-${Math.random().toString(36).substr(2, 5)}`,
+                drafterName: currentStaff.name,
+                startTime: j.active_timer_start,
+                endTime: stopEndIso,
+                durationSeconds,
+                taskDescription: `${taskNote} (Shift End Auto-Stop)`,
+                hourlyRate: j.hourly_rate || 85,
+                delegatedTaskId: j.active_timer_delegated_task_id
+              });
+            }
+
+            // Also stop any delegated task timers belonging to this staff member
+            const updatedTasks = (j.delegated_tasks || []).map(t => {
+              if (!isTaskTimerForCurrentStaff(t)) return t;
+              const tStartMs = t.activeTimerStart ? new Date(t.activeTimerStart).getTime() : stopEndMs;
+              const tElapsed = t.activeTimerStart ? Math.max(1, Math.floor((stopEndMs - tStartMs) / 1000)) : 0;
+              // If job-level timer wasn't already tracking this task, record its time log too
+              if (tElapsed > 0 && j.active_timer_delegated_task_id !== t.id && !j.active_timer_start) {
+                newLogs.push({
+                  id: `tl-task-${stopEndMs}-${Math.random().toString(36).substr(2, 5)}`,
+                  drafterName: currentStaff.name,
+                  startTime: t.activeTimerStart || stopEndIso,
+                  endTime: stopEndIso,
+                  durationSeconds: tElapsed,
+                  taskDescription: `Task: ${t.componentTitle} (Shift End Auto-Stop)`,
+                  hourlyRate: j.hourly_rate || 85,
+                  delegatedTaskId: t.id,
+                  delegatedTaskTitle: t.componentTitle
+                });
+                durationSeconds += tElapsed;
+              }
+              return {
+                ...t,
+                status: t.status === 'In Progress' ? ('Pending' as const) : t.status,
+                activeTimerStart: undefined,
+                activeTimerDrafterName: undefined,
+                workedSeconds: (t.workedSeconds || 0) + tElapsed
+              };
+            });
+
+            const updatedLogs = newLogs.length > 0 ? [...(j.time_logs || []), ...newLogs] : (j.time_logs || []);
+            const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+            const totalMins = Math.round(totalSec / 60);
+            const totalHours = Number((totalSec / 3600).toFixed(2));
+
+            return {
+              ...j,
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              active_timer_delegated_task_id: undefined,
+              paused_by_break: false,
+              paused_timer_task: undefined,
+              paused_timer_drafter_id: undefined,
+              paused_timer_drafter_name: undefined,
+              paused_elapsed_seconds: undefined,
+              delegated_tasks: updatedTasks,
+              time_logs: updatedLogs,
+              total_time_entries: updatedLogs.length,
+              total_duration_minutes: totalMins,
+              total_duration_hours: totalHours,
+              audit_logs: [
+                {
+                  id: `a-${stopEndMs}-${Math.random().toString(36).substr(2, 5)}`,
+                  action: 'Timer Stopped (Clock Out)',
+                  performedBy: currentStaff.name,
+                  timestamp: stopEndIso,
+                  details: durationSeconds > 0
+                    ? `Drafting timer on ${j.job_number} automatically stopped & finalized upon shift clock-out (${Math.max(1, Math.round(durationSeconds / 60))} mins logged).`
+                    : `Drafting timer ended upon shift clock-out for "${taskNote}".`
+                },
+                ...j.audit_logs
+              ]
+            };
+          }),
+        stoppedJobIds
+      );
+    }
 
     // Finalize active timecard shift
     const endMs = Date.now();
@@ -1311,13 +1448,18 @@ export default function App() {
       saveTimeCardToFirestore(sh).catch(err => console.warn('[Firestore] Clock-out sync error:', err));
     });
 
-    // For Greg Hyatt: Stop and finalize all active or paused Dev Project Card timers upon clocking out
+    // For Greg Hyatt: Stop and finalize ALL active or break-paused Dev Project Card timers upon clocking out
     if (isUserGregHyatt(currentStaff)) {
-      const activeDevCards = devCards.filter(c => c.isActive && c.activeTimerStart);
+      const currentDevCards = devCardsRef.current;
       const newDevLogs: GregDevTimeEntry[] = [];
-      const updatedDevCards = devCards.map(c => {
+      const stoppedCardsToSave: GregDevProjectCard[] = [];
+      const updatedDevCards = currentDevCards.map(c => {
+        if (!c.isActive && !c.isPausedByBreak && !c.activeTimerStart) {
+          return c;
+        }
         let additionalSec = 0;
         if (c.isActive && c.activeTimerStart) {
+          stoppedDevProjects.push(c.projectType);
           const startMs = new Date(c.activeTimerStart).getTime();
           const curEndMs = Date.now();
           additionalSec = Math.max(1, Math.floor((curEndMs - startMs) / 1000));
@@ -1343,7 +1485,7 @@ export default function App() {
           saveDevTimeEntryToFirestore(log);
         }
 
-        return {
+        const stoppedCard: GregDevProjectCard = {
           ...c,
           isActive: false,
           isPausedByBreak: false,
@@ -1352,23 +1494,40 @@ export default function App() {
           totalSeconds: (c.totalSeconds || 0) + additionalSec,
           lastStoppedAt: additionalSec > 0 ? new Date().toISOString() : c.lastStoppedAt
         };
+        stoppedCardsToSave.push(stoppedCard);
+        return stoppedCard;
       });
 
       if (newDevLogs.length > 0) {
-        const allEntries = [...newDevLogs, ...devEntries];
+        const allEntries = [...newDevLogs, ...devEntriesRef.current];
         setDevEntries(allEntries);
         saveStoredGregDevEntries(allEntries);
       }
-      setDevCards(updatedDevCards);
-      saveStoredGregDevCards(updatedDevCards);
-      saveDevProjectCardsToFirestore(updatedDevCards);
+      if (stoppedCardsToSave.length > 0) {
+        setDevCards(updatedDevCards);
+        saveStoredGregDevCards(updatedDevCards);
+        stoppedCardsToSave.forEach(card => {
+          saveSingleDevProjectCardToFirestore(card);
+        });
+      }
     }
 
-    if (stoppedJobNumbers.length > 0) {
-      setPausedJobsNotice({ jobNumbers: stoppedJobNumbers, type: 'clock_out_stopped' });
-    } else {
-      setPausedJobsNotice(null);
-    }
+    // Broadcast remote sign-out to all OTHER active sessions/devices for this user (e.g., desktop left open)
+    const originSessionId = getDeviceSessionId();
+    triggerRemoteLogoutInFirestore(currentStaff.id, originSessionId, 'clock_out')
+      .then((signalIso) => {
+        if (authenticatedStaff?.id === currentStaff.id) {
+          initialForceLogoutAtRef.current = signalIso;
+        }
+      })
+      .catch(err => console.warn('[Auth] Remote logout broadcast notice:', err));
+
+    setPausedJobsNotice({
+      jobNumbers: stoppedJobNumbers,
+      devProjects: stoppedDevProjects,
+      remoteSignedOut: true,
+      type: 'clock_out_stopped'
+    });
   };
 
   // Sync manual edits or deletions from TimeCardModal directly to Firestore
@@ -1393,13 +1552,158 @@ export default function App() {
     });
   };
 
-  // Sync Greg Dev Project Cards immediately on timer/card changes, and debounced on typing notes
+  // Atomic single-card Greg Dev Project Card handlers (prevents stale closures or notes edits from ever stopping a running timer)
+  const handleStartDevCardTimer = (cardId: string, notesOverride?: string) => {
+    // Cancel any pending notes debounce for this card so it cannot race with start
+    if (devCardNotesDebounceMapRef.current[cardId]) {
+      clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
+      delete devCardNotesDebounceMapRef.current[cardId];
+    }
+
+    const nowIso = new Date().toISOString();
+    let startedCard: GregDevProjectCard | null = null;
+
+    setDevCards(prev => {
+      const next = prev.map(c => {
+        if (c.id !== cardId) return c;
+        startedCard = {
+          ...c,
+          isActive: true,
+          isPausedByBreak: false,
+          activeTimerStart: nowIso,
+          lastStartedAt: nowIso,
+          currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
+        };
+        return startedCard;
+      });
+      saveStoredGregDevCards(next);
+      return next;
+    });
+
+    if (startedCard) {
+      saveSingleDevProjectCardToFirestore(startedCard);
+    }
+  };
+
+  const handleStopDevCardTimer = (cardId: string, notesOverride?: string, activeShiftId?: string): number => {
+    if (devCardNotesDebounceMapRef.current[cardId]) {
+      clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
+      delete devCardNotesDebounceMapRef.current[cardId];
+    }
+
+    const currentCard = devCardsRef.current.find(c => c.id === cardId);
+    if (!currentCard || !currentCard.isActive || !currentCard.activeTimerStart) return 0;
+
+    const startMs = new Date(currentCard.activeTimerStart).getTime();
+    const endMs = Date.now();
+    const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+    const hours = durationSeconds / 3600;
+    const rate = currentStaff.hourlyRate || 150;
+    const billableAmount = Number((hours * rate).toFixed(2));
+    const todayStr = getLocalDateString(new Date(endMs));
+    const noteToLog = (notesOverride !== undefined ? notesOverride : currentCard.currentNotes)?.trim() || `Dev session on ${currentCard.projectType}`;
+
+    const newEntry: GregDevTimeEntry = {
+      id: `dev-entry-${endMs}-${Math.random().toString(36).substr(2, 4)}`,
+      staffId: currentStaff.id,
+      staffName: currentStaff.name,
+      projectType: currentCard.projectType,
+      date: todayStr,
+      startTime: currentCard.activeTimerStart,
+      endTime: new Date(endMs).toISOString(),
+      durationSeconds,
+      notes: noteToLog,
+      hourlyRate: rate,
+      billableAmount,
+      shiftId: activeShiftId,
+      createdAt: new Date(endMs).toISOString()
+    };
+
+    const updatedEntries = [newEntry, ...devEntriesRef.current];
+    setDevEntries(updatedEntries);
+    saveStoredGregDevEntries(updatedEntries);
+    saveDevTimeEntryToFirestore(newEntry);
+
+    let stoppedCard: GregDevProjectCard | null = null;
+    setDevCards(prev => {
+      const next = prev.map(c => {
+        if (c.id !== cardId) return c;
+        const cardTodaySec = updatedEntries
+          .filter(e => e.projectType === c.projectType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
+          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+        const cardTotalSec = updatedEntries
+          .filter(e => e.projectType === c.projectType)
+          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+        stoppedCard = {
+          ...c,
+          isActive: false,
+          isPausedByBreak: false,
+          activeTimerStart: undefined,
+          todaySeconds: cardTodaySec,
+          totalSeconds: Math.max(c.totalSeconds || 0, cardTotalSec),
+          lastStoppedAt: new Date(endMs).toISOString(),
+          currentNotes: noteToLog
+        };
+        return stoppedCard;
+      });
+      saveStoredGregDevCards(next);
+      return next;
+    });
+
+    if (stoppedCard) {
+      saveSingleDevProjectCardToFirestore(stoppedCard);
+    }
+
+    return durationSeconds;
+  };
+
+  const handleUpdateDevCardNotes = (cardId: string, notes: string) => {
+    // Functional local update ONLY touches currentNotes — NEVER touches isActive / activeTimerStart
+    setDevCards(prev => {
+      const next = prev.map(c => (c.id === cardId ? { ...c, currentNotes: notes } : c));
+      saveStoredGregDevCards(next);
+      return next;
+    });
+
+    if (devCardNotesDebounceMapRef.current[cardId]) {
+      clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
+    }
+    devCardNotesDebounceMapRef.current[cardId] = setTimeout(() => {
+      delete devCardNotesDebounceMapRef.current[cardId];
+      // Merge ONLY current_notes in Firestore so typing or blurring can NEVER stop a running timer
+      updateDevCardNotesInFirestore(cardId, notes);
+    }, 500);
+  };
+
+  const handleAddDevCard = (newCard: GregDevProjectCard) => {
+    setDevCards(prev => {
+      if (prev.some(c => c.id === newCard.id)) return prev;
+      const next = [...prev, newCard];
+      saveStoredGregDevCards(next);
+      return next;
+    });
+    saveSingleDevProjectCardToFirestore(newCard);
+  };
+
+  const handleDismissDevCard = (cardId: string) => {
+    if (devCardNotesDebounceMapRef.current[cardId]) {
+      clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
+      delete devCardNotesDebounceMapRef.current[cardId];
+    }
+    setDevCards(prev => {
+      const next = prev.filter(c => c.id !== cardId);
+      saveStoredGregDevCards(next);
+      return next;
+    });
+    deleteDevProjectCardFromFirestore(cardId).catch(err => console.warn('[Firestore] Dev card delete error:', err));
+  };
+
+  // Fallback bulk sync handler for any legacy callers (writes only changed cards)
   const handleSyncDevCards = (updated: GregDevProjectCard[]) => {
-    const prevCards = devCards;
+    const prevCards = devCardsRef.current;
     setDevCards(updated);
     saveStoredGregDevCards(updated);
 
-    // Delete any dismissed/removed cards from Firestore immediately
     const removedIds = prevCards
       .filter(p => !updated.some(u => u.id === p.id))
       .map(p => p.id);
@@ -1407,34 +1711,19 @@ export default function App() {
       deleteDevProjectCardFromFirestore(cardId).catch(err => console.warn('[Firestore] Dev card delete error:', err));
     });
 
-    // Check if any card was added or any timer state changed (isActive / isPausedByBreak / activeTimerStart / totals)
-    const hasImmediateStateChange =
-      removedIds.length > 0 ||
-      updated.length !== prevCards.length ||
-      updated.some(u => {
-        const p = prevCards.find(c => c.id === u.id);
-        if (!p) return true;
-        return (
-          Boolean(p.isActive) !== Boolean(u.isActive) ||
-          Boolean(p.isPausedByBreak) !== Boolean(u.isPausedByBreak) ||
-          (p.activeTimerStart || '') !== (u.activeTimerStart || '') ||
-          (p.todaySeconds || 0) !== (u.todaySeconds || 0) ||
-          (p.totalSeconds || 0) !== (u.totalSeconds || 0)
-        );
-      });
+    const changedCards = updated.filter(u => {
+      const p = prevCards.find(c => c.id === u.id);
+      if (!p) return true;
+      return JSON.stringify(p) !== JSON.stringify(u);
+    });
 
     if (devCardsCloudDebounceRef.current) {
       clearTimeout(devCardsCloudDebounceRef.current);
       devCardsCloudDebounceRef.current = null;
     }
 
-    if (hasImmediateStateChange) {
-      saveDevProjectCardsToFirestore(updated).catch(err => console.warn('Firestore immediate dev card save error:', err));
-    } else {
-      // Notes-only typing change: debounce to prevent write storms while typing
-      devCardsCloudDebounceRef.current = setTimeout(() => {
-        saveDevProjectCardsToFirestore(updated).catch(err => console.warn('Firestore dev card notes save error:', err));
-      }, 600);
+    if (changedCards.length > 0) {
+      saveDevProjectCardsToFirestore(changedCards).catch(err => console.warn('Firestore dev card save error:', err));
     }
   };
 
@@ -1489,9 +1778,9 @@ export default function App() {
   };
 
   const handleSelectStaff = (staff: StaffUser) => {
-    // Only authorized leadership / visibility roles (Greg, Kyle, Jason, Drew, Ethan) can switch/inspect other profiles
+    // Only authorized leadership (Greg, Kyle, Jason, Drew) can switch into other drafters' accounts
     const realViewer = authenticatedStaff || currentStaff;
-    if (staff.id !== realViewer.id && !canViewTeamProfiles(realViewer)) {
+    if (staff.id !== realViewer.id && !canSwitchStaffAccounts(realViewer)) {
       return;
     }
     const layoutPref = staff.preferredLayout || getStoredPreferredLayout(staff.id || staff.email);
@@ -1534,12 +1823,17 @@ export default function App() {
 
   const handleDeleteStaff = (staffId: string) => {
     const target = staffList.find(s => s.id === staffId);
-    if (target) {
-      addDeletedStaffId({ id: target.id, email: target.email, name: target.name });
-    } else {
-      addDeletedStaffId(staffId);
+    // Only record locally if deleting a hardcoded core default so it doesn't locally re-seed;
+    // for all other accounts, deleting from Firestore is authoritative and allows clean re-creation later!
+    const isCoreDefault = STAFF_USERS.some(c => c.id === staffId);
+    if (isCoreDefault) {
+      if (target) {
+        addDeletedStaffId({ id: target.id, email: target.email, name: target.name });
+      } else {
+        addDeletedStaffId(staffId);
+      }
     }
-    const updated = staffList.filter(s => s.id !== staffId && !isStaffDeleted(s));
+    const updated = staffList.filter(s => s.id !== staffId);
     setStaffList(updated);
     saveStoredStaff(updated);
     if (currentStaff.id === staffId && updated.length > 0) {
@@ -1695,29 +1989,31 @@ export default function App() {
       ? `Preparing drawings & sheets for ${PHASES[nextPhaseIndex]}`
       : 'Final construction print package complete.';
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        return {
-          ...j,
-          current_status: newStatus,
-          next_step: calculatedNextStep,
-          last_customer_contact: new Date().toISOString(),
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Status Updated',
-              performedBy: userRole === 'drafter' ? currentStaff.name : j.customer_name,
-              timestamp: new Date().toISOString(),
-              details: `Phase changed to ${newStatus}`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs);
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === jobId) {
+            return {
+              ...j,
+              current_status: newStatus,
+              next_step: calculatedNextStep,
+              last_customer_contact: new Date().toISOString(),
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: 'Status Updated',
+                  performedBy: userRole === 'drafter' ? currentStaff.name : j.customer_name,
+                  timestamp: new Date().toISOString(),
+                  details: `Phase changed to ${newStatus}`
+                },
+                ...j.audit_logs
+              ]
+            };
+          }
+          return j;
+        }),
+      jobId
+    );
 
     // Create Email Simulator Notification
     setEmailModalData({
@@ -1738,104 +2034,106 @@ export default function App() {
 
     const newRoadblockState = !targetJob.roadblock;
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        const note = newRoadblockState
-          ? j.roadblock_note || 'Awaiting customer site survey input'
-          : '';
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === jobId) {
+            const note = newRoadblockState
+              ? j.roadblock_note || 'Awaiting customer site survey input'
+              : '';
 
-        const commentToAdd = newRoadblockState
-          ? {
-              id: `c-rb-${Date.now()}`,
-              author: currentStaff.name || j.assigned_drafter.split(',')[0] || 'Drafter Workspace',
-              role: 'drafter' as const,
-              text: `🚨 ROADBLOCK FLAGGED: ${note}`,
-              timestamp: new Date().toISOString()
-            }
-          : {
-              id: `c-rb-res-${Date.now()}`,
-              author: currentStaff.name || j.assigned_drafter.split(',')[0] || 'Drafter Workspace',
-              role: 'drafter' as const,
-              text: `✅ ROADBLOCK RESOLVED: ${resolutionCommentText || 'Roadblock cleared and project work resumed.'}`,
-              timestamp: new Date().toISOString()
+            const commentToAdd = newRoadblockState
+              ? {
+                  id: `c-rb-${Date.now()}`,
+                  author: currentStaff.name || j.assigned_drafter.split(',')[0] || 'Drafter Workspace',
+                  role: 'drafter' as const,
+                  text: `🚨 ROADBLOCK FLAGGED: ${note}`,
+                  timestamp: new Date().toISOString()
+                }
+              : {
+                  id: `c-rb-res-${Date.now()}`,
+                  author: currentStaff.name || j.assigned_drafter.split(',')[0] || 'Drafter Workspace',
+                  role: 'drafter' as const,
+                  text: `✅ ROADBLOCK RESOLVED: ${resolutionCommentText || 'Roadblock cleared and project work resumed.'}`,
+                  timestamp: new Date().toISOString()
+                };
+
+            return {
+              ...j,
+              roadblock: newRoadblockState,
+              roadblock_note: note,
+              comments: [...j.comments, commentToAdd],
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: newRoadblockState ? 'Roadblock Activated' : 'Roadblock Resolved',
+                  performedBy: currentStaff.name || 'Drafter Workspace',
+                  timestamp: new Date().toISOString(),
+                  details: newRoadblockState ? `Flagged roadblock: ${note}` : `Cleared roadblock: ${resolutionCommentText || 'Resolved'}`
+                },
+                ...j.audit_logs
+              ]
             };
-
-        return {
-          ...j,
-          roadblock: newRoadblockState,
-          roadblock_note: note,
-          comments: [...j.comments, commentToAdd],
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: newRoadblockState ? 'Roadblock Activated' : 'Roadblock Resolved',
-              performedBy: currentStaff.name || 'Drafter Workspace',
-              timestamp: new Date().toISOString(),
-              details: newRoadblockState ? `Flagged roadblock: ${note}` : `Cleared roadblock: ${resolutionCommentText || 'Resolved'}`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs);
+          }
+          return j;
+        }),
+      jobId
+    );
   };
 
   // 3. Add Comment / Pinned Markup Feedback
   const handleAddComment = (jobId: string, text: string, pinnedLocation?: PinnedLocation) => {
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        const authorName = userRole === 'drafter' ? currentStaff.name : j.customer_name;
-        const newComment = {
-          id: `c-${Date.now()}`,
-          author: authorName,
-          role: userRole,
-          text,
-          timestamp: new Date().toISOString(),
-          pinnedLocation
-        };
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === jobId) {
+            const authorName = userRole === 'drafter' ? currentStaff.name : j.customer_name;
+            const newComment = {
+              id: `c-${Date.now()}`,
+              author: authorName,
+              role: userRole,
+              text,
+              timestamp: new Date().toISOString(),
+              pinnedLocation
+            };
 
-        return {
-          ...j,
-          comments: [...j.comments, newComment],
-          last_customer_contact: new Date().toISOString()
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs);
+            return {
+              ...j,
+              comments: [...j.comments, newComment],
+              last_customer_contact: new Date().toISOString()
+            };
+          }
+          return j;
+        }),
+      jobId
+    );
   };
 
   // 3b. Add Specific Job Note (From Drafter Dashboard Table or Modals)
   const handleAddJobNote = (jobId: string, text: string, customTimestamp?: string) => {
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        const newNote: JobComment = {
-          id: `c-note-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          author: currentStaff.name,
-          authorId: currentStaff.id,
-          role: 'drafter',
-          text: text.trim(),
-          timestamp: customTimestamp || new Date().toISOString(),
-          isJobNote: true
-        };
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === jobId) {
+            const newNote: JobComment = {
+              id: `c-note-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              author: currentStaff.name,
+              authorId: currentStaff.id,
+              role: 'drafter',
+              text: text.trim(),
+              timestamp: customTimestamp || new Date().toISOString(),
+              isJobNote: true
+            };
 
-        return {
-          ...j,
-          comments: [...(j.comments || []), newNote]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs);
-    if (selectedJobForDetail && selectedJobForDetail.id === jobId) {
-      const updatedJob = updatedJobs.find(j => j.id === jobId);
-      if (updatedJob) setSelectedJobForDetail(updatedJob);
-    }
+            return {
+              ...j,
+              comments: [...(j.comments || []), newNote]
+            };
+          }
+          return j;
+        }),
+      jobId
+    );
   };
 
   // 4. Customer Formal Approval
@@ -1851,39 +2149,41 @@ export default function App() {
 
   // 5. Customer Request Revision
   const handleRequestRevision = (jobId: string, notes: string) => {
-    const updatedJobs = jobs.map(j => {
-      if (j.id === jobId) {
-        const newReviewCount = j.layout_reviews_count + 1;
-        const revisionComment = {
-          id: `c-${Date.now()}`,
-          author: j.customer_name,
-          role: 'customer' as const,
-          text: `[REVISION REQUEST #${newReviewCount}] ${notes}`,
-          timestamp: new Date().toISOString()
-        };
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === jobId) {
+            const newReviewCount = j.layout_reviews_count + 1;
+            const revisionComment = {
+              id: `c-${Date.now()}`,
+              author: j.customer_name,
+              role: 'customer' as const,
+              text: `[REVISION REQUEST #${newReviewCount}] ${notes}`,
+              timestamp: new Date().toISOString()
+            };
 
-        return {
-          ...j,
-          current_status: 'Revisions' as JobPhase,
-          layout_reviews_count: newReviewCount,
-          comments: [...j.comments, revisionComment],
-          last_customer_contact: new Date().toISOString(),
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: `Revision Requested (#${newReviewCount})`,
-              performedBy: j.customer_name,
-              timestamp: new Date().toISOString(),
-              details: notes
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs);
+            return {
+              ...j,
+              current_status: 'Revisions' as JobPhase,
+              layout_reviews_count: newReviewCount,
+              comments: [...j.comments, revisionComment],
+              last_customer_contact: new Date().toISOString(),
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: `Revision Requested (#${newReviewCount})`,
+                  performedBy: j.customer_name,
+                  timestamp: new Date().toISOString(),
+                  details: notes
+                },
+                ...j.audit_logs
+              ]
+            };
+          }
+          return j;
+        }),
+      jobId
+    );
   };
 
   // 6. Create New Job Intake (Restricted strictly to Kyle or Jason Barnett)
@@ -1892,8 +2192,7 @@ export default function App() {
       alert('Permission Restricted: Only Kyle or Jason Barnett have authorization to create a new job.');
       return;
     }
-    const updated = [newJob, ...jobs];
-    updateJobsState(updated);
+    updateJobsState(prevJobs => [newJob, ...prevJobs], newJob.id);
     setSelectedCustomerId(newJob.id);
   };
 
@@ -2650,58 +2949,56 @@ export default function App() {
     }
   ) => {
     const nowIso = new Date().toISOString();
-    const updatedJobs = jobs.map((job) => {
+    const matchedJobIds: string[] = [];
+    jobs.forEach(job => {
       const isTarget = updatedContact.updateAllPlans
         ? (job.customer_name && job.customer_name.trim().toLowerCase() === targetCustomerName.trim().toLowerCase()) ||
           (updatedContact.currentJobId && job.id === updatedContact.currentJobId)
         : (updatedContact.currentJobId ? job.id === updatedContact.currentJobId : (job.customer_name && job.customer_name.trim().toLowerCase() === targetCustomerName.trim().toLowerCase()));
-
-      if (!isTarget) return job;
-
-      const changeAudit: string[] = [];
-      if (updatedContact.customer_name && updatedContact.customer_name !== job.customer_name) {
-        changeAudit.push(`Name: "${job.customer_name}" ➔ "${updatedContact.customer_name}"`);
-      }
-      if (updatedContact.customer_email !== undefined && updatedContact.customer_email !== job.customer_email) {
-        changeAudit.push(`Email: "${job.customer_email || 'none'}" ➔ "${updatedContact.customer_email || 'none'}"`);
-      }
-      if (updatedContact.customer_phone !== undefined && updatedContact.customer_phone !== job.customer_phone) {
-        changeAudit.push(`Phone: "${job.customer_phone || 'none'}" ➔ "${updatedContact.customer_phone || 'none'}"`);
-      }
-      if (updatedContact.project_address !== undefined && updatedContact.project_address !== job.project_address) {
-        changeAudit.push(`Address: "${job.project_address || 'none'}" ➔ "${updatedContact.project_address || 'none'}"`);
-      }
-
-      const updatedJob: Job = {
-        ...job,
-        customer_name: updatedContact.customer_name !== undefined ? updatedContact.customer_name : job.customer_name,
-        customer_email: updatedContact.customer_email !== undefined ? updatedContact.customer_email : job.customer_email,
-        customer_phone: updatedContact.customer_phone !== undefined ? updatedContact.customer_phone : job.customer_phone,
-        project_address: updatedContact.project_address !== undefined ? updatedContact.project_address : job.project_address,
-        audit_logs: [
-          {
-            id: `a-contact-${Date.now()}-${job.id}`,
-            action: 'Customer Contact Info Updated',
-            performedBy: currentStaff.name,
-            timestamp: nowIso,
-            details: changeAudit.length > 0 ? changeAudit.join('; ') : 'Contact information saved.'
-          },
-          ...job.audit_logs
-        ]
-      };
-
-      return updatedJob;
+      if (isTarget) matchedJobIds.push(job.id);
     });
 
-    updateJobsState(updatedJobs);
+    if (matchedJobIds.length === 0) return;
 
-    // Keep selectedJobForDetail synchronized if open
-    if (selectedJobForDetail) {
-      const freshSelected = updatedJobs.find(j => j.id === selectedJobForDetail.id);
-      if (freshSelected) {
-        setSelectedJobForDetail(freshSelected);
-      }
-    }
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map((job) => {
+          if (!matchedJobIds.includes(job.id)) return job;
+
+          const changeAudit: string[] = [];
+          if (updatedContact.customer_name && updatedContact.customer_name !== job.customer_name) {
+            changeAudit.push(`Name: "${job.customer_name}" ➔ "${updatedContact.customer_name}"`);
+          }
+          if (updatedContact.customer_email !== undefined && updatedContact.customer_email !== job.customer_email) {
+            changeAudit.push(`Email: "${job.customer_email || 'none'}" ➔ "${updatedContact.customer_email || 'none'}"`);
+          }
+          if (updatedContact.customer_phone !== undefined && updatedContact.customer_phone !== job.customer_phone) {
+            changeAudit.push(`Phone: "${job.customer_phone || 'none'}" ➔ "${updatedContact.customer_phone || 'none'}"`);
+          }
+          if (updatedContact.project_address !== undefined && updatedContact.project_address !== job.project_address) {
+            changeAudit.push(`Address: "${job.project_address || 'none'}" ➔ "${updatedContact.project_address || 'none'}"`);
+          }
+
+          return {
+            ...job,
+            customer_name: updatedContact.customer_name !== undefined ? updatedContact.customer_name : job.customer_name,
+            customer_email: updatedContact.customer_email !== undefined ? updatedContact.customer_email : job.customer_email,
+            customer_phone: updatedContact.customer_phone !== undefined ? updatedContact.customer_phone : job.customer_phone,
+            project_address: updatedContact.project_address !== undefined ? updatedContact.project_address : job.project_address,
+            audit_logs: [
+              {
+                id: `a-contact-${Date.now()}-${job.id}`,
+                action: 'Customer Contact Info Updated',
+                performedBy: currentStaff.name,
+                timestamp: nowIso,
+                details: changeAudit.length > 0 ? changeAudit.join('; ') : 'Contact information saved.'
+              },
+              ...job.audit_logs
+            ]
+          };
+        }),
+      matchedJobIds
+    );
   };
 
   // Get active selected customer job object
@@ -2726,14 +3023,19 @@ export default function App() {
     return (
       <AuthScreen
         currentUser={authUser}
+        remoteLogoutNotice={remoteLogoutNotice}
+        onDismissRemoteLogoutNotice={() => setRemoteLogoutNotice(null)}
         onAuthenticated={async (user) => {
           markAuthSessionActive(user.uid);
+          setRemoteLogoutNotice(null);
           setAuthUser(user);
           setIsDemoModeBypassed(false);
           try {
             const matched = await syncAuthToStaffUser(user, staffListRef.current);
             const layoutPref = matched.preferredLayout || getStoredPreferredLayout(matched.id || matched.email);
             const hydrated = { ...matched, preferredLayout: layoutPref };
+            sessionLoginAtRef.current = Date.now();
+            initialForceLogoutAtRef.current = matched.forceLogoutAt || null;
             setAuthenticatedStaff(hydrated);
             setCurrentStaff(hydrated);
             saveStoredActiveStaffId(hydrated.id);
@@ -2776,6 +3078,7 @@ export default function App() {
         setCurrentStaff={handleSelectStaff}
         staffList={staffList}
         timeCards={timeCards}
+        devCards={devCards}
         nowTimestamp={nowTimestamp}
         selectedCustomerId={selectedCustomerId}
         setSelectedCustomerId={setSelectedCustomerId}
@@ -2810,6 +3113,109 @@ export default function App() {
         onSignOut={handleSignOut}
       />
 
+      {/* Live Account Inspection Banner when Greg, Kyle, Jason, or Drew switches into another drafter's account */}
+      {authenticatedStaff && currentStaff.id !== authenticatedStaff.id && canSwitchStaffAccounts(authenticatedStaff) && (() => {
+        const inspectedOnline = isStaffCurrentlyOnline(currentStaff, nowTimestamp);
+        const inspectedShift = timeCards.find(
+          tc => isShiftForStaff(tc, currentStaff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
+        );
+        const inspectedWork = getStaffActiveWork(currentStaff, jobs, devCards, nowTimestamp);
+        const switchableStaff = staffList.filter(s => !isLegacyMockStaffDoc(s));
+
+        return (
+          <div className="bg-indigo-950 text-indigo-100 border-b border-indigo-700/80 px-4 sm:px-6 lg:px-8 py-2.5 shadow-sm">
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                <span className="bg-indigo-500 text-white font-mono text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shrink-0">
+                  Inspecting Account
+                </span>
+                <span className="font-bold text-white text-sm">{currentStaff.name}</span>
+
+                {inspectedOnline ? (
+                  <span className="inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 rounded-full font-mono text-[11px] font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Logged In Now
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full font-mono text-[11px]">
+                    <span className="w-2 h-2 rounded-full bg-slate-500" />
+                    Offline{currentStaff.lastSeenAt ? ` • Last seen ${formatRelativeLastSeen(currentStaff.lastSeenAt, nowTimestamp)}` : ''}
+                  </span>
+                )}
+
+                {inspectedShift ? (
+                  <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-semibold border ${
+                    inspectedShift.status === 'on_break'
+                      ? 'bg-amber-500/20 text-amber-200 border-amber-400/40'
+                      : 'bg-sky-500/20 text-sky-200 border-sky-400/40'
+                  }`}>
+                    {inspectedShift.status === 'on_break'
+                      ? 'On Break'
+                      : `Clocked In (${formatTimeOnly(inspectedShift.clockInTime)})`}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full font-mono text-[11px] bg-slate-900/70 text-slate-400 border border-slate-700/80">
+                    Not Clocked In
+                  </span>
+                )}
+
+                {inspectedWork.activeItem ? (
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border font-medium ${
+                    inspectedWork.activeItem.isPaused
+                      ? 'bg-amber-950/70 border-amber-600/60 text-amber-200'
+                      : 'bg-emerald-950/80 border-emerald-500/60 text-emerald-100'
+                  }`}>
+                    <span>{inspectedWork.activeItem.isPaused ? '⏸ Paused:' : '▶ Working on:'}</span>
+                    <strong className="text-white">{inspectedWork.activeItem.label}</strong>
+                    {inspectedWork.activeItem.sublabel && (
+                      <span className="text-emerald-200/80 hidden md:inline">({inspectedWork.activeItem.sublabel})</span>
+                    )}
+                    <span className="font-mono font-bold text-emerald-300 ml-1">
+                      {formatSecondsToHHMMSS(inspectedWork.activeItem.elapsedSeconds)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-indigo-200/80 font-mono text-[11px]">
+                    No active timer • {inspectedWork.assignedJobsCount} active {inspectedWork.assignedJobsCount === 1 ? 'plan' : 'plans'} • {inspectedWork.openTasksCount} open {inspectedWork.openTasksCount === 1 ? 'task' : 'tasks'}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <select
+                  aria-label="Switch inspected drafter account"
+                  value={currentStaff.id}
+                  onChange={(e) => {
+                    const next = switchableStaff.find(s => s.id === e.target.value);
+                    if (next) {
+                      handleSelectStaff(next);
+                      if (next.id !== authenticatedStaff.id) {
+                        setUserRole('drafter');
+                      }
+                    }
+                  }}
+                  className="bg-slate-900 text-white border border-indigo-500/50 rounded-lg px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+                >
+                  {switchableStaff.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.id === authenticatedStaff.id ? ' (My Account)' : isStaffCurrentlyOnline(s, nowTimestamp) ? ' ● Online' : ' (Offline)'}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectStaff(authenticatedStaff)}
+                  className="bg-white hover:bg-indigo-50 text-indigo-950 font-bold px-3 py-1 rounded-lg transition shadow-xs cursor-pointer"
+                >
+                  Return to {authenticatedStaff.name.split(' ')[0]}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Clock-In, Break & Clock-Out Bar (Accessible to all employees, with special manager view for Jason) */}
       {userRole !== 'customer' && (
         <TimeClockBar
@@ -2817,10 +3223,12 @@ export default function App() {
           staffList={staffList}
           timeCards={timeCards}
           jobs={jobs}
+          devCards={devCards}
           onClockIn={handleClockIn}
           onStartBreak={handleStartBreak}
           onResumeFromBreak={handleResumeFromBreak}
           onClockOut={handleClockOut}
+          onSignOutCurrentDevice={handleSignOut}
           onOpenTimeCardModal={(staffId) => {
             setTimeCardModalStaffId(staffId || currentStaff.id);
             setIsTimeCardModalOpen(true);
@@ -2848,6 +3256,11 @@ export default function App() {
             devEntries={devEntries}
             onUpdateDevCards={handleSyncDevCards}
             onUpdateDevEntries={handleSyncDevEntries}
+            onStartDevCardTimer={handleStartDevCardTimer}
+            onStopDevCardTimer={handleStopDevCardTimer}
+            onUpdateDevCardNotes={handleUpdateDevCardNotes}
+            onAddDevCard={handleAddDevCard}
+            onDismissDevCard={handleDismissDevCard}
             onOpenReviewModal={() => setIsDevReviewModalOpen(true)}
             activeShiftId={activeGregShift?.id}
           />
@@ -2883,6 +3296,7 @@ export default function App() {
               devEntries={devEntries}
               onOpenDevReviewModal={() => setIsDevReviewModalOpen(true)}
               onAddJobNote={handleAddJobNote}
+              isInspectingOtherAccount={Boolean(authenticatedStaff && currentStaff.id !== authenticatedStaff.id)}
             />
           ) : userRole === 'admin' ? (
             <AdminBillingDashboard
@@ -2894,11 +3308,10 @@ export default function App() {
               onToggleRoadblock={handleToggleRoadblock}
               onSelectJob={handleOpenJobDetail}
               onUpdateJob={(updatedJob) => {
-                const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
-                updateJobsState(updatedList);
-                if (selectedJobForDetail && selectedJobForDetail.id === updatedJob.id) {
-                  setSelectedJobForDetail(updatedJob);
-                }
+                updateJobsState(
+                  prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
+                  updatedJob.id
+                );
               }}
               onDispatchNotifications={handleDispatchNotifications}
               nowTimestamp={nowTimestamp}
@@ -2936,9 +3349,10 @@ export default function App() {
             setJobDetailHighlightCommentId(undefined);
           }}
           onUpdateJob={(updatedJob) => {
-            const updatedList = jobs.map(j => j.id === updatedJob.id ? updatedJob : j);
-            updateJobsState(updatedList);
-            setSelectedJobForDetail(updatedJob);
+            updateJobsState(
+              prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
+              updatedJob.id
+            );
           }}
           onUpdateCustomerContact={handleUpdateCustomerContact}
           onDispatchNotifications={handleDispatchNotifications}
@@ -3075,8 +3489,16 @@ export default function App() {
         currentStaff={currentStaff}
         jobs={jobs}
         timeCards={timeCards}
+        devCards={devCards}
         nowTimestamp={nowTimestamp}
         readOnly={!canUserManageStaff(authenticatedStaff || currentStaff)}
+        canSwitchAccounts={canSwitchStaffAccounts(authenticatedStaff || currentStaff)}
+        onSwitchToStaff={(staff) => {
+          handleSelectStaff(staff);
+          if (authenticatedStaff && staff.id !== authenticatedStaff.id) {
+            setUserRole('drafter');
+          }
+        }}
         onAddStaff={handleAddStaff}
         onUpdateStaff={handleUpdateStaff}
         onDeleteStaff={handleDeleteStaff}

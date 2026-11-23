@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut, ChevronDown } from 'lucide-react';
-import { Job, StaffUser, AppNotification, TimeCardShift } from '../types';
-import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, isJobArchived, canUserManageStaff, canUserCreateJob, isStaffDeleted, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
+import { Job, StaffUser, AppNotification, TimeCardShift, GregDevProjectCard } from '../types';
+import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, canSwitchStaffAccounts, isJobArchived, canUserManageStaff, canUserCreateJob, isStaffDeleted, isLegacyMockStaffDoc, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
 import { formatTimeOnly, isShiftForStaff } from '../utils/timeCardExport';
+import { getStaffActiveWork, formatSecondsToHHMMSS } from '../utils/timeUtils';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderNavProps {
@@ -13,6 +14,7 @@ interface HeaderNavProps {
   setCurrentStaff: (staff: StaffUser) => void;
   staffList?: StaffUser[];
   timeCards?: TimeCardShift[];
+  devCards?: GregDevProjectCard[];
   nowTimestamp?: number;
   selectedCustomerId: string;
   setSelectedCustomerId: (id: string) => void;
@@ -45,6 +47,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   setCurrentStaff,
   staffList = [],
   timeCards = [],
+  devCards = [],
   nowTimestamp = Date.now(),
   selectedCustomerId,
   setSelectedCustomerId,
@@ -115,8 +118,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   const realViewer = authenticatedStaff || currentStaff;
   const canSeeAllProfiles = canViewTeamProfiles(realViewer);
+  const canSwitchAccounts = canSwitchStaffAccounts(realViewer);
   const canManageTeam = canUserManageStaff(realViewer);
-  const visibleStaffRoster = ((staffList && staffList.length > 0) ? staffList : STAFF_USERS).filter(s => !isStaffDeleted(s));
+  const isInspectingOtherAccount = Boolean(authenticatedStaff && currentStaff.id !== authenticatedStaff.id);
+  const visibleStaffRoster = (staffList && staffList.length > 0)
+    ? staffList.filter(s => !isLegacyMockStaffDoc(s))
+    : STAFF_USERS.filter(s => !isStaffDeleted(s));
   const onlineStaffCount = visibleStaffRoster.filter(s => isStaffCurrentlyOnline(s, nowTimestamp)).length;
 
   const isAuthorizedForAdmin = currentStaff.canAccessFinancials || currentStaff.role === 'drafter_lead' || currentStaff.name === 'Kyle' || currentStaff.canAccessPayroll;
@@ -130,8 +137,16 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   };
 
   const handleStaffChange = (staff: StaffUser) => {
+    if (!canSwitchAccounts && staff.id !== realViewer.id) {
+      return;
+    }
     setCurrentStaff(staff);
     setShowStaffDropdown(false);
+    // When switching into another drafter's account to inspect their live work, open Drafter Studio immediately
+    if (authenticatedStaff && staff.id !== authenticatedStaff.id && userRole !== 'drafter') {
+      setUserRole('drafter');
+      return;
+    }
     // If switching to an unauthorized user while in admin view, switch back to drafter view
     const targetIsAuthorized = staff.canAccessFinancials || staff.role === 'drafter_lead' || staff.name === 'Kyle' || staff.canAccessPayroll;
     if (!targetIsAuthorized && userRole === 'admin') {
@@ -255,12 +270,16 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   className={`flex items-center gap-2 border px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition shadow-xs text-left select-none ${
                     !canSeeAllProfiles
                       ? 'bg-slate-800/80 border-slate-700/80 cursor-default'
+                      : isInspectingOtherAccount
+                      ? 'bg-indigo-950/90 border-indigo-400/80 ring-2 ring-indigo-500/30 cursor-pointer'
                       : showStaffDropdown
                       ? 'bg-slate-800 border-blue-500/80 ring-2 ring-blue-500/20 cursor-pointer'
                       : 'bg-slate-800/90 hover:bg-slate-750 border-slate-700 hover:border-slate-600 cursor-pointer'
                   }`}
                   title={
-                    canSeeAllProfiles
+                    canSwitchAccounts
+                      ? `Switch into any drafter's account to see if they're logged in & what they're working on (${onlineStaffCount} online)`
+                      : canSeeAllProfiles
                       ? `View Team Profiles & Live Online Status (${onlineStaffCount} online)`
                       : `Signed in as ${currentStaff.name}`
                   }
@@ -279,6 +298,11 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   
                   <div className="text-left hidden sm:block">
                     <div className="font-bold text-white leading-tight flex items-center gap-1.5 text-xs">
+                      {isInspectingOtherAccount && (
+                        <span className="text-[9px] bg-indigo-500 text-white px-1.5 py-0.2 rounded font-mono uppercase">
+                          Viewing
+                        </span>
+                      )}
                       <span>{currentStaff.name}</span>
                       {canSeeAllProfiles && (
                         <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded-full font-mono flex items-center gap-1">
@@ -307,8 +331,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[160px]">
-                      {currentStaff.title}
+                    <div className="text-[10px] text-slate-400 leading-tight truncate max-w-[180px]">
+                      {isInspectingOtherAccount && authenticatedStaff
+                        ? `Signed in as ${authenticatedStaff.name.split(' ')[0]}`
+                        : currentStaff.title}
                     </div>
                   </div>
 
@@ -317,16 +343,18 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   )}
                 </button>
 
-                {/* Staff Dropdown Menu (Authorized for Greg, Kyle, Jason, Drew, Ethan) */}
+                {/* Staff Dropdown Menu (Team presence for Greg, Kyle, Jason, Drew, Ethan; Account Switching for Greg, Kyle, Jason, Drew) */}
                 {showStaffDropdown && canSeeAllProfiles && (
-                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
-                    <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between gap-2">
+                  <div className="absolute right-0 mt-2 w-80 sm:w-[420px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1">
+                    <div className="px-3 py-2.5 border-b border-slate-800 bg-slate-950/90 flex items-center justify-between gap-2">
                       <div>
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                          Team Profiles & Live Presence
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300 block">
+                          {canSwitchAccounts ? 'Switch Into Drafter Account' : 'Team Profiles & Live Presence'}
                         </span>
                         <p className="text-[11px] text-slate-400 mt-0.5">
-                          Select a team member to inspect their board & permissions:
+                          {canSwitchAccounts
+                            ? 'Click any team member to view their login status & active work:'
+                            : 'See who is currently logged in & what they are working on:'}
                         </p>
                       </div>
                       <span className="text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full shrink-0">
@@ -334,9 +362,27 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                       </span>
                     </div>
 
-                    <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto">
+                    {isInspectingOtherAccount && authenticatedStaff && (
+                      <div className="px-3 py-2 bg-indigo-950/70 border-b border-indigo-800/60 flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-indigo-200">
+                          Viewing <strong>{currentStaff.name}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleStaffChange(authenticatedStaff)}
+                          className="text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg transition cursor-pointer"
+                        >
+                          Return to {authenticatedStaff.name.split(' ')[0]}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="divide-y divide-slate-800 max-h-96 overflow-y-auto">
                       {[...visibleStaffRoster]
                         .sort((a, b) => {
+                          const aWork = getStaffActiveWork(a, jobs, devCards, nowTimestamp).activeItem && !getStaffActiveWork(a, jobs, devCards, nowTimestamp).activeItem?.isPaused ? 1 : 0;
+                          const bWork = getStaffActiveWork(b, jobs, devCards, nowTimestamp).activeItem && !getStaffActiveWork(b, jobs, devCards, nowTimestamp).activeItem?.isPaused ? 1 : 0;
+                          if (aWork !== bWork) return bWork - aWork;
                           const aOnline = isStaffCurrentlyOnline(a, nowTimestamp) ? 1 : 0;
                           const bOnline = isStaffCurrentlyOnline(b, nowTimestamp) ? 1 : 0;
                           if (aOnline !== bOnline) return bOnline - aOnline;
@@ -344,16 +390,28 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         })
                         .map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
+                        const isSelf = Boolean(authenticatedStaff && staff.id === authenticatedStaff.id);
                         const isOnline = isStaffCurrentlyOnline(staff, nowTimestamp);
                         const activeShift = timeCards.find(
                           tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
                         );
+                        const activeWork = getStaffActiveWork(staff, jobs, devCards, nowTimestamp);
+                        const canClickThisRow = canSwitchAccounts || isSelf;
+
                         return (
                           <button
                             key={staff.id}
-                            onClick={() => handleStaffChange(staff)}
-                            className={`w-full text-left p-2.5 transition flex items-start justify-between cursor-pointer ${
-                              isCurrent ? 'bg-blue-950/80 text-white' : 'hover:bg-slate-800/80 text-slate-300'
+                            type="button"
+                            onClick={() => {
+                              if (canClickThisRow) handleStaffChange(staff);
+                            }}
+                            disabled={!canClickThisRow}
+                            className={`w-full text-left p-2.5 transition flex items-start justify-between group ${
+                              isCurrent
+                                ? 'bg-blue-950/80 text-white'
+                                : canClickThisRow
+                                ? 'hover:bg-slate-800/80 text-slate-300 cursor-pointer'
+                                : 'text-slate-300 cursor-default'
                             }`}
                           >
                             <div className="flex items-start gap-2.5 min-w-0 flex-1">
@@ -365,37 +423,45 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                                   className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ${
                                     isOnline ? 'bg-emerald-400' : 'bg-slate-600'
                                   }`}
-                                  title={isOnline ? 'Online now' : 'Offline'}
+                                  title={isOnline ? 'Logged in & online now' : 'Offline'}
                                 />
                               </div>
-                              <div className="space-y-0.5 min-w-0 flex-1">
-                                <div className="font-bold text-xs flex items-center gap-1.5 text-white flex-wrap">
-                                  <span className="truncate">{staff.name}</span>
-                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                                  {isOnline ? (
-                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded-full font-mono shrink-0">
-                                      ● Online
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded-full font-mono shrink-0">
-                                      Offline
-                                    </span>
-                                  )}
-                                  {activeShift && (
-                                    <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${
-                                      activeShift.status === 'on_break'
-                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                        : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                                    }`}>
-                                      {activeShift.status === 'on_break' ? 'On Break' : 'Clocked In'}
-                                    </span>
-                                  )}
-                                  {staff.name.toLowerCase().includes('greg hyatt') && (
-                                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.2 rounded font-mono shrink-0">
-                                      OWNER
+                              <div className="space-y-1 min-w-0 flex-1">
+                                <div className="font-bold text-xs flex items-center justify-between gap-1.5 text-white">
+                                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                    <span className="truncate">{staff.name}</span>
+                                    {isSelf && (
+                                      <span className="text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1 py-0.2 rounded font-mono shrink-0">
+                                        YOU
+                                      </span>
+                                    )}
+                                    {isCurrent && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                                    {isOnline ? (
+                                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded-full font-mono shrink-0">
+                                        ● Logged In
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded-full font-mono shrink-0">
+                                        Offline
+                                      </span>
+                                    )}
+                                    {activeShift && (
+                                      <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${
+                                        activeShift.status === 'on_break'
+                                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                          : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                      }`}>
+                                        {activeShift.status === 'on_break' ? 'On Break' : 'Clocked In'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {canSwitchAccounts && !isCurrent && (
+                                    <span className="text-[10px] font-semibold text-sky-400 opacity-80 group-hover:opacity-100 shrink-0">
+                                      Switch →
                                     </span>
                                   )}
                                 </div>
+
                                 <div className="text-[10px] text-slate-400 truncate flex items-center justify-between gap-2">
                                   <span className="truncate">{staff.title}</span>
                                   {!isOnline && staff.lastSeenAt && (
@@ -404,27 +470,28 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-1 pt-1">
-                                  {staff.canAccessFinancials ? (
-                                    <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                      💰 Financial
+
+                                {/* Live Working On Status */}
+                                {activeWork.activeItem ? (
+                                  <div className={`text-[10px] px-2 py-1 rounded-lg border flex items-center justify-between gap-2 ${
+                                    activeWork.activeItem.isPaused
+                                      ? 'bg-amber-950/60 border-amber-800/60 text-amber-200'
+                                      : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-200'
+                                  }`}>
+                                    <span className="truncate font-medium">
+                                      {activeWork.activeItem.isPaused ? '⏸ Paused: ' : '▶ Working on: '}
+                                      <strong className="text-white">{activeWork.activeItem.label}</strong>
+                                      {activeWork.activeItem.sublabel ? ` • ${activeWork.activeItem.sublabel}` : ''}
                                     </span>
-                                  ) : (
-                                    <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">
-                                      🔒 No Financials
+                                    <span className="font-mono font-bold text-[10px] shrink-0 text-emerald-300">
+                                      {formatSecondsToHHMMSS(activeWork.activeItem.elapsedSeconds)}
                                     </span>
-                                  )}
-                                  {staff.canDelegate && (
-                                    <span className="text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
-                                      ⚡ Delegator
-                                    </span>
-                                  )}
-                                  {staff.canManageStaff && (
-                                    <span className="text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded">
-                                      🛡️ Admin
-                                    </span>
-                                  )}
-                                </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] text-slate-500 font-mono">
+                                    No active timer • {activeWork.assignedJobsCount} {activeWork.assignedJobsCount === 1 ? 'plan' : 'plans'} • {activeWork.openTasksCount} open {activeWork.openTasksCount === 1 ? 'task' : 'tasks'}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </button>

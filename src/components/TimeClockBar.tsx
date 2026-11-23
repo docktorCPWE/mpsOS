@@ -15,8 +15,9 @@ import {
   Sparkles,
   ArrowRight
 } from 'lucide-react';
-import { StaffUser, TimeCardShift, Job } from '../types';
+import { StaffUser, TimeCardShift, Job, GregDevProjectCard } from '../types';
 import { isStaffExemptFromClock } from '../data/mockData';
+import { isUserGregHyatt } from '../utils/gregDevTimeService';
 import { 
   calculateShiftWorkSeconds, 
   calculateShiftBreakSeconds, 
@@ -36,12 +37,14 @@ interface TimeClockBarProps {
   staffList: StaffUser[];
   timeCards: TimeCardShift[];
   jobs: Job[];
+  devCards?: GregDevProjectCard[];
   onClockIn: (notes?: string) => void;
   onStartBreak: () => void;
   onResumeFromBreak: () => void;
   onClockOut: (notes?: string) => void;
+  onSignOutCurrentDevice?: () => void;
   onOpenTimeCardModal: (initialStaffId?: string) => void;
-  pausedJobsNotice?: { jobNumbers: string[]; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null;
+  pausedJobsNotice?: { jobNumbers: string[]; devProjects?: string[]; remoteSignedOut?: boolean; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null;
   onClearPausedNotice?: () => void;
 }
 
@@ -50,10 +53,12 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   staffList,
   timeCards,
   jobs,
+  devCards = [],
   onClockIn,
   onStartBreak,
   onResumeFromBreak,
   onClockOut,
+  onSignOutCurrentDevice,
   onOpenTimeCardModal,
   pausedJobsNotice,
   onClearPausedNotice
@@ -113,29 +118,42 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   const teamActiveCount = teamClockedIn + teamOnBreak;
 
   // Check if current user has any active project timer running on jobs
-  const curName = currentStaff.name.toLowerCase();
+  const curName = (currentStaff.name || '').toLowerCase().trim();
   const userRunningJobTimer = jobs.find(j => {
     if (!j.active_timer_start) return false;
-    if (j.active_timer_drafter_id === currentStaff.id) return true;
-    if (j.active_timer_drafter_name && j.active_timer_drafter_name.toLowerCase() === curName) return true;
-    const assigned = (j.assigned_drafter || '').toLowerCase();
-    return assigned.includes(curName) || curName.includes(assigned.split(',')[0].trim());
+    if (j.active_timer_drafter_id) return j.active_timer_drafter_id === currentStaff.id;
+    if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase().trim() === curName;
+    const assigned = (j.assigned_drafter || '').toLowerCase().trim();
+    const assignedFirst = assigned.split(',')[0].trim();
+    return Boolean(
+      (curName.length > 0 && assigned.includes(curName)) ||
+      (assignedFirst.length > 0 && curName.includes(assignedFirst))
+    );
   });
 
   // Check if current user has any job timer paused on break
   const userPausedJobTimer = jobs.find(j => {
     if (!j.paused_by_break) return false;
-    if (j.paused_timer_drafter_id === currentStaff.id) return true;
-    if (j.paused_timer_drafter_name && j.paused_timer_drafter_name.toLowerCase() === curName) return true;
-    const assigned = (j.assigned_drafter || '').toLowerCase();
-    return assigned.includes(curName) || curName.includes(assigned.split(',')[0].trim());
+    if (j.paused_timer_drafter_id) return j.paused_timer_drafter_id === currentStaff.id;
+    if (j.paused_timer_drafter_name) return j.paused_timer_drafter_name.toLowerCase().trim() === curName;
+    const assigned = (j.assigned_drafter || '').toLowerCase().trim();
+    const assignedFirst = assigned.split(',')[0].trim();
+    return Boolean(
+      (curName.length > 0 && assigned.includes(curName)) ||
+      (assignedFirst.length > 0 && curName.includes(assignedFirst))
+    );
   });
+
+  // Active Greg Dev Project timers
+  const runningDevTimers = isUserGregHyatt(currentStaff)
+    ? devCards.filter(c => c.isActive && c.activeTimerStart)
+    : [];
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2 font-sans">
       {/* Toast Notice for Project Timers Auto-Paused / Resumed on Break / Stopped on Clock Out */}
       {pausedJobsNotice && (
-        <div className={`mb-3 p-3 rounded-xl border flex items-center justify-between text-xs font-medium animate-fadeIn ${
+        <div className={`mb-3 p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs font-medium animate-fadeIn ${
           pausedJobsNotice.type === 'paused'
             ? 'bg-amber-50 border-amber-300 text-amber-900'
             : pausedJobsNotice.type === 'clock_out_stopped'
@@ -158,8 +176,22 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                 </>
               ) : pausedJobsNotice.type === 'clock_out_stopped' ? (
                 <>
-                  <strong>Shift Ended & Clocked Out:</strong> Active drafting timer on plan(s){' '}
-                  <span className="font-mono font-bold underline">{pausedJobsNotice.jobNumbers.join(', ')}</span> was automatically stopped & saved to job history.
+                  <strong>Shift Ended & Clocked Out:</strong>{' '}
+                  {pausedJobsNotice.jobNumbers.length > 0 && (
+                    <>
+                      Job timer(s){' '}
+                      <span className="font-mono font-bold underline">{pausedJobsNotice.jobNumbers.join(', ')}</span> stopped & saved.{' '}
+                    </>
+                  )}
+                  {pausedJobsNotice.devProjects && pausedJobsNotice.devProjects.length > 0 && (
+                    <>
+                      Dev timer(s){' '}
+                      <span className="font-mono font-bold underline">{pausedJobsNotice.devProjects.join(', ')}</span> stopped & logged.{' '}
+                    </>
+                  )}
+                  {pausedJobsNotice.remoteSignedOut && (
+                    <span>All other signed-in devices (e.g., desktop) have been automatically signed out.</span>
+                  )}
                 </>
               ) : (
                 <>
@@ -169,14 +201,24 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
               )}
             </span>
           </div>
-          {onClearPausedNotice && (
-            <button
-              onClick={onClearPausedNotice}
-              className="text-slate-500 hover:text-slate-800 ml-4 text-[11px] underline"
-            >
-              Dismiss
-            </button>
-          )}
+          <div className="flex items-center gap-3 ml-auto">
+            {pausedJobsNotice.type === 'clock_out_stopped' && onSignOutCurrentDevice && (
+              <button
+                onClick={onSignOutCurrentDevice}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold cursor-pointer"
+              >
+                Sign Out Here Too
+              </button>
+            )}
+            {onClearPausedNotice && (
+              <button
+                onClick={onClearPausedNotice}
+                className="text-slate-500 hover:text-slate-800 text-[11px] underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -288,6 +330,13 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                 </div>
               )}
 
+              {runningDevTimers.length > 0 && (
+                <div className="bg-indigo-950/70 border border-indigo-500/50 text-indigo-200 px-2.5 py-1 rounded-lg text-[11px] flex items-center gap-1.5 animate-pulse">
+                  <Clock className="w-3 h-3 text-indigo-400" />
+                  <span>Dev Timer: <strong>{runningDevTimers.map(c => c.projectType).join(', ')}</strong></span>
+                </div>
+              )}
+
               {userPausedJobTimer && currentStatus === 'on_break' && (
                 <div className="bg-amber-950/60 border border-amber-500/50 text-amber-300 px-2.5 py-1 rounded-lg text-[11px] flex items-center gap-1.5">
                   <Coffee className="w-3 h-3 text-amber-400" />
@@ -363,9 +412,11 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
               {/* CLOCK OUT BUTTON */}
               {currentStatus !== 'clocked_out' && (
                 confirmClockOut ? (
-                  <div className="flex items-center gap-1.5 bg-rose-950 border border-rose-600 px-2 py-1 rounded-xl animate-fadeIn">
-                    <span className="text-[11px] text-rose-300 font-semibold">
-                      {userRunningJobTimer ? `Stop #${userRunningJobTimer.job_number.replace(/^#/, '')} & Clock Out?` : 'End Shift?'}
+                  <div className="flex flex-wrap items-center gap-1.5 bg-rose-950 border border-rose-600 px-2.5 py-1.5 rounded-xl animate-fadeIn">
+                    <span className="text-[11px] text-rose-200 font-semibold">
+                      {userRunningJobTimer || runningDevTimers.length > 0
+                        ? 'Stop all active timers, end shift & sign out other devices?'
+                        : 'End shift & sign out other devices?'}
                     </span>
                     <button
                       onClick={() => {
@@ -387,7 +438,7 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
                   <button
                     onClick={() => setConfirmClockOut(true)}
                     className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-rose-600/90 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-                    title="Finish work and clock out"
+                    title="Finish work, stop all active timers, and automatically sign out other devices"
                   >
                     <Square className="w-3.5 h-3.5" />
                     <span>Clock Out</span>

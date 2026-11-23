@@ -42,6 +42,7 @@ interface DrafterDashboardProps {
   devEntries?: GregDevTimeEntry[];
   onOpenDevReviewModal?: () => void;
   onAddJobNote?: (jobId: string, text: string, timestamp?: string) => void;
+  isInspectingOtherAccount?: boolean;
 }
 
 const PHASES: JobPhase[] = [
@@ -79,6 +80,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   devEntries,
   onOpenDevReviewModal,
   onAddJobNote,
+  isInspectingOtherAccount = false,
 }) => {
   const effectiveStaff = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const canDelete = canUserDeleteDelegatedItem(currentStaff);
@@ -324,14 +326,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // Whenever the active staff user is switched, update the board scope
   useEffect(() => {
     setDrafterScopeFilter('touched');
-    if (!isAllCardsAuthorized) {
+    if (isInspectingOtherAccount) {
+      // When Greg/Kyle/Jason/Drew switches into another drafter's account, immediately focus on that drafter's work
       setSelectedDrafter(currentStaff.name);
-    } else if (selectedDrafter !== 'all') {
-      // Check if selectedDrafter is still in drafter list
-      const exists = effectiveStaff.some(s => s.name.toLowerCase() === selectedDrafter.toLowerCase());
-      if (!exists) setSelectedDrafter('all');
+      setDelegationFilter('my_assigned');
+    } else if (!isAllCardsAuthorized) {
+      setSelectedDrafter(currentStaff.name);
+      setDelegationFilter('all');
+    } else {
+      setSelectedDrafter('all');
+      setDelegationFilter('all');
     }
-  }, [currentStaff.id, currentStaff.name, isAllCardsAuthorized, effectiveStaff]);
+  }, [currentStaff.id, currentStaff.name, isAllCardsAuthorized, isInspectingOtherAccount]);
 
   const canAccessFinancials = currentStaff.canAccessFinancials;
   const canDelegate = currentStaff.canDelegate;

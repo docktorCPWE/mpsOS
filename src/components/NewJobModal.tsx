@@ -32,6 +32,8 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
   const [jobNumber, setJobNumber] = useState(() => `M26-${Math.floor(210 + Math.random() * 80)}`);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
+  const [secondaryEmail, setSecondaryEmail] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [customerPhone, setCustomerPhone] = useState('');
   const [assignedDrafter, setAssignedDrafter] = useState(initialDrafterValue);
   const [sqFt, setSqFt] = useState(2500);
@@ -89,7 +91,37 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName.trim() || !customerEmail.trim()) return;
+    setEmailError(null);
+    if (!customerName.trim() || !customerEmail.trim()) {
+      setEmailError('Please enter at least one primary customer email address.');
+      return;
+    }
+
+    // Parse primary & optional second email (also gracefully splits if multiple emails were pasted with spaces, commas, or semicolons)
+    const rawTokens = `${customerEmail} ${secondaryEmail}`
+      .split(/[;,\s]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidToken = rawTokens.find(t => !emailRegex.test(t));
+    if (rawTokens.length === 0 || invalidToken) {
+      setEmailError(
+        invalidToken
+          ? `"${invalidToken}" does not look like a valid email address.`
+          : 'Please enter a valid primary email address.'
+      );
+      return;
+    }
+
+    // Deduplicate case-insensitively while preserving order
+    const seen = new Set<string>();
+    const combinedEmails = rawTokens.filter(addr => {
+      const lower = addr.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    }).join('; ');
 
     const finalJobNumber = jobNumber.trim() || `M26-${Math.floor(210 + Math.random() * 80)}`;
     const effectiveDepositAmount = depositCollected ? Math.max(0, Number(depositAmount || 0)) : 0;
@@ -98,7 +130,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
       id: `job-${Date.now()}`,
       job_number: finalJobNumber,
       customer_name: customerName.trim(),
-      customer_email: customerEmail.trim(),
+      customer_email: combinedEmails,
       customer_phone: customerPhone.trim() || '(555) 000-0000',
       assigned_drafter: assignedDrafter,
       sq_ft: Number(sqFt),
@@ -154,6 +186,8 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
     setJobNumber(`M26-${Math.floor(210 + Math.random() * 80)}`);
     setCustomerName('');
     setCustomerEmail('');
+    setSecondaryEmail('');
+    setEmailError(null);
     setCustomerPhone('');
     setLotDetails('');
     setDepositCollected(false);
@@ -216,13 +250,17 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Customer Email *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Primary Customer Email *</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
                   value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerEmail(e.target.value);
+                    if (emailError) setEmailError(null);
+                  }}
                   placeholder="jonathan@example.com"
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   required
@@ -230,15 +268,38 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Phone Number</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Second Email Address <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
                 <input
                   type="text"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="(555) 000-0000"
+                  inputMode="email"
+                  value={secondaryEmail}
+                  onChange={(e) => {
+                    setSecondaryEmail(e.target.value);
+                    if (emailError) setEmailError(null);
+                  }}
+                  placeholder="clare@example.com"
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
+            </div>
+
+            {emailError && (
+              <div className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-medium">
+                {emailError}
+              </div>
+            )}
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Phone Number</label>
+              <input
+                type="text"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                placeholder="(555) 000-0000"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

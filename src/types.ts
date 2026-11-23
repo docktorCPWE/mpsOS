@@ -244,10 +244,13 @@ export interface StaffUser {
   canManageRoadblocks?: boolean; // Flag and resolve roadblocks on jobs
   canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
   preferredLayout?: 'grid' | 'board' | 'list' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Lists, Table)
-  // Real-time Session Presence
+  // Real-time Session Presence & Remote Sign-Out Sync
   isOnline?: boolean;
   lastSeenAt?: string;           // ISO timestamp of last heartbeat
   lastLoginAt?: string;          // ISO timestamp of most recent sign-in
+  forceLogoutAt?: string;        // ISO timestamp triggering automatic sign-out on other devices (e.g. remote clock-out)
+  forceLogoutOriginSessionId?: string; // Device session ID that initiated the remote sign-out
+  forceLogoutReason?: string;    // Reason code e.g. 'clock_out'
 }
 
 export interface PayrollEntry {

@@ -1,4 +1,4 @@
-import { Job, DelegatedWorkItem } from '../types';
+import { Job, DelegatedWorkItem, StaffUser, GregDevProjectCard } from '../types';
 
 /**
  * Calculate total seconds worked on a specific delegated work item.
@@ -300,4 +300,173 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+export interface StaffActiveWorkItem {
+  kind: 'job' | 'delegated_task' | 'dev_project';
+  label: string;
+  sublabel?: string;
+  jobId?: string;
+  startTime?: string;
+  elapsedSeconds: number;
+  isPaused: boolean;
+}
+
+export interface StaffActiveWorkSummary {
+  activeItem: StaffActiveWorkItem | null;
+  assignedJobsCount: number;
+  openTasksCount: number;
+}
+
+function matchesStaffName(rawName: string | undefined | null, staff: StaffUser): boolean {
+  const raw = (rawName || '').toLowerCase().trim();
+  const full = (staff.name || '').toLowerCase().trim();
+  const first = full.split(' ')[0]?.trim() || '';
+  if (!raw || !full) return false;
+  if (raw === full || (first.length >= 2 && raw === first)) return true;
+  if (raw.includes(full) || full.includes(raw)) return true;
+  const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+  return parts.some(p => p === full || (first.length >= 2 && (p === first || p.startsWith(`${first} `))));
+}
+
+/**
+ * Resolves what a specific staff member is actively working on right now (running job timer,
+ * running delegated task timer, Greg's dev project timer, or paused-on-break timer)
+ * along with their active assigned plans & open delegated task counts.
+ */
+export function getStaffActiveWork(
+  staff: StaffUser,
+  jobs: Job[],
+  devCards: GregDevProjectCard[] = [],
+  nowTimestamp: number = Date.now()
+): StaffActiveWorkSummary {
+  const activeJobs = jobs.filter(j => !j.is_archived && j.invoice_status !== 'Paid');
+
+  const assignedJobsCount = activeJobs.filter(j => matchesStaffName(j.assigned_drafter, staff)).length;
+
+  let openTasksCount = 0;
+  let runningTaskItem: StaffActiveWorkItem | null = null;
+  let runningJobItem: StaffActiveWorkItem | null = null;
+  let pausedJobItem: StaffActiveWorkItem | null = null;
+
+  for (const job of jobs) {
+    // Check delegated tasks assigned to this staff member
+    for (const task of job.delegated_tasks || []) {
+      const isTaskOpen =
+        task.status !== 'Completed' &&
+        task.status !== 'Under Review' &&
+        !task.isReviewed &&
+        !task.completedAt;
+      const isAssignedToStaff =
+        matchesStaffName(task.assignedTo, staff) ||
+        (Boolean(task.assignedToEmail) &&
+          Boolean(staff.email) &&
+          task.assignedToEmail!.toLowerCase().trim() === staff.email.toLowerCase().trim());
+
+      if (isTaskOpen && isAssignedToStaff && !job.is_archived && job.invoice_status !== 'Paid') {
+        openTasksCount++;
+      }
+
+      if (isTaskOpen && !runningTaskItem) {
+        const taskTimerStart =
+          task.activeTimerStart ||
+          (job.active_timer_start && job.active_timer_delegated_task_id === task.id
+            ? job.active_timer_start
+            : undefined);
+
+        if (taskTimerStart) {
+          const isRunningByStaff =
+            (job.active_timer_drafter_id && job.active_timer_drafter_id === staff.id) ||
+            (task.activeTimerDrafterName && matchesStaffName(task.activeTimerDrafterName, staff)) ||
+            (job.active_timer_drafter_name && matchesStaffName(job.active_timer_drafter_name, staff)) ||
+            isAssignedToStaff;
+
+          if (isRunningByStaff) {
+            const startMs = new Date(taskTimerStart).getTime();
+            const elapsed = isNaN(startMs) ? 0 : Math.max(0, Math.floor((nowTimestamp - startMs) / 1000));
+            runningTaskItem = {
+              kind: 'delegated_task',
+              label: `${job.job_number} — ${task.componentTitle}`,
+              sublabel: job.customer_name,
+              jobId: job.id,
+              startTime: taskTimerStart,
+              elapsedSeconds: elapsed,
+              isPaused: false
+            };
+          }
+        }
+      }
+    }
+
+    // Check active running job-level timer for this staff member
+    if (!runningJobItem && job.active_timer_start) {
+      const isRunningForStaff = job.active_timer_drafter_id
+        ? job.active_timer_drafter_id === staff.id
+        : job.active_timer_drafter_name
+        ? matchesStaffName(job.active_timer_drafter_name, staff)
+        : matchesStaffName(job.assigned_drafter, staff);
+
+      if (isRunningForStaff) {
+        const startMs = new Date(job.active_timer_start).getTime();
+        const elapsed = isNaN(startMs) ? 0 : Math.max(0, Math.floor((nowTimestamp - startMs) / 1000));
+        runningJobItem = {
+          kind: 'job',
+          label: `${job.job_number} (${job.customer_name})`,
+          sublabel: job.active_timer_task || job.current_status,
+          jobId: job.id,
+          startTime: job.active_timer_start,
+          elapsedSeconds: elapsed,
+          isPaused: false
+        };
+      }
+    }
+
+    // Check paused-on-break timer for this staff member
+    if (!pausedJobItem && job.paused_by_break) {
+      const isPausedForStaff = job.paused_timer_drafter_id
+        ? job.paused_timer_drafter_id === staff.id
+        : job.paused_timer_drafter_name
+        ? matchesStaffName(job.paused_timer_drafter_name, staff)
+        : matchesStaffName(job.assigned_drafter, staff);
+
+      if (isPausedForStaff) {
+        pausedJobItem = {
+          kind: 'job',
+          label: `${job.job_number} (${job.customer_name})`,
+          sublabel: job.paused_timer_task || 'Paused on Break',
+          jobId: job.id,
+          elapsedSeconds: job.paused_elapsed_seconds || 0,
+          isPaused: true
+        };
+      }
+    }
+  }
+
+  // Check Greg's Dev Project timers if inspecting Greg
+  let devTimerItem: StaffActiveWorkItem | null = null;
+  const isGreg =
+    staff.id === 'staff-greg' ||
+    (staff.email || '').toLowerCase().trim() === 'arkcwd@gmail.com' ||
+    (staff.name || '').toLowerCase().includes('greg hyatt');
+  if (isGreg && devCards.length > 0) {
+    const runningCard = devCards.find(c => c.isActive && c.activeTimerStart);
+    if (runningCard && runningCard.activeTimerStart) {
+      const startMs = new Date(runningCard.activeTimerStart).getTime();
+      const elapsed = isNaN(startMs) ? 0 : Math.max(0, Math.floor((nowTimestamp - startMs) / 1000));
+      devTimerItem = {
+        kind: 'dev_project',
+        label: runningCard.projectType,
+        sublabel: runningCard.currentNotes || 'Dev Timer Active',
+        startTime: runningCard.activeTimerStart,
+        elapsedSeconds: elapsed,
+        isPaused: false
+      };
+    }
+  }
+
+  return {
+    activeItem: runningTaskItem || runningJobItem || devTimerItem || pausedJobItem,
+    assignedJobsCount,
+    openTasksCount
+  };
 }

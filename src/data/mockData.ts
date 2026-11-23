@@ -144,9 +144,8 @@ export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): bo
 }
 
 /**
- * Authorized leadership & visibility roles who can see all visible team member profiles,
- * live online/logged-in presence, and inspect team boards:
- * Greg Hyatt, Kyle Edmonson, Jason Barnett, Drew Lupkey, and Ethan Pierce.
+ * Authorized leadership & visibility roles who can see all visible team member profiles
+ * and live online/logged-in presence: Greg Hyatt, Kyle Edmonson, Jason Barnett, Drew Lupkey, and Ethan Pierce.
  */
 export function canViewTeamProfiles(userNameOrStaff?: string | StaffUser | null): boolean {
   if (!userNameOrStaff) return false;
@@ -161,11 +160,17 @@ export function canViewTeamProfiles(userNameOrStaff?: string | StaffUser | null)
       id === 'staff-drew' ||
       id === 'staff-ethan' ||
       email === 'arkcwd@gmail.com' ||
-      email === 'greg.hyatt@myplanstore.com' ||
-      email === 'kyle@myplanstore.com' ||
-      email === 'jason@myplanstore.com' ||
-      email === 'drew@myplanstore.com' ||
+      email.includes('greg') ||
+      email.includes('kyle') ||
+      email.includes('jason') ||
+      email.includes('drew') ||
       email === 'ethanp.dwg@gmail.com' ||
+      email.includes('ethan') ||
+      name.includes('greg') ||
+      name.includes('kyle') ||
+      name.includes('jason') ||
+      name.includes('drew') ||
+      name.includes('ethan') ||
       userNameOrStaff.canViewAllProjects === true ||
       userNameOrStaff.canManageStaff === true ||
       userNameOrStaff.role === 'admin' ||
@@ -176,7 +181,53 @@ export function canViewTeamProfiles(userNameOrStaff?: string | StaffUser | null)
     return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.includes(n.toLowerCase()));
   }
   const name = String(userNameOrStaff).toLowerCase().trim();
-  return AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.includes(n.toLowerCase()));
+  return (
+    name.includes('greg') ||
+    name.includes('kyle') ||
+    name.includes('jason') ||
+    name.includes('drew') ||
+    name.includes('ethan') ||
+    AUTHORIZED_ALL_PROJECTS_NAMES.some(n => name.includes(n.toLowerCase()))
+  );
+}
+
+/**
+ * Authorized leadership who can switch into any other drafter's account to inspect
+ * whether they are logged in and what they are currently working on:
+ * Greg Hyatt, Kyle Edmonson, Jason Barnett, and Drew Lupkey.
+ */
+export function canSwitchStaffAccounts(userNameOrStaff?: string | StaffUser | null): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    const id = (userNameOrStaff.id || '').toLowerCase();
+    const email = (userNameOrStaff.email || '').toLowerCase().trim();
+    const name = (userNameOrStaff.name || '').toLowerCase().trim();
+    return Boolean(
+      id === 'staff-greg' ||
+      id === 'staff-kyle' ||
+      id === 'staff-jason' ||
+      id === 'staff-drew' ||
+      email === 'arkcwd@gmail.com' ||
+      email.includes('greg') ||
+      email.includes('kyle') ||
+      email.includes('jason') ||
+      email.includes('drew') ||
+      name.includes('greg') ||
+      name.includes('kyle') ||
+      name.includes('jason') ||
+      name.includes('drew') ||
+      userNameOrStaff.canManageStaff === true ||
+      userNameOrStaff.role === 'admin' ||
+      userNameOrStaff.role === 'drafter_lead'
+    );
+  }
+  const name = String(userNameOrStaff).toLowerCase().trim();
+  return (
+    name.includes('greg') ||
+    name.includes('kyle') ||
+    name.includes('jason') ||
+    name.includes('drew')
+  );
 }
 
 export const ONLINE_PRESENCE_TTL_MS = 3 * 60 * 1000; // 3 minutes without heartbeat => offline
@@ -1201,19 +1252,21 @@ export function saveStoredDelegatedLayout(staffId: string | undefined, layout: D
 
 export const DELETED_STAFF_STORAGE_KEY = 'my_plan_store_os_deleted_staff_ids_v2';
 
-// Strictly exclude ONLY legacy placeholder mock IDs and mock placeholder emails,
-// NEVER real authenticated accounts (e.g. jamesb.dwg@gmail.com or aaronp.dwg@gmail.com) by name.
+// Strictly exclude ONLY legacy hardcoded mock placeholder IDs that have never logged in,
+// NEVER block real authenticated accounts or emails from re-creating their profiles.
 export const PERMANENTLY_EXCLUDED_STAFF_IDS = new Set([
   'staff-aaron',
   'staff-james',
   'staff-james-barnett'
 ]);
 
-export const PERMANENTLY_EXCLUDED_STAFF_EMAILS = new Set([
-  'aaron@myplanstore.com',
-  'james@myplanstore.com',
-  'james.barnett@myplanstore.com'
-]);
+export const PERMANENTLY_EXCLUDED_STAFF_EMAILS = new Set<string>([]);
+
+export function isLegacyMockStaffDoc(staff?: { id?: string; lastLoginAt?: string } | null): boolean {
+  if (!staff?.id) return false;
+  const id = staff.id.toLowerCase().trim();
+  return PERMANENTLY_EXCLUDED_STAFF_IDS.has(id) && !staff.lastLoginAt;
+}
 
 export function getDeletedStaffIds(): string[] {
   try {
@@ -1272,12 +1325,16 @@ export function removeDeletedStaffId(staffIdOrInfo: string | { id?: string; emai
   }
 }
 
-export function isStaffDeleted(staff?: { id?: string; email?: string; name?: string } | null): boolean {
+export function isStaffDeleted(staff?: { id?: string; email?: string; name?: string; lastLoginAt?: string } | null): boolean {
   if (!staff) return false;
+  if (isLegacyMockStaffDoc(staff)) {
+    return true;
+  }
+
   const id = (staff.id || '').toLowerCase().trim();
   const email = (staff.email || '').toLowerCase().trim();
 
-  if ((id && PERMANENTLY_EXCLUDED_STAFF_IDS.has(id)) || (email && PERMANENTLY_EXCLUDED_STAFF_EMAILS.has(email))) {
+  if (email && PERMANENTLY_EXCLUDED_STAFF_EMAILS.has(email) && !staff.lastLoginAt) {
     return true;
   }
 
@@ -1389,14 +1446,7 @@ export function getStoredJobs(): Job[] {
           if (updated.comments && updated.comments.length > 0) {
             updated.comments = updated.comments.filter(c => !isTestComment(c));
           }
-          // Reset any dangling timer fields left running from testing
-          if (updated.active_timer_start && (isTestJob(updated) || isTestDelegatedTask({ neededWorkDescription: updated.active_timer_task }))) {
-            delete updated.active_timer_start;
-            delete updated.active_timer_task;
-            delete updated.active_timer_drafter_id;
-            delete updated.active_timer_drafter_name;
-            delete updated.active_timer_delegated_task_id;
-          }
+          // Never strip active timers from real jobs (test jobs are already excluded above)
           return updated;
         });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));

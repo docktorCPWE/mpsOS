@@ -140,6 +140,8 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   const [localNotes, setLocalNotes] = useState(card.currentNotes || '');
   const isFocusedRef = React.useRef(false);
   const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const onUpdateNotesRef = React.useRef(onUpdateNotes);
+  onUpdateNotesRef.current = onUpdateNotes;
 
   // Sync from props only when the input is NOT actively focused by the user
   useEffect(() => {
@@ -160,21 +162,25 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
     const val = e.target.value;
     setLocalNotes(val);
 
-    // Debounce pushing updates to the parent so typing is silky smooth
+    // Debounce pushing notes-only updates to the parent so typing is silky smooth
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
-      onUpdateNotes(card.id, val);
-    }, 400);
+      onUpdateNotesRef.current(card.id, val);
+    }, 450);
   };
 
   const handleNotesBlur = () => {
     isFocusedRef.current = false;
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
-    onUpdateNotes(card.id, localNotes);
+    // Only persist on blur if the user actually modified the notes text (prevents spurious writes on button click / tab switch)
+    if (localNotes !== (card.currentNotes || '')) {
+      onUpdateNotesRef.current(card.id, localNotes);
+    }
   };
 
   const handleNotesFocus = () => {
@@ -184,6 +190,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   const handleStart = () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
     onStartTimer(card.id, localNotes);
   };
@@ -191,6 +198,7 @@ const DevProjectCardItem: React.FC<DevProjectCardItemProps> = ({
   const handleStop = () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
     onStopTimer(card.id, localNotes);
   };
@@ -366,6 +374,8 @@ const DevProjectListItem: React.FC<DevProjectCardItemProps> = ({
   const [localNotes, setLocalNotes] = useState(card.currentNotes || '');
   const isFocusedRef = React.useRef(false);
   const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const onUpdateNotesRef = React.useRef(onUpdateNotes);
+  onUpdateNotesRef.current = onUpdateNotes;
 
   useEffect(() => {
     if (!isFocusedRef.current) {
@@ -388,16 +398,19 @@ const DevProjectListItem: React.FC<DevProjectCardItemProps> = ({
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
-      onUpdateNotes(card.id, val);
-    }, 400);
+      onUpdateNotesRef.current(card.id, val);
+    }, 450);
   };
 
   const handleNotesBlur = () => {
     isFocusedRef.current = false;
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
-    onUpdateNotes(card.id, localNotes);
+    if (localNotes !== (card.currentNotes || '')) {
+      onUpdateNotesRef.current(card.id, localNotes);
+    }
   };
 
   const handleNotesFocus = () => {
@@ -407,6 +420,7 @@ const DevProjectListItem: React.FC<DevProjectCardItemProps> = ({
   const handleStart = () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
     onStartTimer(card.id, localNotes);
   };
@@ -414,6 +428,7 @@ const DevProjectListItem: React.FC<DevProjectCardItemProps> = ({
   const handleStop = () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
     onStopTimer(card.id, localNotes);
   };
@@ -566,6 +581,11 @@ interface GregDevProjectCardsSectionProps {
   devEntries: GregDevTimeEntry[];
   onUpdateDevCards: (cards: GregDevProjectCard[]) => void;
   onUpdateDevEntries: (entries: GregDevTimeEntry[]) => void;
+  onStartDevCardTimer?: (cardId: string, notesOverride?: string) => void;
+  onStopDevCardTimer?: (cardId: string, notesOverride?: string, activeShiftId?: string) => number | void;
+  onUpdateDevCardNotes?: (cardId: string, notes: string) => void;
+  onAddDevCard?: (newCard: GregDevProjectCard) => void;
+  onDismissDevCard?: (cardId: string) => void;
   onOpenReviewModal: () => void;
   activeShiftId?: string;
 }
@@ -578,6 +598,11 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
   devEntries,
   onUpdateDevCards,
   onUpdateDevEntries,
+  onStartDevCardTimer,
+  onStopDevCardTimer,
+  onUpdateDevCardNotes,
+  onAddDevCard,
+  onDismissDevCard,
   onOpenReviewModal,
   activeShiftId
 }) => {
@@ -644,16 +669,20 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
       currentNotes: `Development work on ${type}`
     };
 
-    const updated = [...devCards, newCard];
-    onUpdateDevCards(updated);
-    saveStoredGregDevCards(updated);
+    if (onAddDevCard) {
+      onAddDevCard(newCard);
+    } else {
+      const updated = [...devCards, newCard];
+      onUpdateDevCards(updated);
+      saveStoredGregDevCards(updated);
+    }
     setShowAddMenu(false);
     setCustomTypeName('');
     setShowCustomInput(false);
     triggerToast(`Activated "${type}" time card.`);
   };
 
-  // Start timer on a specific card
+  // Start timer on a specific card (atomic single-card update — never clobbers other cards)
   const handleStartTimer = (cardId: string, notesOverride?: string) => {
     if (!isClockedIn) {
       triggerToast('Please clock in on your primary shift time card first before starting a dev project timer.');
@@ -664,30 +693,40 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
       return;
     }
 
-    const updated = devCards.map(c => {
-      if (c.id === cardId) {
-        return {
-          ...c,
-          isActive: true,
-          isPausedByBreak: false,
-          activeTimerStart: new Date().toISOString(),
-          lastStartedAt: new Date().toISOString(),
-          currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
-        };
-      }
-      return c;
-    });
-
-    onUpdateDevCards(updated);
-    saveStoredGregDevCards(updated);
     const target = devCards.find(c => c.id === cardId);
+    if (onStartDevCardTimer) {
+      onStartDevCardTimer(cardId, notesOverride);
+    } else {
+      const updated = devCards.map(c => {
+        if (c.id === cardId) {
+          return {
+            ...c,
+            isActive: true,
+            isPausedByBreak: false,
+            activeTimerStart: new Date().toISOString(),
+            lastStartedAt: new Date().toISOString(),
+            currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
+          };
+        }
+        return c;
+      });
+      onUpdateDevCards(updated);
+      saveStoredGregDevCards(updated);
+    }
     triggerToast(`Started timer on ${target?.projectType || 'project'}.`);
   };
 
-  // Stop timer and log session
+  // Stop timer and log session (atomic single-card update)
   const handleStopTimer = (cardId: string, notesOverride?: string) => {
     const card = devCards.find(c => c.id === cardId);
     if (!card || !card.isActive || !card.activeTimerStart) return;
+
+    if (onStopDevCardTimer) {
+      const loggedSec = onStopDevCardTimer(cardId, notesOverride, activeShiftId);
+      const mins = typeof loggedSec === 'number' ? Math.max(1, Math.round(loggedSec / 60)) : Math.max(1, Math.round((Date.now() - new Date(card.activeTimerStart).getTime()) / 60000));
+      triggerToast(`Logged ${mins} min${mins === 1 ? '' : 's'} to ${card.projectType}.`);
+      return;
+    }
 
     const startMs = new Date(card.activeTimerStart).getTime();
     const endMs = Date.now();
@@ -761,14 +800,22 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
       handleStopTimer(cardId);
     }
 
-    const updated = devCards.filter(c => c.id !== cardId);
-    onUpdateDevCards(updated);
-    saveStoredGregDevCards(updated);
+    if (onDismissDevCard) {
+      onDismissDevCard(cardId);
+    } else {
+      const updated = devCards.filter(c => c.id !== cardId);
+      onUpdateDevCards(updated);
+      saveStoredGregDevCards(updated);
+    }
     triggerToast(`Removed ${card.projectType} card.`);
   };
 
-  // Update notes on a card
+  // Update notes ONLY on a card — never touches timer state
   const handleUpdateNotes = (cardId: string, notes: string) => {
+    if (onUpdateDevCardNotes) {
+      onUpdateDevCardNotes(cardId, notes);
+      return;
+    }
     const updated = devCards.map(c => c.id === cardId ? { ...c, currentNotes: notes } : c);
     onUpdateDevCards(updated);
     saveStoredGregDevCards(updated);

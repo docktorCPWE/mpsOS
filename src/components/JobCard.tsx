@@ -155,7 +155,11 @@ export const JobCard: React.FC<JobCardProps> = ({
   );
 
   // Email and phone shortcuts
-  const primaryEmail = job.customer_email ? job.customer_email.split(';')[0].trim() : '';
+  const allEmails = job.customer_email
+    ? job.customer_email.split(/[;,]+/).map(e => e.trim()).filter(Boolean)
+    : [];
+  const primaryEmail = allEmails[0] || '';
+  const extraEmailsCount = Math.max(0, allEmails.length - 1);
   const primaryPhone = job.customer_phone ? job.customer_phone.split(';')[0].trim() : '';
   const sheetStatusStyle = getSheetStatusColor(job.sheet_status);
 
@@ -338,13 +342,18 @@ export const JobCard: React.FC<JobCardProps> = ({
             <div className="flex items-center gap-3 truncate min-w-0">
               {primaryEmail ? (
                 <a
-                  href={`mailto:${primaryEmail}`}
+                  href={`mailto:${allEmails.join(',')}`}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[170px]"
-                  title={job.customer_email}
+                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[190px]"
+                  title={allEmails.join(' • ')}
                 >
                   <Mail className="w-3 h-3 shrink-0" />
                   <span className="truncate">{primaryEmail}</span>
+                  {extraEmailsCount > 0 && (
+                    <span className="text-[9px] font-mono font-bold bg-blue-100 text-blue-700 px-1 py-0.2 rounded shrink-0">
+                      +{extraEmailsCount}
+                    </span>
+                  )}
                 </a>
               ) : null}
               {primaryPhone ? (

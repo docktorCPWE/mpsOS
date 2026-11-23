@@ -32,9 +32,10 @@ import {
   Clock,
   Briefcase
 } from 'lucide-react';
-import { StaffUser, StaffDepartment, Job, TimeCardShift } from '../types';
-import { isStaffDeleted, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
+import { StaffUser, StaffDepartment, Job, TimeCardShift, GregDevProjectCard } from '../types';
+import { isLegacyMockStaffDoc, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
 import { isShiftForStaff } from '../utils/timeCardExport';
+import { getStaffActiveWork, formatSecondsToHHMMSS } from '../utils/timeUtils';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -43,8 +44,11 @@ interface StaffManagementModalProps {
   currentStaff: StaffUser;
   jobs: Job[];
   timeCards?: TimeCardShift[];
+  devCards?: GregDevProjectCard[];
   nowTimestamp?: number;
   readOnly?: boolean;
+  canSwitchAccounts?: boolean;
+  onSwitchToStaff?: (staff: StaffUser) => void;
   onAddStaff: (newStaff: StaffUser) => void;
   onUpdateStaff: (updatedStaff: StaffUser) => void;
   onDeleteStaff: (staffId: string) => void;
@@ -179,8 +183,11 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   currentStaff,
   jobs,
   timeCards = [],
+  devCards = [],
   nowTimestamp = Date.now(),
   readOnly = false,
+  canSwitchAccounts = false,
+  onSwitchToStaff,
   onAddStaff,
   onUpdateStaff,
   onDeleteStaff,
@@ -396,7 +403,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
   // Filtered staff list
   const filteredStaff = staffList.filter(s => {
-    if (isStaffDeleted(s)) return false;
+    if (isLegacyMockStaffDoc(s)) return false;
     if (filterRole !== 'all' && s.role !== filterRole) return false;
     if (filterDepartment !== 'all' && s.department !== filterDepartment) return false;
     if (searchQuery) {
@@ -411,7 +418,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   });
 
   // Calculate high-level stats
-  const activeValidStaff = staffList.filter(s => !isStaffDeleted(s));
+  const activeValidStaff = staffList.filter(s => !isLegacyMockStaffDoc(s));
   const totalStaffCount = activeValidStaff.length;
   const activeStaffCount = activeValidStaff.filter(s => s.status !== 'inactive').length;
   const financialStaffCount = activeValidStaff.filter(s => s.canAccessFinancials).length;
@@ -625,11 +632,10 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 const activeShift = timeCards.find(
                   tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
                 );
+                const activeWork = getStaffActiveWork(staff, jobs, devCards, nowTimestamp);
 
                 // Count active assigned jobs
-                const assignedJobCount = jobs.filter(j => 
-                  j.assigned_drafter.toLowerCase().includes(staff.name.toLowerCase()) && !j.is_archived
-                ).length;
+                const assignedJobCount = activeWork.assignedJobsCount;
 
                 return (
                   <div
@@ -734,6 +740,31 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         </div>
                       </div>
 
+                      {/* Live Working On Status */}
+                      <div className="mb-3">
+                        {activeWork.activeItem ? (
+                          <div className={`text-[11px] px-2.5 py-1.5 rounded-xl border flex items-center justify-between gap-2 ${
+                            activeWork.activeItem.isPaused
+                              ? 'bg-amber-950/50 border-amber-800/60 text-amber-200'
+                              : 'bg-emerald-950/50 border-emerald-700/60 text-emerald-200'
+                          }`}>
+                            <div className="min-w-0 truncate">
+                              <span className="font-semibold">
+                                {activeWork.activeItem.isPaused ? '⏸ Paused: ' : '▶ Working on: '}
+                              </span>
+                              <span className="text-white font-bold">{activeWork.activeItem.label}</span>
+                            </div>
+                            <span className="font-mono font-bold text-emerald-300 shrink-0">
+                              {formatSecondsToHHMMSS(activeWork.activeItem.elapsedSeconds)}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] px-2.5 py-1.5 rounded-xl bg-slate-900/50 border border-slate-800/80 text-slate-500 font-mono">
+                            No active timer • {activeWork.openTasksCount} open delegated {activeWork.openTasksCount === 1 ? 'task' : 'tasks'}
+                          </div>
+                        )}
+                      </div>
+
                       {/* Active Permissions Chips */}
                       <div className="space-y-1.5 mb-3">
                         <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
@@ -790,33 +821,50 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     </div>
 
                     {/* Card Actions Footer */}
-                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                       <span className="text-[10px] text-slate-500 font-mono">
                         {assignedJobCount} active assigned {assignedJobCount === 1 ? 'plan' : 'plans'}
                       </span>
 
-                      {!readOnly && (
-                        <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        {canSwitchAccounts && onSwitchToStaff && !isCurrent && (
                           <button
-                            onClick={() => handleOpenEdit(staff)}
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
-                            title="Edit Profile & Permissions"
+                            type="button"
+                            onClick={() => {
+                              onSwitchToStaff(staff);
+                              onClose();
+                            }}
+                            className="px-2 py-1.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg transition text-xs font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                            title={`Switch into ${staff.name}'s account to see what they are working on`}
                           >
-                            <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Edit</span>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Inspect Account</span>
                           </button>
+                        )}
 
-                          {!isOwner && (
+                        {!readOnly && (
+                          <>
                             <button
-                              onClick={() => setStaffToDelete(staff)}
-                              className="p-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 rounded-lg transition border border-slate-700 hover:border-red-800 cursor-pointer"
-                              title="Delete Staff Member"
+                              onClick={() => handleOpenEdit(staff)}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
+                              title="Edit Profile & Permissions"
                             >
-                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                              <span>Edit</span>
                             </button>
-                          )}
-                        </div>
-                      )}
+
+                            {!isOwner && (
+                              <button
+                                onClick={() => setStaffToDelete(staff)}
+                                className="p-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 rounded-lg transition border border-slate-700 hover:border-red-800 cursor-pointer"
+                                title="Delete Staff Member"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
