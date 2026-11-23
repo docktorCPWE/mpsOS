@@ -95,9 +95,16 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Pre-populate template on mount or task change
+  // Pre-populate template and reset stale fields only when opening the modal for a specific task
   useEffect(() => {
-    if (!task) return;
+    if (!isOpen || !task) return;
+
+    setReviewFiles([]);
+    setFileCategories({});
+    setLoggedHours('');
+    setTimeTaskDescription('');
+    setCompletionDate(new Date().toISOString().split('T')[0]);
+    setErrorMsg('');
 
     // Detect most appropriate initial template based on task properties
     let initialTemplateId = 'preliminary_plan_completed';
@@ -122,13 +129,16 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
         projectNumber: task.jobNumber ? `#${task.jobNumber.replace(/^#/, '')}` : (job ? `#${job.job_number.replace(/^#/, '')}` : '#1042'),
         customerName: task.customerName || (job ? job.customer_name : 'Customer'),
         drafterName: currentStaff.name || 'Drafter',
-        attachedFiles: reviewFiles.map(f => f.name),
+        attachedFiles: [],
         dateStr: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         revisionCount: task.revisionCount || 1
       });
       setCompletionNotes(generated);
     }
-  }, [task, job?.id, currentStaff.name]);
+    // Intentionally depend on modal open state and task.id so live Firestore timer ticks
+    // do not overwrite notes or clear uploaded files while the drafter is filling out the modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, task?.id]);
 
   if (!isOpen || !task) return null;
 
@@ -607,7 +617,14 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
                       </div>
                       <div className="min-w-0">
                         <p className="font-bold text-slate-900 truncate">{file.name}</p>
-                        <span className="text-[10px] text-slate-400 font-mono">{file.size}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] text-slate-400 font-mono">{file.size}</span>
+                          {!file.url && (
+                            <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-medium">
+                              Logged as reference (file &gt; 400KB — share link in notes if needed)
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 

@@ -235,11 +235,120 @@ export function subscribeToJobs(
   }
 }
 
+const FIRESTORE_SAFE_JOB_BYTES = 880_000;
+
+function getUtf8ByteLength(str: string): number {
+  try {
+    return new TextEncoder().encode(str).length;
+  } catch {
+    return str.length;
+  }
+}
+
+/**
+ * Ensures a job document fits comfortably under Firestore's hard 1 MiB (1,048,576 byte) limit
+ * so saving a task completion, timer update, or status change NEVER fails silently due to
+ * oversized or duplicated base64 data: URLs.
+ */
+function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { trimmed: boolean; byteSize: number } {
+  const measure = () => getUtf8ByteLength(JSON.stringify(cleanJob));
+  let byteSize = measure();
+  if (byteSize <= FIRESTORE_SAFE_JOB_BYTES) {
+    return { trimmed: false, byteSize };
+  }
+
+  let trimmed = false;
+
+  // Step 1: Deduplicate identical large inline data: URLs that exist in BOTH deliverables and task attachments
+  const deliverableDataUrls = new Set<string>();
+  if (Array.isArray(cleanJob.deliverables)) {
+    for (const del of cleanJob.deliverables) {
+      if (typeof del?.fileUrl === 'string' && del.fileUrl.startsWith('data:') && del.fileUrl.length > 10_000) {
+        deliverableDataUrls.add(del.fileUrl);
+      }
+    }
+  }
+  if (deliverableDataUrls.size > 0 && Array.isArray(cleanJob.delegated_tasks)) {
+    for (const task of cleanJob.delegated_tasks) {
+      if (Array.isArray(task?.attachments)) {
+        for (const att of task.attachments) {
+          if (typeof att?.url === 'string' && deliverableDataUrls.has(att.url)) {
+            att.url = '';
+            trimmed = true;
+          }
+        }
+      }
+    }
+  }
+
+  byteSize = measure();
+  if (byteSize <= FIRESTORE_SAFE_JOB_BYTES) {
+    return { trimmed, byteSize };
+  }
+
+  // Step 2: Progressively strip the largest inline data: URLs (keeping all file metadata intact)
+  // until the document fits safely under Firestore's 1 MiB limit.
+  type DataUrlSlot = { len: number; clear: () => void };
+  const slots: DataUrlSlot[] = [];
+
+  if (Array.isArray(cleanJob.delegated_tasks)) {
+    for (const task of cleanJob.delegated_tasks) {
+      if (Array.isArray(task?.attachments)) {
+        for (const att of task.attachments) {
+          if (typeof att?.url === 'string' && att.url.startsWith('data:') && att.url.length > 4_000) {
+            slots.push({ len: att.url.length, clear: () => { att.url = ''; } });
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(cleanJob.deliverables)) {
+    for (const del of cleanJob.deliverables) {
+      if (typeof del?.fileUrl === 'string' && del.fileUrl.startsWith('data:') && del.fileUrl.length > 4_000) {
+        slots.push({ len: del.fileUrl.length, clear: () => { del.fileUrl = ''; } });
+      }
+    }
+  }
+  if (Array.isArray(cleanJob.comments)) {
+    for (const c of cleanJob.comments) {
+      if (typeof c?.attachmentUrl === 'string' && c.attachmentUrl.startsWith('data:') && c.attachmentUrl.length > 4_000) {
+        slots.push({ len: c.attachmentUrl.length, clear: () => { c.attachmentUrl = ''; } });
+      }
+      if (Array.isArray(c?.attachments)) {
+        for (const att of c.attachments) {
+          if (typeof att?.url === 'string' && att.url.startsWith('data:') && att.url.length > 4_000) {
+            slots.push({ len: att.url.length, clear: () => { att.url = ''; } });
+          }
+        }
+      }
+    }
+  }
+
+  // Strip largest inline blobs first so we preserve as many smaller images/sheets as possible
+  slots.sort((a, b) => b.len - a.len);
+  for (const slot of slots) {
+    if (byteSize <= FIRESTORE_SAFE_JOB_BYTES) break;
+    slot.clear();
+    trimmed = true;
+    byteSize = measure();
+  }
+
+  return { trimmed, byteSize };
+}
+
 export async function saveJobToFirestore(job: Job): Promise<void> {
   const path = `jobs/${job.id}`;
   try {
     const cleanJob: Record<string, any> = JSON.parse(JSON.stringify(job));
-    
+
+    // Fit within Firestore's 1 MiB document size limit BEFORE attaching deleteField() sentinels
+    const { trimmed, byteSize } = fitJobDocumentWithinFirestoreLimit(cleanJob);
+    if (trimmed) {
+      console.warn(
+        `[Firestore] Job ${job.job_number} exceeded safe document size; stripped duplicate/oversized inline file blobs while preserving metadata (final size: ${byteSize} bytes).`
+      );
+    }
+
     // Explicitly delete timer fields from Firestore if timer is not currently running
     if (!job.active_timer_start) {
       cleanJob.active_timer_start = deleteField();
@@ -248,7 +357,7 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       cleanJob.active_timer_drafter_name = deleteField();
       cleanJob.active_timer_delegated_task_id = deleteField();
     }
-    
+
     // Explicitly delete paused timer fields if job is not paused by break
     if (!job.paused_by_break) {
       cleanJob.paused_by_break = false;
@@ -258,13 +367,66 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       cleanJob.paused_elapsed_seconds = deleteField();
     }
 
-    // Log document size warnings if approaching Firestore 1MB document limit
-    const jsonStr = JSON.stringify(cleanJob);
-    if (jsonStr.length > 800000) {
-      console.warn(`[Firestore] Document for job ${job.job_number} is large (${jsonStr.length} bytes). Use file deletion if needed.`);
+    const docRef = doc(db, 'jobs', job.id);
+    let lastErr: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await setDoc(docRef, cleanJob, { merge: true });
+        return;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || '').toLowerCase();
+        const isSizeError =
+          err?.code === 'invalid-argument' ||
+          msg.includes('exceeds the maximum allowed size') ||
+          msg.includes('too large') ||
+          msg.includes('1048576');
+
+        if (isSizeError) {
+          // Emergency fallback: persist critical operational state (delegated_tasks with stripped inline blobs,
+          // timers, time logs, status, custom charges) so task completion NEVER gets lost or reset.
+          const strippedTasks = Array.isArray(cleanJob.delegated_tasks)
+            ? cleanJob.delegated_tasks.map((t: any) => ({
+                ...t,
+                attachments: Array.isArray(t?.attachments)
+                  ? t.attachments.map((a: any) => ({
+                      ...a,
+                      url: typeof a?.url === 'string' && a.url.startsWith('data:') ? '' : a?.url
+                    }))
+                  : t?.attachments
+              }))
+            : [];
+
+          await updateDoc(docRef, {
+            status: cleanJob.status,
+            delegated_tasks: strippedTasks,
+            time_logs: cleanJob.time_logs || [],
+            total_time_entries: cleanJob.total_time_entries || 0,
+            total_duration_minutes: cleanJob.total_duration_minutes || 0,
+            total_duration_hours: cleanJob.total_duration_hours || 0,
+            active_timer_start: cleanJob.active_timer_start,
+            active_timer_task: cleanJob.active_timer_task,
+            active_timer_drafter_id: cleanJob.active_timer_drafter_id,
+            active_timer_drafter_name: cleanJob.active_timer_drafter_name,
+            active_timer_delegated_task_id: cleanJob.active_timer_delegated_task_id,
+            paused_by_break: cleanJob.paused_by_break,
+            paused_timer_task: cleanJob.paused_timer_task,
+            paused_timer_drafter_id: cleanJob.paused_timer_drafter_id,
+            paused_timer_drafter_name: cleanJob.paused_timer_drafter_name,
+            paused_elapsed_seconds: cleanJob.paused_elapsed_seconds
+          });
+          console.warn(`[Firestore] Saved critical task/timer fields for job ${job.job_number} via size-safe fallback.`);
+          return;
+        }
+
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+        }
+      }
     }
 
-    await setDoc(doc(db, 'jobs', job.id), cleanJob, { merge: true });
+    throw lastErr;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }

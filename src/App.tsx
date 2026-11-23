@@ -155,6 +155,7 @@ export default function App() {
     paused_timer_drafter_name?: string;
     paused_elapsed_seconds?: number;
   }>>({});
+  const pendingJobTaskMutationRef = useRef<Record<string, Record<string, { atMs: number; task: DelegatedWorkItem }>>>({});
   const authenticatedStaffRef = useRef<StaffUser | null>(authenticatedStaff);
   const healedZombieTokensRef = useRef<Set<string>>(new Set());
   const hasActiveWorkOrShiftRef = useRef<boolean>(false);
@@ -249,36 +250,91 @@ export default function App() {
     testConnection();
     purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
-    // Protect any in-flight job timer Start/Stop/Break/ClockOut writes from stale Firestore snapshots.
-    // NEVER auto-stop a running job timer or write back to Firestore from a snapshot listener!
-    const protectInFlightJobTimers = (cloudJobs: Job[]): Job[] => {
+    // Protect any in-flight job timer Start/Stop/Break/ClockOut AND delegated task status/completion writes
+    // from stale or out-of-order Firestore snapshots.
+    // NEVER auto-stop a running job timer or revert a completed task from a snapshot listener!
+    const protectInFlightJobMutations = (cloudJobs: Job[]): Job[] => {
       const now = Date.now();
       return cloudJobs.map(job => {
-        const pending = pendingJobTimerMutationRef.current[job.id];
-        if (!pending) return job;
+        let protectedJob = job;
 
-        const cloudMatchesExpected =
-          (job.active_timer_start || '') === (pending.active_timer_start || '') &&
-          Boolean(job.paused_by_break) === Boolean(pending.paused_by_break);
+        // 1. Protect in-flight job timer mutations (20s window)
+        const pendingTimer = pendingJobTimerMutationRef.current[job.id];
+        if (pendingTimer) {
+          const cloudMatchesExpected =
+            (job.active_timer_start || '') === (pendingTimer.active_timer_start || '') &&
+            Boolean(job.paused_by_break) === Boolean(pendingTimer.paused_by_break);
 
-        if (cloudMatchesExpected || now - pending.atMs > 20000) {
-          delete pendingJobTimerMutationRef.current[job.id];
-          return job;
+          if (cloudMatchesExpected || now - pendingTimer.atMs > 20000) {
+            delete pendingJobTimerMutationRef.current[job.id];
+          } else {
+            protectedJob = {
+              ...protectedJob,
+              active_timer_start: pendingTimer.active_timer_start,
+              active_timer_task: pendingTimer.active_timer_task,
+              active_timer_drafter_id: pendingTimer.active_timer_drafter_id,
+              active_timer_drafter_name: pendingTimer.active_timer_drafter_name,
+              active_timer_delegated_task_id: pendingTimer.active_timer_delegated_task_id,
+              paused_by_break: pendingTimer.paused_by_break,
+              paused_timer_task: pendingTimer.paused_timer_task,
+              paused_timer_drafter_id: pendingTimer.paused_timer_drafter_id,
+              paused_timer_drafter_name: pendingTimer.paused_timer_drafter_name,
+              paused_elapsed_seconds: pendingTimer.paused_elapsed_seconds
+            };
+          }
         }
 
-        return {
-          ...job,
-          active_timer_start: pending.active_timer_start,
-          active_timer_task: pending.active_timer_task,
-          active_timer_drafter_id: pending.active_timer_drafter_id,
-          active_timer_drafter_name: pending.active_timer_drafter_name,
-          active_timer_delegated_task_id: pending.active_timer_delegated_task_id,
-          paused_by_break: pending.paused_by_break,
-          paused_timer_task: pending.paused_timer_task,
-          paused_timer_drafter_id: pending.paused_timer_drafter_id,
-          paused_timer_drafter_name: pending.paused_timer_drafter_name,
-          paused_elapsed_seconds: pending.paused_elapsed_seconds
-        };
+        // 2. Protect in-flight delegated task mutations (status / completion / review / revision) for 20s
+        const pendingTasksForJob = pendingJobTaskMutationRef.current[job.id];
+        if (pendingTasksForJob) {
+          const pendingTaskIds = Object.keys(pendingTasksForJob);
+          if (pendingTaskIds.length > 0) {
+            const existingTasks = [...(protectedJob.delegated_tasks || [])];
+            let didOverrideTask = false;
+
+            for (const taskId of pendingTaskIds) {
+              const entry = pendingTasksForJob[taskId];
+              if (!entry) continue;
+
+              const idx = existingTasks.findIndex(t => String(t.id).trim() === String(taskId).trim());
+              const cloudTask = idx >= 0 ? existingTasks[idx] : undefined;
+              const expected = entry.task;
+
+              const cloudMatchesTask = Boolean(
+                cloudTask &&
+                cloudTask.status === expected.status &&
+                (cloudTask.completedAt || '') === (expected.completedAt || '') &&
+                Boolean(cloudTask.isReviewed) === Boolean(expected.isReviewed) &&
+                Boolean(cloudTask.revisionRequested) === Boolean(expected.revisionRequested) &&
+                (cloudTask.assignedTo || '') === (expected.assignedTo || '') &&
+                (cloudTask.completionNotes || '') === (expected.completionNotes || '')
+              );
+
+              if (cloudMatchesTask || now - entry.atMs > 20000) {
+                delete pendingTasksForJob[taskId];
+              } else if (idx >= 0) {
+                existingTasks[idx] = expected;
+                didOverrideTask = true;
+              } else {
+                existingTasks.unshift(expected);
+                didOverrideTask = true;
+              }
+            }
+
+            if (Object.keys(pendingTasksForJob).length === 0) {
+              delete pendingJobTaskMutationRef.current[job.id];
+            }
+
+            if (didOverrideTask) {
+              protectedJob = {
+                ...protectedJob,
+                delegated_tasks: existingTasks
+              };
+            }
+          }
+        }
+
+        return protectedJob;
       });
     };
 
@@ -286,7 +342,7 @@ export default function App() {
     const unsubscribeJobs = subscribeToJobs(
       (cloudJobs) => {
         if (cloudJobs) {
-          const protectedJobs = protectInFlightJobTimers(cloudJobs);
+          const protectedJobs = protectInFlightJobMutations(cloudJobs);
           jobsRef.current = protectedJobs;
           setJobs(protectedJobs);
           saveStoredJobs(protectedJobs);
@@ -739,6 +795,66 @@ export default function App() {
       const match = nextJobs.find(j => j.id === prev.job.id);
       return match ? { ...prev, job: match } : null;
     });
+  };
+
+  // Record an in-flight delegated task mutation so out-of-order Firestore snapshots cannot revert it
+  const recordPendingTaskMutation = (jobId: string, task: DelegatedWorkItem) => {
+    if (!pendingJobTaskMutationRef.current[jobId]) {
+      pendingJobTaskMutationRef.current[jobId] = {};
+    }
+    pendingJobTaskMutationRef.current[jobId][task.id] = {
+      atMs: Date.now(),
+      task
+    };
+  };
+
+  // Safe direct job update handler (used by JobDetailModal & AdminBillingDashboard) that registers
+  // in-flight task/timer mutation guards automatically before syncing to Firestore
+  const handleDirectJobUpdate = (updatedJob: Job) => {
+    const prevJob = jobsRef.current.find(j => j.id === updatedJob.id);
+
+    if (prevJob) {
+      // Guard any delegated task changes against stale snapshots
+      const prevTasksById = new Map<string, DelegatedWorkItem>((prevJob.delegated_tasks || []).map(t => [t.id, t]));
+      for (const nextTask of updatedJob.delegated_tasks || []) {
+        const oldTask = prevTasksById.get(nextTask.id);
+        if (
+          !oldTask ||
+          oldTask.status !== nextTask.status ||
+          (oldTask.completedAt || '') !== (nextTask.completedAt || '') ||
+          Boolean(oldTask.isReviewed) !== Boolean(nextTask.isReviewed) ||
+          Boolean(oldTask.revisionRequested) !== Boolean(nextTask.revisionRequested) ||
+          (oldTask.completionNotes || '') !== (nextTask.completionNotes || '')
+        ) {
+          recordPendingTaskMutation(updatedJob.id, nextTask);
+        }
+      }
+
+      // Guard any timer state changes against stale snapshots
+      if (
+        (prevJob.active_timer_start || '') !== (updatedJob.active_timer_start || '') ||
+        Boolean(prevJob.paused_by_break) !== Boolean(updatedJob.paused_by_break)
+      ) {
+        pendingJobTimerMutationRef.current[updatedJob.id] = {
+          atMs: Date.now(),
+          active_timer_start: updatedJob.active_timer_start,
+          active_timer_task: updatedJob.active_timer_task,
+          active_timer_drafter_id: updatedJob.active_timer_drafter_id,
+          active_timer_drafter_name: updatedJob.active_timer_drafter_name,
+          active_timer_delegated_task_id: updatedJob.active_timer_delegated_task_id,
+          paused_by_break: updatedJob.paused_by_break,
+          paused_timer_task: updatedJob.paused_timer_task,
+          paused_timer_drafter_id: updatedJob.paused_timer_drafter_id,
+          paused_timer_drafter_name: updatedJob.paused_timer_drafter_name,
+          paused_elapsed_seconds: updatedJob.paused_elapsed_seconds
+        };
+      }
+    }
+
+    updateJobsState(
+      prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
+      updatedJob.id
+    );
   };
 
   // Helper to update and persist notifications across page loads and sessions
@@ -1537,6 +1653,10 @@ export default function App() {
 
             // Also stop any delegated task timers belonging to this staff member
             const updatedTasks = (j.delegated_tasks || []).map(t => {
+              // Never alter status of already Completed or Under Review tasks upon clock-out
+              if (t.status === 'Completed' || t.status === 'Under Review' || Boolean(t.isReviewed) || Boolean(t.completedAt)) {
+                return { ...t, activeTimerStart: undefined, activeTimerDrafterName: undefined };
+              }
               if (!isTaskTimerForCurrentStaff(t)) return t;
               const tStartMs = t.activeTimerStart ? new Date(t.activeTimerStart).getTime() : stopEndMs;
               const tElapsed = t.activeTimerStart ? Math.max(1, Math.floor((stopEndMs - tStartMs) / 1000)) : 0;
@@ -2585,86 +2705,130 @@ export default function App() {
     let completedTaskTitle = '';
     let delegatorName = '';
 
-    const targetJob = jobs.find(j => 
-      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+    const currentJobs = jobsRef.current;
+    const targetJob = currentJobs.find(j =>
+      (j.delegated_tasks && j.delegated_tasks.some(t => String(t.id).trim() === String(taskId).trim())) ||
       (jobId && isTargetJob(j, jobId)) ||
       (jobId && j.id === jobId)
     );
     const targetJobId = targetJob ? targetJob.id : jobId;
 
-    const updatedJobs = jobs.map(j => {
-      const isMatch = targetJob ? j.id === targetJob.id : (isTargetJob(j, jobId) || (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)));
-      if (isMatch && j.delegated_tasks) {
-        const updatedTasks = j.delegated_tasks.map(t => {
-          if (t.id === taskId) {
-            completedTaskTitle = t.componentTitle;
-            delegatorName = t.delegatedBy;
-            return { 
-              ...t, 
-              status: newStatus,
-              completedAt: newStatus === 'Completed' ? (t.completedAt || new Date().toISOString()) : t.completedAt,
-              completedBy: newStatus === 'Completed' ? (t.completedBy || currentStaff.name) : t.completedBy,
-              isReviewed: newStatus === 'Completed' ? false : t.isReviewed,
-              revisionRequested: newStatus === 'Completed' ? false : t.revisionRequested
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        const isMatch = targetJob
+          ? j.id === targetJob.id
+          : (isTargetJob(j, jobId) || Boolean(j.delegated_tasks && j.delegated_tasks.some(t => String(t.id).trim() === String(taskId).trim())));
+        if (isMatch && j.delegated_tasks) {
+          let updatedTaskRef: DelegatedWorkItem | null = null;
+          const updatedTasks = j.delegated_tasks.map(t => {
+            if (String(t.id).trim() === String(taskId).trim()) {
+              completedTaskTitle = t.componentTitle;
+              delegatorName = t.delegatedBy;
+              updatedTaskRef = {
+                ...t,
+                status: newStatus,
+                completedAt: newStatus === 'Completed' ? (t.completedAt || new Date().toISOString()) : t.completedAt,
+                completedBy: newStatus === 'Completed' ? (t.completedBy || currentStaff.name) : t.completedBy,
+                isReviewed: newStatus === 'Completed' ? false : t.isReviewed,
+                revisionRequested: newStatus === 'Completed' ? false : t.revisionRequested,
+                activeTimerStart: newStatus === 'Completed' ? undefined : t.activeTimerStart,
+                activeTimerDrafterName: newStatus === 'Completed' ? undefined : t.activeTimerDrafterName
+              };
+              return updatedTaskRef;
+            }
+            return t;
+          });
+
+          if (updatedTaskRef) {
+            recordPendingTaskMutation(j.id, updatedTaskRef);
+          }
+
+          // Timer management for task status changes
+          let activeTimerStart = j.active_timer_start;
+          let activeTimerTask = j.active_timer_task;
+          let activeTimerDrafterId = j.active_timer_drafter_id;
+          let activeTimerDrafterName = j.active_timer_drafter_name;
+          let activeTimerDelegatedTaskId = j.active_timer_delegated_task_id;
+          let pausedByBreak = j.paused_by_break;
+          let pausedTimerTask = j.paused_timer_task;
+          let pausedTimerDrafterId = j.paused_timer_drafter_id;
+          let pausedTimerDrafterName = j.paused_timer_drafter_name;
+          let pausedElapsedSeconds = j.paused_elapsed_seconds;
+          let timerChanged = false;
+
+          if (newStatus === 'In Progress' && !j.active_timer_start) {
+            activeTimerStart = new Date().toISOString();
+            activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
+            activeTimerDrafterId = currentStaff.id;
+            activeTimerDrafterName = currentStaff.name;
+            activeTimerDelegatedTaskId = taskId;
+            pausedByBreak = false;
+            pausedTimerTask = undefined;
+            pausedTimerDrafterId = undefined;
+            pausedTimerDrafterName = undefined;
+            pausedElapsedSeconds = undefined;
+            timerChanged = true;
+          } else if (newStatus === 'Completed' && (String(j.active_timer_delegated_task_id || '').trim() === String(taskId).trim() || !j.active_timer_delegated_task_id)) {
+            if (j.active_timer_start || j.paused_by_break) {
+              activeTimerStart = undefined;
+              activeTimerTask = undefined;
+              activeTimerDrafterId = undefined;
+              activeTimerDrafterName = undefined;
+              activeTimerDelegatedTaskId = undefined;
+              pausedByBreak = false;
+              pausedTimerTask = undefined;
+              pausedTimerDrafterId = undefined;
+              pausedTimerDrafterName = undefined;
+              pausedElapsedSeconds = undefined;
+              timerChanged = true;
+            }
+          }
+
+          if (timerChanged) {
+            pendingJobTimerMutationRef.current[j.id] = {
+              atMs: Date.now(),
+              active_timer_start: activeTimerStart,
+              active_timer_task: activeTimerTask,
+              active_timer_drafter_id: activeTimerDrafterId,
+              active_timer_drafter_name: activeTimerDrafterName,
+              active_timer_delegated_task_id: activeTimerDelegatedTaskId,
+              paused_by_break: pausedByBreak,
+              paused_timer_task: pausedTimerTask,
+              paused_timer_drafter_id: pausedTimerDrafterId,
+              paused_timer_drafter_name: pausedTimerDrafterName,
+              paused_elapsed_seconds: pausedElapsedSeconds
             };
           }
-          return t;
-        });
 
-        // Timer management for task status changes
-        let activeTimerStart = j.active_timer_start;
-        let activeTimerTask = j.active_timer_task;
-        let activeTimerDrafterId = j.active_timer_drafter_id;
-        let activeTimerDrafterName = j.active_timer_drafter_name;
-        let activeTimerDelegatedTaskId = j.active_timer_delegated_task_id;
-
-        if (newStatus === 'In Progress' && !j.active_timer_start) {
-          activeTimerStart = new Date().toISOString();
-          activeTimerTask = completedTaskTitle ? `Task: ${completedTaskTitle}` : (j.active_timer_task || 'Delegated Task');
-          activeTimerDrafterId = currentStaff.id;
-          activeTimerDrafterName = currentStaff.name;
-          activeTimerDelegatedTaskId = taskId;
-        } else if (newStatus === 'Completed' && (j.active_timer_delegated_task_id === taskId || !j.active_timer_delegated_task_id)) {
-          // Task completed: finalize and clear running timer
-          activeTimerStart = undefined;
-          activeTimerTask = undefined;
-          activeTimerDrafterId = undefined;
-          activeTimerDrafterName = undefined;
-          activeTimerDelegatedTaskId = undefined;
+          return {
+            ...j,
+            active_timer_start: activeTimerStart,
+            active_timer_task: activeTimerTask,
+            active_timer_drafter_id: activeTimerDrafterId,
+            active_timer_drafter_name: activeTimerDrafterName,
+            active_timer_delegated_task_id: activeTimerDelegatedTaskId,
+            paused_by_break: pausedByBreak,
+            paused_timer_task: pausedTimerTask,
+            paused_timer_drafter_id: pausedTimerDrafterId,
+            paused_timer_drafter_name: pausedTimerDrafterName,
+            paused_elapsed_seconds: pausedElapsedSeconds,
+            delegated_tasks: updatedTasks,
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Delegated Task Updated',
+                performedBy: currentStaff.name,
+                timestamp: new Date().toISOString(),
+                details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
+              },
+              ...j.audit_logs
+            ]
+          };
         }
-
-        return {
-          ...j,
-          active_timer_start: activeTimerStart,
-          active_timer_task: activeTimerTask,
-          active_timer_drafter_id: activeTimerDrafterId,
-          active_timer_drafter_name: activeTimerDrafterName,
-          active_timer_delegated_task_id: activeTimerDelegatedTaskId,
-          delegated_tasks: updatedTasks,
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Delegated Task Updated',
-              performedBy: currentStaff.name,
-              timestamp: new Date().toISOString(),
-              details: `Updated status of task "${completedTaskTitle}" to "${newStatus}"`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs, targetJobId);
-
-    // Keep selectedJobForDetail synchronized if currently open
-    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
-      const freshJob = updatedJobs.find(j => j.id === targetJobId);
-      if (freshJob) {
-        setSelectedJobForDetail(freshJob);
-      }
-    }
+        return j;
+      }),
+      targetJobId
+    );
 
     // If marked Completed, notify delegator (Kyle / Jason / Greg)
     if (newStatus === 'Completed' && delegatorName && delegatorName !== currentStaff.name) {
@@ -2689,9 +2853,10 @@ export default function App() {
 
   // 9. Handle Comprehensive Task Completion Submission (Modal with Notes, Files, Time Log, and Notification)
   const handleCompleteTask = (payload: CompleteTaskPayload) => {
-    // Resilient job discovery by task ID in delegated_tasks first, then flexible jobId matcher
-    const targetJob = jobs.find(j => 
-      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === payload.taskId)) ||
+    // Resilient job discovery from live jobsRef (never stale React closure!)
+    const currentJobs = jobsRef.current;
+    const targetJob = currentJobs.find(j =>
+      (j.delegated_tasks && j.delegated_tasks.some(t => String(t.id).trim() === String(payload.taskId).trim())) ||
       (payload.jobId && isTargetJob(j, payload.jobId)) ||
       (payload.jobId && j.id === payload.jobId)
     );
@@ -2705,137 +2870,169 @@ export default function App() {
     let targetTaskTitle = '';
     const nowIso = payload.completedAtDate || new Date().toISOString();
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === targetJobId && j.delegated_tasks) {
-        const targetTask = j.delegated_tasks.find(t => String(t.id).trim() === String(payload.taskId).trim());
-        targetTaskTitle = targetTask ? targetTask.componentTitle : '';
-        const manualLoggedSec = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
-        
-        // Check if an active timer was running on this job for this task
-        const isTimerOnThisTask = Boolean(
-          j.active_timer_start && (
-            (j.active_timer_delegated_task_id && String(j.active_timer_delegated_task_id).trim() === String(payload.taskId).trim()) ||
-            (!j.active_timer_delegated_task_id && targetTaskTitle && j.active_timer_task && j.active_timer_task.toLowerCase().includes(targetTaskTitle.toLowerCase()))
-          )
-        );
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (j.id === targetJobId && j.delegated_tasks) {
+          const targetTask = j.delegated_tasks.find(t => String(t.id).trim() === String(payload.taskId).trim());
+          targetTaskTitle = targetTask ? targetTask.componentTitle : '';
+          const manualLoggedSec = payload.loggedHours ? Math.round(payload.loggedHours * 3600) : 0;
 
-        let liveTimerSec = 0;
-        if (isTimerOnThisTask && j.active_timer_start) {
-          const startMs = new Date(j.active_timer_start).getTime();
-          liveTimerSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-        }
+          // Check if an active timer was running on this job for this task
+          const isTimerOnThisTask = Boolean(
+            (j.active_timer_start || j.paused_by_break) && (
+              (j.active_timer_delegated_task_id && String(j.active_timer_delegated_task_id).trim() === String(payload.taskId).trim()) ||
+              Boolean(targetTask?.activeTimerStart) ||
+              (!j.active_timer_delegated_task_id && targetTaskTitle && (j.active_timer_task || j.paused_timer_task) && (j.active_timer_task || j.paused_timer_task || '').toLowerCase().includes(targetTaskTitle.toLowerCase()))
+            )
+          );
 
-        const effectiveWorkedSec = manualLoggedSec > 0 ? manualLoggedSec : liveTimerSec;
+          let liveTimerSec = 0;
+          if (isTimerOnThisTask && j.active_timer_start) {
+            const startMs = new Date(j.active_timer_start).getTime();
+            liveTimerSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+          } else if (isTimerOnThisTask && j.paused_elapsed_seconds) {
+            liveTimerSec = Math.max(0, j.paused_elapsed_seconds);
+          } else if (targetTask?.activeTimerStart) {
+            const startMs = new Date(targetTask.activeTimerStart).getTime();
+            liveTimerSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+          }
 
-        const updatedTasks = j.delegated_tasks.map(t => {
-          if (String(t.id).trim() === String(payload.taskId).trim()) {
-            targetTaskTitle = t.componentTitle;
-            const existingAttachments = t.attachments || [];
-            // Merge newly uploaded review attachments with full metadata
-            const mergedAttachments = [...existingAttachments, ...payload.reviewFiles];
-            const curWorked = t.workedSeconds || 0;
-            
-            return {
-              ...t,
-              status: 'Completed' as const,
-              completedAt: nowIso,
-              completedBy: currentStaff.name,
-              completionNotes: payload.resolutionNotes,
-              attachments: mergedAttachments,
-              workedSeconds: curWorked + effectiveWorkedSec,
-              isReviewed: false,
-              revisionRequested: false,
-              activeTimerStart: undefined,
-              activeTimerDrafterName: undefined
+          const effectiveWorkedSec = manualLoggedSec > 0 ? manualLoggedSec : liveTimerSec;
+
+          let completedTaskRecord: DelegatedWorkItem | null = null;
+          const updatedTasks = j.delegated_tasks.map(t => {
+            if (String(t.id).trim() === String(payload.taskId).trim()) {
+              targetTaskTitle = t.componentTitle;
+              const existingAttachments = t.attachments || [];
+              // Merge newly uploaded review attachments with full metadata
+              const mergedAttachments = [...existingAttachments, ...payload.reviewFiles];
+              const curWorked = t.workedSeconds || 0;
+
+              completedTaskRecord = {
+                ...t,
+                status: 'Completed' as const,
+                completedAt: nowIso,
+                completedBy: currentStaff.name,
+                completionNotes: payload.resolutionNotes,
+                attachments: mergedAttachments,
+                workedSeconds: curWorked + effectiveWorkedSec,
+                isReviewed: false,
+                revisionRequested: false,
+                activeTimerStart: undefined,
+                activeTimerDrafterName: undefined
+              };
+              return completedTaskRecord;
+            }
+            return t;
+          });
+
+          if (completedTaskRecord) {
+            recordPendingTaskMutation(j.id, completedTaskRecord);
+          }
+
+          // If user wants deliverables added to project sheet gallery
+          const updatedDeliverables = payload.addToJobDeliverables && payload.deliverableSheets.length > 0
+            ? [...payload.deliverableSheets, ...(j.deliverables || [])]
+            : (j.deliverables || []);
+
+          // If user logged time spent during completion or had active timer running
+          let updatedTimeLogs = j.time_logs || [];
+          if (manualLoggedSec > 0) {
+            const manualLog: TimeLog = {
+              id: `log-comp-${Date.now()}`,
+              drafterName: currentStaff.name,
+              startTime: new Date(Date.now() - manualLoggedSec * 1000).toISOString(),
+              endTime: nowIso,
+              durationSeconds: manualLoggedSec,
+              taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
+              hourlyRate: j.hourly_rate || 85,
+              billableAmount: Math.round((manualLoggedSec / 3600) * (j.hourly_rate || 85)),
+              delegatedTaskId: payload.taskId,
+              delegatedTaskTitle: targetTaskTitle
+            };
+            updatedTimeLogs = [manualLog, ...updatedTimeLogs];
+          } else if (liveTimerSec > 0) {
+            const liveLog: TimeLog = {
+              id: `log-live-${Date.now()}`,
+              drafterName: currentStaff.name || j.active_timer_drafter_name || 'Kyle',
+              startTime: j.active_timer_start || targetTask?.activeTimerStart || new Date(Date.now() - liveTimerSec * 1000).toISOString(),
+              endTime: nowIso,
+              durationSeconds: liveTimerSec,
+              taskDescription: `Completed: ${targetTaskTitle}`,
+              hourlyRate: j.hourly_rate || 85,
+              billableAmount: Math.round((liveTimerSec / 3600) * (j.hourly_rate || 85)),
+              delegatedTaskId: payload.taskId,
+              delegatedTaskTitle: targetTaskTitle
+            };
+            updatedTimeLogs = [liveLog, ...updatedTimeLogs];
+          }
+
+          const totalSec = updatedTimeLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+          const totalMins = Math.round(totalSec / 60);
+          const totalHours = Number((totalSec / 3600).toFixed(2));
+
+          // If the job had an active/paused timer running on this task, clear it atomically & protect from stale snapshots
+          const shouldClearJobTimer = isTimerOnThisTask;
+          if (shouldClearJobTimer) {
+            pendingJobTimerMutationRef.current[j.id] = {
+              atMs: Date.now(),
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              active_timer_delegated_task_id: undefined,
+              paused_by_break: false,
+              paused_timer_task: undefined,
+              paused_timer_drafter_id: undefined,
+              paused_timer_drafter_name: undefined,
+              paused_elapsed_seconds: undefined
             };
           }
-          return t;
-        });
 
-        // If user wants deliverables added to project sheet gallery
-        const updatedDeliverables = payload.addToJobDeliverables && payload.deliverableSheets.length > 0
-          ? [...payload.deliverableSheets, ...j.deliverables]
-          : j.deliverables;
+          // Add a detailed comment in the project stream for the team
+          const completionComment = {
+            id: `c-task-comp-${Date.now()}`,
+            author: currentStaff.name,
+            role: 'drafter' as const,
+            text: `✅ TASK COMPLETED & SUBMITTED FOR REVIEW to ${payload.delegatorName} (CC: Jason):\n"${targetTaskTitle}"\n\nReview Notes:\n${payload.resolutionNotes}${payload.reviewFiles.length > 0 ? `\n\n📁 Attached ${payload.reviewFiles.length} file(s): ${payload.reviewFiles.map(f => f.name).join(', ')}` : ''}`,
+            timestamp: nowIso
+          };
 
-        // If user logged time spent during completion or had active timer running
-        let updatedTimeLogs = j.time_logs || [];
-        if (manualLoggedSec > 0) {
-          const manualLog: TimeLog = {
-            id: `log-comp-${Date.now()}`,
-            drafterName: currentStaff.name,
-            startTime: new Date(Date.now() - manualLoggedSec * 1000).toISOString(),
-            endTime: nowIso,
-            durationSeconds: manualLoggedSec,
-            taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
-            hourlyRate: j.hourly_rate || 85,
-            billableAmount: Math.round((manualLoggedSec / 3600) * (j.hourly_rate || 85)),
-            delegatedTaskId: payload.taskId,
-            delegatedTaskTitle: targetTaskTitle
+          return {
+            ...j,
+            active_timer_start: shouldClearJobTimer ? undefined : j.active_timer_start,
+            active_timer_task: shouldClearJobTimer ? undefined : j.active_timer_task,
+            active_timer_drafter_id: shouldClearJobTimer ? undefined : j.active_timer_drafter_id,
+            active_timer_drafter_name: shouldClearJobTimer ? undefined : j.active_timer_drafter_name,
+            active_timer_delegated_task_id: shouldClearJobTimer ? undefined : j.active_timer_delegated_task_id,
+            paused_by_break: shouldClearJobTimer ? false : j.paused_by_break,
+            paused_timer_task: shouldClearJobTimer ? undefined : j.paused_timer_task,
+            paused_timer_drafter_id: shouldClearJobTimer ? undefined : j.paused_timer_drafter_id,
+            paused_timer_drafter_name: shouldClearJobTimer ? undefined : j.paused_timer_drafter_name,
+            paused_elapsed_seconds: shouldClearJobTimer ? undefined : j.paused_elapsed_seconds,
+            delegated_tasks: updatedTasks,
+            deliverables: updatedDeliverables,
+            time_logs: updatedTimeLogs,
+            total_time_entries: updatedTimeLogs.length,
+            total_duration_minutes: totalMins,
+            total_duration_hours: totalHours,
+            comments: [...(j.comments || []), completionComment],
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Delegated Task Completed',
+                performedBy: currentStaff.name,
+                timestamp: nowIso,
+                details: `Marked "${targetTaskTitle}" completed with ${payload.reviewFiles.length} review file(s) submitted to ${payload.delegatorName} (CC: Jason). Notes: ${payload.resolutionNotes}`
+              },
+              ...(j.audit_logs || [])
+            ]
           };
-          updatedTimeLogs = [manualLog, ...updatedTimeLogs];
-        } else if (liveTimerSec > 0 && j.active_timer_start) {
-          const liveLog: TimeLog = {
-            id: `log-live-${Date.now()}`,
-            drafterName: currentStaff.name || j.active_timer_drafter_name || 'Kyle',
-            startTime: j.active_timer_start,
-            endTime: nowIso,
-            durationSeconds: liveTimerSec,
-            taskDescription: `Completed: ${targetTaskTitle}`,
-            hourlyRate: j.hourly_rate || 85,
-            billableAmount: Math.round((liveTimerSec / 3600) * (j.hourly_rate || 85)),
-            delegatedTaskId: payload.taskId,
-            delegatedTaskTitle: targetTaskTitle
-          };
-          updatedTimeLogs = [liveLog, ...updatedTimeLogs];
         }
-
-        // If the job had an active timer running on this task, clear it completely
-        const shouldClearJobTimer = isTimerOnThisTask;
-
-        // Add a detailed comment in the project stream for the team
-        const completionComment = {
-          id: `c-task-comp-${Date.now()}`,
-          author: currentStaff.name,
-          role: 'drafter' as const,
-          text: `✅ TASK COMPLETED & SUBMITTED FOR REVIEW to ${payload.delegatorName} (CC: Jason):\n"${targetTaskTitle}"\n\nReview Notes:\n${payload.resolutionNotes}${payload.reviewFiles.length > 0 ? `\n\n📁 Attached ${payload.reviewFiles.length} file(s): ${payload.reviewFiles.map(f => f.name).join(', ')}` : ''}`,
-          timestamp: nowIso
-        };
-
-        return {
-          ...j,
-          active_timer_start: shouldClearJobTimer ? undefined : j.active_timer_start,
-          active_timer_task: shouldClearJobTimer ? undefined : j.active_timer_task,
-          active_timer_drafter_id: shouldClearJobTimer ? undefined : j.active_timer_drafter_id,
-          active_timer_drafter_name: shouldClearJobTimer ? undefined : j.active_timer_drafter_name,
-          active_timer_delegated_task_id: shouldClearJobTimer ? undefined : j.active_timer_delegated_task_id,
-          delegated_tasks: updatedTasks,
-          deliverables: updatedDeliverables,
-          time_logs: updatedTimeLogs,
-          comments: [...j.comments, completionComment],
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Delegated Task Completed',
-              performedBy: currentStaff.name,
-              timestamp: nowIso,
-              details: `Marked "${targetTaskTitle}" completed with ${payload.reviewFiles.length} review file(s) submitted to ${payload.delegatorName} (CC: Jason). Notes: ${payload.resolutionNotes}`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs, targetJobId);
-
-    // Synchronize selectedJobForDetail if currently open
-    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
-      const freshJob = updatedJobs.find(j => j.id === targetJobId);
-      if (freshJob) {
-        setSelectedJobForDetail(freshJob);
-      }
-    }
+        return j;
+      }),
+      targetJobId
+    );
 
     const newNotifs: AppNotification[] = [];
 
@@ -2887,8 +3084,9 @@ export default function App() {
 
   // 10. Handle Approving / Signing Off on a Reviewed Delegated Task
   const handleApproveTaskReview = (jobId: string, taskId: string, reviewNote?: string) => {
-    const targetJob = jobs.find(j => 
-      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+    const currentJobs = jobsRef.current;
+    const targetJob = currentJobs.find(j =>
+      (j.delegated_tasks && j.delegated_tasks.some(t => String(t.id).trim() === String(taskId).trim())) ||
       (jobId && isTargetJob(j, jobId)) ||
       (jobId && j.id === jobId)
     );
@@ -2898,62 +3096,61 @@ export default function App() {
     let assignedDrafter = '';
     let taskTitle = '';
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === targetJobId && j.delegated_tasks) {
-        const updatedTasks = j.delegated_tasks.map(t => {
-          if (t.id === taskId) {
-            assignedDrafter = t.assignedTo;
-            taskTitle = t.componentTitle;
-            return {
-              ...t,
-              status: 'Completed' as const,
-              isReviewed: true,
-              reviewedBy: currentStaff.name,
-              reviewedAt: nowIso,
-              reviewNotes: reviewNote || `Approved & signed off by ${currentStaff.name}`,
-              revisionRequested: false
-            };
-          }
-          return t;
-        });
-
-        return {
-          ...j,
-          delegated_tasks: updatedTasks,
-          comments: [
-            ...j.comments,
-            {
-              id: `c-appr-${Date.now()}`,
-              author: currentStaff.name,
-              role: 'drafter' as const,
-              text: `✅ TASK SIGNED OFF & APPROVED: "${taskTitle}" completed by ${assignedDrafter}. ${reviewNote ? `Notes: ${reviewNote}` : `Approved by ${currentStaff.name}`}`,
-              timestamp: nowIso
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (j.id === targetJobId && j.delegated_tasks) {
+          let approvedTaskRef: DelegatedWorkItem | null = null;
+          const updatedTasks = j.delegated_tasks.map(t => {
+            if (String(t.id).trim() === String(taskId).trim()) {
+              assignedDrafter = t.assignedTo;
+              taskTitle = t.componentTitle;
+              approvedTaskRef = {
+                ...t,
+                status: 'Completed' as const,
+                isReviewed: true,
+                reviewedBy: currentStaff.name,
+                reviewedAt: nowIso,
+                reviewNotes: reviewNote || `Approved & signed off by ${currentStaff.name}`,
+                revisionRequested: false
+              };
+              return approvedTaskRef;
             }
-          ],
-          audit_logs: [
-            {
-              id: `a-rev-${Date.now()}`,
-              action: 'Task Reviewed & Approved',
-              performedBy: currentStaff.name,
-              timestamp: nowIso,
-              details: `Signed off on "${taskTitle}" completed by ${assignedDrafter}. ${reviewNote ? `Notes: ${reviewNote}` : 'All drawings & deliverables verified.'}`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
+            return t;
+          });
 
-    updateJobsState(updatedJobs, targetJobId);
+          if (approvedTaskRef) {
+            recordPendingTaskMutation(j.id, approvedTaskRef);
+          }
 
-    // Keep selectedJobForDetail synchronized if currently open
-    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
-      const freshJob = updatedJobs.find(j => j.id === targetJobId);
-      if (freshJob) {
-        setSelectedJobForDetail(freshJob);
-      }
-    }
+          return {
+            ...j,
+            delegated_tasks: updatedTasks,
+            comments: [
+              ...(j.comments || []),
+              {
+                id: `c-appr-${Date.now()}`,
+                author: currentStaff.name,
+                role: 'drafter' as const,
+                text: `✅ TASK SIGNED OFF & APPROVED: "${taskTitle}" completed by ${assignedDrafter}. ${reviewNote ? `Notes: ${reviewNote}` : `Approved by ${currentStaff.name}`}`,
+                timestamp: nowIso
+              }
+            ],
+            audit_logs: [
+              {
+                id: `a-rev-${Date.now()}`,
+                action: 'Task Reviewed & Approved',
+                performedBy: currentStaff.name,
+                timestamp: nowIso,
+                details: `Signed off on "${taskTitle}" completed by ${assignedDrafter}. ${reviewNote ? `Notes: ${reviewNote}` : 'All drawings & deliverables verified.'}`
+              },
+              ...(j.audit_logs || [])
+            ]
+          };
+        }
+        return j;
+      }),
+      targetJobId
+    );
 
     // Remove the delegation notification from the specific drafter, and send sign-off approval notification
     if (assignedDrafter) {
@@ -2988,8 +3185,9 @@ export default function App() {
 
   // 11. Handle Requesting Revisions on a Delegated Task
   const handleRequestTaskRevision = (jobId: string, taskId: string, feedbackNote: string) => {
-    const targetJob = jobs.find(j => 
-      (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+    const currentJobs = jobsRef.current;
+    const targetJob = currentJobs.find(j =>
+      (j.delegated_tasks && j.delegated_tasks.some(t => String(t.id).trim() === String(taskId).trim())) ||
       (jobId && isTargetJob(j, jobId)) ||
       (jobId && j.id === jobId)
     );
@@ -3000,65 +3198,64 @@ export default function App() {
     let taskTitle = '';
     let currentRevCount = 1;
 
-    const updatedJobs = jobs.map(j => {
-      if (j.id === targetJobId && j.delegated_tasks) {
-        const updatedTasks = j.delegated_tasks.map(t => {
-          if (t.id === taskId) {
-            assignedDrafter = t.assignedTo;
-            taskTitle = t.componentTitle;
-            currentRevCount = (t.revisionCount || 0) + 1;
-            return {
-              ...t,
-              status: 'Revision Requested' as const,
-              isReviewed: false,
-              revisionRequested: true,
-              revisionRequestedBy: currentStaff.name,
-              revisionRequestedAt: nowIso,
-              revisionNotes: feedbackNote,
-              revisionCount: currentRevCount,
-              notes: `${t.notes ? `${t.notes} | ` : ''}Revision Request #${currentRevCount} (${currentStaff.name}): ${feedbackNote}`
-            };
-          }
-          return t;
-        });
-
-        return {
-          ...j,
-          delegated_tasks: updatedTasks,
-          comments: [
-            ...j.comments,
-            {
-              id: `c-rev-req-${Date.now()}`,
-              author: currentStaff.name,
-              role: 'drafter' as const,
-              text: `🔄 REVISION REQUESTED on "${taskTitle}" (Rev #${currentRevCount}): ${feedbackNote}`,
-              timestamp: nowIso
+    updateJobsState(prevJobs =>
+      prevJobs.map(j => {
+        if (j.id === targetJobId && j.delegated_tasks) {
+          let revisedTaskRef: DelegatedWorkItem | null = null;
+          const updatedTasks = j.delegated_tasks.map(t => {
+            if (String(t.id).trim() === String(taskId).trim()) {
+              assignedDrafter = t.assignedTo;
+              taskTitle = t.componentTitle;
+              currentRevCount = (t.revisionCount || 0) + 1;
+              revisedTaskRef = {
+                ...t,
+                status: 'Revision Requested' as const,
+                isReviewed: false,
+                revisionRequested: true,
+                revisionRequestedBy: currentStaff.name,
+                revisionRequestedAt: nowIso,
+                revisionNotes: feedbackNote,
+                revisionCount: currentRevCount,
+                notes: `${t.notes ? `${t.notes} | ` : ''}Revision Request #${currentRevCount} (${currentStaff.name}): ${feedbackNote}`
+              };
+              return revisedTaskRef;
             }
-          ],
-          audit_logs: [
-            {
-              id: `a-rev-req-${Date.now()}`,
-              action: `Task Revision Requested (#${currentRevCount})`,
-              performedBy: currentStaff.name,
-              timestamp: nowIso,
-              details: `Requested revisions on "${taskTitle}" from ${assignedDrafter}: "${feedbackNote}"`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
+            return t;
+          });
 
-    updateJobsState(updatedJobs, targetJobId);
+          if (revisedTaskRef) {
+            recordPendingTaskMutation(j.id, revisedTaskRef);
+          }
 
-    // Keep selectedJobForDetail synchronized if currently open
-    if (selectedJobForDetail && (selectedJobForDetail.id === targetJobId || isTargetJob(selectedJobForDetail, targetJobId))) {
-      const freshJob = updatedJobs.find(j => j.id === targetJobId);
-      if (freshJob) {
-        setSelectedJobForDetail(freshJob);
-      }
-    }
+          return {
+            ...j,
+            delegated_tasks: updatedTasks,
+            comments: [
+              ...(j.comments || []),
+              {
+                id: `c-rev-req-${Date.now()}`,
+                author: currentStaff.name,
+                role: 'drafter' as const,
+                text: `🔄 REVISION REQUESTED on "${taskTitle}" (Rev #${currentRevCount}): ${feedbackNote}`,
+                timestamp: nowIso
+              }
+            ],
+            audit_logs: [
+              {
+                id: `a-rev-req-${Date.now()}`,
+                action: `Task Revision Requested (#${currentRevCount})`,
+                performedBy: currentStaff.name,
+                timestamp: nowIso,
+                details: `Requested revisions on "${taskTitle}" from ${assignedDrafter}: "${feedbackNote}"`
+              },
+              ...(j.audit_logs || [])
+            ]
+          };
+        }
+        return j;
+      }),
+      targetJobId
+    );
 
     // Notify drafter with clear Revision Request notification
     if (assignedDrafter) {
@@ -3608,12 +3805,7 @@ export default function App() {
               onUpdateStatus={handleUpdateJobStatus}
               onToggleRoadblock={handleToggleRoadblock}
               onSelectJob={handleOpenJobDetail}
-              onUpdateJob={(updatedJob) => {
-                updateJobsState(
-                  prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
-                  updatedJob.id
-                );
-              }}
+              onUpdateJob={handleDirectJobUpdate}
               onDispatchNotifications={handleDispatchNotifications}
               nowTimestamp={nowTimestamp}
               payrollEntries={payrollEntries}
@@ -3649,12 +3841,7 @@ export default function App() {
             setSelectedJobForDetail(null);
             setJobDetailHighlightCommentId(undefined);
           }}
-          onUpdateJob={(updatedJob) => {
-            updateJobsState(
-              prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
-              updatedJob.id
-            );
-          }}
+          onUpdateJob={handleDirectJobUpdate}
           onUpdateCustomerContact={handleUpdateCustomerContact}
           onDispatchNotifications={handleDispatchNotifications}
           onTriggerEmail={(email) => setEmailModalData(email)}

@@ -286,18 +286,28 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const handleMarkTaskCompleteWithDate = (taskId: string, completedDateIso?: string) => {
     if (!job || !job.delegated_tasks) return;
     const nowIso = completedDateIso || new Date().toISOString();
-    
+    const targetTask = job.delegated_tasks.find(t => String(t.id).trim() === String(taskId).trim());
+    if (!targetTask) return;
+
     // Check if active timer was running on this task
+    const isTimerOnThisTask = Boolean(
+      job.active_timer_start && (
+        (job.active_timer_delegated_task_id && String(job.active_timer_delegated_task_id).trim() === String(taskId).trim()) ||
+        Boolean(targetTask.activeTimerStart) ||
+        (!job.active_timer_delegated_task_id && targetTask.componentTitle && job.active_timer_task && job.active_timer_task.toLowerCase().includes(targetTask.componentTitle.toLowerCase()))
+      )
+    );
+
     let timerElapsedSec = 0;
-    if (job.active_timer_start && (job.active_timer_delegated_task_id === taskId || (job.active_timer_task && job.active_timer_task.toLowerCase().includes(taskId.toLowerCase())))) {
+    if (isTimerOnThisTask && job.active_timer_start) {
       timerElapsedSec = Math.max(0, Math.floor((Date.now() - new Date(job.active_timer_start).getTime()) / 1000));
     }
 
     const updatedTasks = job.delegated_tasks.map(t => {
-      if (t.id === taskId) {
+      if (String(t.id).trim() === String(taskId).trim()) {
         const curWorked = t.workedSeconds || 0;
         let taskTimerSec = 0;
-        if (t.activeTimerStart) {
+        if (!timerElapsedSec && t.activeTimerStart) {
           taskTimerSec = Math.max(0, Math.floor((Date.now() - new Date(t.activeTimerStart).getTime()) / 1000));
         }
         return {
@@ -306,6 +316,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
           completedAt: nowIso,
           completedBy: t.completedBy || currentStaff?.name || 'Staff User',
           workedSeconds: curWorked + timerElapsedSec + taskTimerSec,
+          isReviewed: false,
+          revisionRequested: false,
           activeTimerStart: undefined,
           activeTimerDrafterName: undefined
         };
@@ -313,29 +325,76 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
       return t;
     });
 
-    const shouldStopJobTimer = Boolean(job.active_timer_delegated_task_id === taskId);
+    const shouldStopJobTimer = isTimerOnThisTask;
+    let updatedLogs = job.time_logs || [];
+    if (shouldStopJobTimer && timerElapsedSec > 0 && job.active_timer_start) {
+      const liveLog: TimeLog = {
+        id: `log-quick-comp-${Date.now()}`,
+        drafterName: currentStaff?.name || job.active_timer_drafter_name || targetTask.assignedTo || 'Staff User',
+        startTime: job.active_timer_start,
+        endTime: nowIso,
+        durationSeconds: timerElapsedSec,
+        taskDescription: `Completed: ${targetTask.componentTitle}`,
+        hourlyRate: job.hourly_rate || 85,
+        billableAmount: Math.round((timerElapsedSec / 3600) * (job.hourly_rate || 85)),
+        delegatedTaskId: taskId,
+        delegatedTaskTitle: targetTask.componentTitle
+      };
+      updatedLogs = [liveLog, ...updatedLogs];
+    }
+
+    const totalSec = updatedLogs.reduce((acc, l) => acc + (l.durationSeconds || 0), 0);
+    const actorName = currentStaff?.name || 'Staff User';
 
     const updatedJob: Job = {
       ...job,
       active_timer_start: shouldStopJobTimer ? undefined : job.active_timer_start,
       active_timer_task: shouldStopJobTimer ? undefined : job.active_timer_task,
+      active_timer_drafter_id: shouldStopJobTimer ? undefined : job.active_timer_drafter_id,
+      active_timer_drafter_name: shouldStopJobTimer ? undefined : job.active_timer_drafter_name,
       active_timer_delegated_task_id: shouldStopJobTimer ? undefined : job.active_timer_delegated_task_id,
+      paused_by_break: shouldStopJobTimer ? false : job.paused_by_break,
+      paused_timer_task: shouldStopJobTimer ? undefined : job.paused_timer_task,
+      paused_timer_drafter_id: shouldStopJobTimer ? undefined : job.paused_timer_drafter_id,
+      paused_timer_drafter_name: shouldStopJobTimer ? undefined : job.paused_timer_drafter_name,
+      paused_elapsed_seconds: shouldStopJobTimer ? undefined : job.paused_elapsed_seconds,
       delegated_tasks: updatedTasks,
+      time_logs: updatedLogs,
+      total_time_entries: updatedLogs.length,
+      total_duration_minutes: Math.round(totalSec / 60),
+      total_duration_hours: Number((totalSec / 3600).toFixed(2)),
       audit_logs: [
         {
           id: `a-${Date.now()}`,
           action: 'Task Marked Completed',
-          details: `Task completed on ${new Date(nowIso).toLocaleDateString()} by ${currentStaff?.name || 'Staff User'}`,
+          details: `Marked "${targetTask.componentTitle}" completed on ${new Date(nowIso).toLocaleDateString()} by ${actorName}`,
           timestamp: new Date().toISOString(),
-          drafter_name: currentStaff?.name || 'Staff User'
+          performedBy: actorName
         },
         ...(job.audit_logs || [])
       ]
     };
 
+    // Single atomic job update (do NOT also call onUpdateTaskStatus, which previously fired a competing stale write!)
     onUpdateJob(updatedJob);
-    if (onUpdateTaskStatus) {
-      onUpdateTaskStatus(job.id, taskId, 'Completed');
+
+    // Notify delegator if someone else completed their delegated task
+    const delegatorName = targetTask.delegatedBy;
+    if (onDispatchNotifications && delegatorName && delegatorName !== actorName) {
+      const delegatorStaff = staffList.find(s => s.name.toLowerCase().includes(delegatorName.toLowerCase()));
+      onDispatchNotifications([{
+        id: `notif-${Date.now()}`,
+        recipientName: delegatorName,
+        recipientEmail: delegatorStaff?.email || `${delegatorName.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
+        senderName: actorName,
+        title: `Task Completed: ${targetTask.componentTitle}`,
+        message: `${actorName} marked "${targetTask.componentTitle}" completed on Job #${job.job_number} (${job.customer_name}).`,
+        jobId: job.id,
+        jobNumber: job.job_number,
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'status_change'
+      }]);
     }
   };
 
@@ -347,12 +406,13 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         return {
           ...t,
           completedAt: isoDate,
-          status: t.status === 'Completed' || t.status === 'Under Review' ? t.status : 'Completed'
+          status: t.status === 'Completed' || t.status === 'Under Review' ? t.status : ('Completed' as const)
         };
       }
       return t;
     });
 
+    const actorName = currentStaff?.name || 'Staff User';
     const updatedJob: Job = {
       ...job,
       delegated_tasks: updatedTasks,
@@ -360,9 +420,9 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         {
           id: `a-${Date.now()}`,
           action: 'Task Completion Date Updated',
-          details: `Completion date changed to ${new Date(isoDate).toLocaleDateString()} by ${currentStaff?.name || 'Staff User'}`,
+          details: `Completion date changed to ${new Date(isoDate).toLocaleDateString()} by ${actorName}`,
           timestamp: new Date().toISOString(),
-          drafter_name: currentStaff?.name || 'Staff User'
+          performedBy: actorName
         },
         ...(job.audit_logs || [])
       ]
@@ -523,7 +583,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
             action: 'Task Timer Stopped',
             details: `Logged ${formatSecondsToReadable(elapsedSeconds)} for "${task.componentTitle}"`,
             timestamp: new Date().toISOString(),
-            drafter_name: currentStaff?.name || 'Staff User'
+            performedBy: currentStaff?.name || 'Staff User'
           },
           ...(job.audit_logs || [])
         ]
@@ -531,13 +591,17 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
 
       onUpdateJob(updatedJob);
     } else {
+      // Do not restart a timer on an already completed/reviewed task
+      if (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.isReviewed) || Boolean(task.completedAt)) {
+        return;
+      }
       // Start timer on this task
       const startIso = new Date().toISOString();
       const updatedTasks = (job.delegated_tasks || []).map(t => {
         if (t.id === task.id) {
           return {
             ...t,
-            status: t.status === 'Completed' ? t.status : ('In Progress' as const),
+            status: 'In Progress' as const,
             activeTimerStart: startIso,
             activeTimerDrafterName: currentStaff?.name || 'Drafter'
           };
@@ -559,7 +623,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
             action: 'Task Timer Started',
             details: `Started drafting timer for delegated task "${task.componentTitle}"`,
             timestamp: startIso,
-            drafter_name: currentStaff?.name || 'Staff User'
+            performedBy: currentStaff?.name || 'Staff User'
           },
           ...(job.audit_logs || [])
         ]

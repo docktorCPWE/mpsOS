@@ -91,6 +91,18 @@ export async function processFileForAttachment(file: File): Promise<{
     ? `${Math.max(1, Math.round(file.size / 1024))} KB`
     : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
+  // Firestore has a hard 1 MiB (1,048,576 byte) limit per job document, and base64 adds +33% overhead.
+  // Never inline multi-MB PDFs/DWGs into base64 strings or the entire job save (including task completion) will fail.
+  const MAX_INLINE_BINARY_BYTES = 400 * 1024; // 400 KB raw (~533 KB base64)
+  if (file.size > MAX_INLINE_BINARY_BYTES) {
+    return {
+      url: '',
+      name: file.name,
+      size: formattedSize,
+      type: file.type || 'application/octet-stream'
+    };
+  }
+
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {

@@ -312,13 +312,19 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   // Mark task complete -> opens CompleteTaskModal or marks completed
   const handleMarkTaskComplete = (task: DelegatedWorkItem, parentJob?: Job) => {
     const resolvedJob = parentJob || resolveParentJob(task);
-    if (isTaskTimerRunning(task, resolvedJob)) {
-      handleStopTaskTimer(task, resolvedJob);
-    }
     if (onOpenCompleteTaskModal && resolvedJob) {
+      // Do NOT call handleStopTaskTimer here before opening the modal — stopping first
+      // writes status='Pending' to Firestore and races with CompleteTaskModal's status='Completed' write.
+      // handleCompleteTask atomically stops, logs the running timer, and marks the task Completed in one write.
+      setActiveDelegatedTaskId(null);
       onOpenCompleteTaskModal(task, resolvedJob);
-    } else if (onUpdateTaskStatus) {
-      onUpdateTaskStatus(resolvedJob?.id || task.jobId, task.id, 'Completed');
+    } else {
+      if (isTaskTimerRunning(task, resolvedJob)) {
+        handleStopTaskTimer(task, resolvedJob);
+      }
+      if (onUpdateTaskStatus) {
+        onUpdateTaskStatus(resolvedJob?.id || task.jobId, task.id, 'Completed');
+      }
     }
   };
 
