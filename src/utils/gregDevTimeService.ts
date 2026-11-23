@@ -225,7 +225,6 @@ export const INITIAL_GREG_DEV_ENTRIES: GregDevTimeEntry[] = [
 
 export interface ReconciledDevCardsResult {
   cards: GregDevProjectCard[];
-  healedCards: GregDevProjectCard[];
   duplicateIdsToDelete: string[];
 }
 
@@ -248,102 +247,49 @@ function parseTimestampMs(iso?: string): number {
 }
 
 /**
- * Reconciles Greg Dev Project Cards against completed dev_time_entries (and optional local snapshot):
- * 1. Auto-heals corrupt active cards (isActive: true with missing/invalid activeTimerStart)
- * 2. Auto-heals zombie active cards whose timer session was ALREADY stopped & logged in dev_time_entries
- *    or whose lastStoppedAt >= activeTimerStart (e.g. from older stopped-card sync failures)
- * 3. Clears orphaned activeTimerStart on inactive cards
- * 4. Deduplicates duplicate Firestore docs for the same projectType so a hard refresh never
- *    shows phantom duplicate timers.
- * 5. Recalculates todaySeconds & totalSeconds cleanly from entries.
+ * Safely normalizes and deduplicates Greg Dev Project Cards in memory:
+ * 1. NEVER auto-stops a running timer that has a valid activeTimerStart timestamp
+ *    (timers are ONLY ever stopped by an explicit user action: Stop, Break, Clock Out, or Dismiss).
+ * 2. Only clears structurally corrupt state (isActive: true with missing/NaN activeTimerStart,
+ *    or leftover activeTimerStart on an explicitly inactive card).
+ * 3. Deduplicates duplicate Firestore docs for the same projectType, always keeping the running
+ *    or canonical card.
+ * 4. Recalculates todaySeconds & totalSeconds cleanly from completed entries.
  */
 export function sanitizeAndDedupeDevProjectCards(
   cards: GregDevProjectCard[],
   entries: GregDevTimeEntry[],
-  localCardsSnapshot?: GregDevProjectCard[],
+  _localCardsSnapshot?: GregDevProjectCard[],
   todayStr: string = getLocalDateString(new Date())
 ): ReconciledDevCardsResult {
-  const healedMap = new Map<string, GregDevProjectCard>();
   const duplicateIdsToDelete: string[] = [];
 
   const sanitized: GregDevProjectCard[] = cards.map(card => {
-    const normType = normalizeDevProjectType(card.projectType);
     const startMs = parseTimestampMs(card.activeTimerStart);
-    let nextCard: GregDevProjectCard = { ...card };
-    let needsHeal = false;
 
     if (card.isActive) {
       if (!card.activeTimerStart || isNaN(startMs)) {
-        // Corrupt active card without a valid start timestamp
-        nextCard = {
-          ...nextCard,
+        // Structurally corrupt active card without a valid start timestamp
+        return {
+          ...card,
           isActive: false,
           isPausedByBreak: false,
           activeTimerStart: undefined
         };
-        needsHeal = true;
-      } else {
-        let stopIso: string | undefined;
-
-        // Proof 1: Card's own lastStoppedAt is at or after activeTimerStart
-        const cardStoppedMs = parseTimestampMs(card.lastStoppedAt);
-        if (!isNaN(cardStoppedMs) && cardStoppedMs >= startMs) {
-          stopIso = card.lastStoppedAt;
-        }
-
-        // Proof 2: A completed dev_time_entry already exists for this exact session (or a newer one on this card)
-        if (!stopIso && entries && entries.length > 0) {
-          const matchingEntry = entries.find(e => {
-            if (normalizeDevProjectType(e.projectType) !== normType) return false;
-            if (!e.endTime) return false;
-            const eStartMs = parseTimestampMs(e.startTime);
-            const eEndMs = parseTimestampMs(e.endTime);
-            if (isNaN(eStartMs) || isNaN(eEndMs)) return false;
-            // Exact/near-exact match for this active session start, OR a completed session started at/after startMs
-            return Math.abs(eStartMs - startMs) <= 5000 || eStartMs >= startMs;
-          });
-          if (matchingEntry) {
-            stopIso = matchingEntry.endTime;
-          }
-        }
-
-        // Proof 3: Browser's pre-refresh localStorage snapshot explicitly stopped this exact session
-        if (!stopIso && localCardsSnapshot && localCardsSnapshot.length > 0) {
-          const localMatch = localCardsSnapshot.find(
-            lc => lc.id === card.id || normalizeDevProjectType(lc.projectType) === normType
-          );
-          if (localMatch && !localMatch.isActive) {
-            const localStoppedMs = parseTimestampMs(localMatch.lastStoppedAt);
-            if (!isNaN(localStoppedMs) && localStoppedMs >= startMs) {
-              stopIso = localMatch.lastStoppedAt;
-            }
-          }
-        }
-
-        if (stopIso) {
-          nextCard = {
-            ...nextCard,
-            isActive: false,
-            isPausedByBreak: false,
-            activeTimerStart: undefined,
-            lastStoppedAt: stopIso
-          };
-          needsHeal = true;
-        }
       }
-    } else if (card.activeTimerStart) {
-      // Inactive card with leftover activeTimerStart
-      nextCard = {
-        ...nextCard,
+      // Valid running timer — preserve untouched!
+      return { ...card };
+    }
+
+    if (card.activeTimerStart) {
+      // Explicitly inactive card with leftover timestamp field
+      return {
+        ...card,
         activeTimerStart: undefined
       };
-      needsHeal = true;
     }
 
-    if (needsHeal) {
-      healedMap.set(nextCard.id, nextCard);
-    }
-    return nextCard;
+    return { ...card };
   });
 
   // Deduplicate cards that share the exact same normalized projectType
@@ -366,7 +312,7 @@ export function sanitizeAndDedupeDevProjectCards(
       continue;
     }
 
-    // Pick single authoritative card for this projectType
+    // Pick single authoritative card for this projectType (always prefer actively running card first)
     const sorted = [...group].sort((a, b) => {
       const aRunning = a.isActive && Boolean(a.activeTimerStart) ? 1 : 0;
       const bRunning = b.isActive && Boolean(b.activeTimerStart) ? 1 : 0;
@@ -393,7 +339,6 @@ export function sanitizeAndDedupeDevProjectCards(
     for (let i = 1; i < sorted.length; i++) {
       const loser = sorted[i];
       duplicateIdsToDelete.push(loser.id);
-      healedMap.delete(loser.id);
       winner.todaySeconds = Math.max(winner.todaySeconds || 0, loser.todaySeconds || 0);
       winner.totalSeconds = Math.max(winner.totalSeconds || 0, loser.totalSeconds || 0);
       if (!winner.currentNotes && loser.currentNotes) {
@@ -405,16 +350,9 @@ export function sanitizeAndDedupeDevProjectCards(
 
   // Reconcile todaySeconds & totalSeconds against entries
   const finalCards = reconcileGregDevCardsWithEntries(deduped, entries, todayStr);
-  const finalHealed: GregDevProjectCard[] = [];
-  for (const fc of finalCards) {
-    if (healedMap.has(fc.id)) {
-      finalHealed.push(fc);
-    }
-  }
 
   return {
     cards: finalCards,
-    healedCards: finalHealed,
     duplicateIdsToDelete
   };
 }

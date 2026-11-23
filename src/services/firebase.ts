@@ -1290,18 +1290,19 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
 }
 
 function buildSanitizedDevCardPayload(card: GregDevProjectCard): Record<string, any> {
+  const active = Boolean(card.isActive && card.activeTimerStart);
   return {
     id: card.id,
     project_type: card.projectType || 'Other Dev',
     color_theme: card.colorTheme || 'indigo',
-    is_active: Boolean(card.isActive),
+    is_active: active,
     is_paused_by_break: Boolean(card.isPausedByBreak),
-    active_timer_start: card.activeTimerStart ? String(card.activeTimerStart) : null,
+    active_timer_start: active && card.activeTimerStart ? String(card.activeTimerStart) : null,
     today_seconds: typeof card.todaySeconds === 'number' && !isNaN(card.todaySeconds) ? card.todaySeconds : 0,
     total_seconds: typeof card.totalSeconds === 'number' && !isNaN(card.totalSeconds) ? card.totalSeconds : 0,
     current_notes: typeof card.currentNotes === 'string' ? card.currentNotes : '',
     last_started_at: card.lastStartedAt ? String(card.lastStartedAt) : null,
-    last_stopped_at: card.lastStoppedAt ? String(card.lastStoppedAt) : null,
+    last_stopped_at: active ? null : (card.lastStoppedAt ? String(card.lastStoppedAt) : null),
     // Clear any legacy camelCase ghost fields so snake_case is the sole source of truth
     isActive: deleteField(),
     isPausedByBreak: deleteField(),
@@ -1311,14 +1312,22 @@ function buildSanitizedDevCardPayload(card: GregDevProjectCard): Record<string, 
 
 /**
  * Saves a single dev project card document cleanly without touching any other card's running timer.
+ * Retries once automatically on transient network glitches so timer start/stop writes never silently drop.
  */
 export async function saveSingleDevProjectCardToFirestore(card: GregDevProjectCard): Promise<void> {
   if (!db || !card?.id) return;
+  const docRef = doc(db, 'dev_project_cards', card.id);
+  const payload = buildSanitizedDevCardPayload(card);
   try {
-    const docRef = doc(db, 'dev_project_cards', card.id);
-    await setDoc(docRef, buildSanitizedDevCardPayload(card), { merge: true });
+    await setDoc(docRef, payload, { merge: true });
   } catch (err) {
-    console.error('[Firestore] error saving single dev project card:', card.id, err);
+    console.warn('[Firestore] Retrying single dev project card save after transient error:', card.id, err);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 650));
+      await setDoc(docRef, payload, { merge: true });
+    } catch (retryErr) {
+      console.error('[Firestore] error saving single dev project card after retry:', card.id, retryErr);
+    }
   }
 }
 

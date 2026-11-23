@@ -142,10 +142,20 @@ export default function App() {
   const devEntriesRef = useRef<GregDevTimeEntry[]>(devEntries);
   const jobsRef = useRef<Job[]>(jobs);
   const pendingDevCardMutationRef = useRef<Record<string, { atMs: number; card: GregDevProjectCard }>>({});
-  const initialLocalJobsRef = useRef<Job[]>([]);
-  const initialLocalDevCardsRef = useRef<GregDevProjectCard[]>([]);
-  const initialLocalDevEntriesRef = useRef<GregDevTimeEntry[]>([]);
-  const latestCloudDevCardsRef = useRef<GregDevProjectCard[]>([]);
+  const pendingJobTimerMutationRef = useRef<Record<string, {
+    atMs: number;
+    active_timer_start?: string;
+    active_timer_task?: string;
+    active_timer_drafter_id?: string;
+    active_timer_drafter_name?: string;
+    active_timer_delegated_task_id?: string;
+    paused_by_break?: boolean;
+    paused_timer_task?: string;
+    paused_timer_drafter_id?: string;
+    paused_timer_drafter_name?: string;
+    paused_elapsed_seconds?: number;
+  }>>({});
+  const authenticatedStaffRef = useRef<StaffUser | null>(authenticatedStaff);
   const healedZombieTokensRef = useRef<Set<string>>(new Set());
   const hasActiveWorkOrShiftRef = useRef<boolean>(false);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
@@ -154,6 +164,10 @@ export default function App() {
   const lastHeartbeatSentAtRef = useRef<number>(0);
   const sessionLoginAtRef = useRef<number>(Date.now());
   const initialForceLogoutAtRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    authenticatedStaffRef.current = authenticatedStaff;
+  }, [authenticatedStaff]);
 
   useEffect(() => {
     staffListRef.current = staffList;
@@ -211,11 +225,8 @@ export default function App() {
 
   // Initialize jobs, staff, chat, and time cards from local storage or cloud Firestore
   useEffect(() => {
-    // 1. Immediate local fallback load (also snapshot pre-refresh local state for zombie timer reconciliation)
+    // 1. Immediate local fallback load
     const loaded = getStoredJobs();
-    initialLocalJobsRef.current = loaded;
-    initialLocalDevCardsRef.current = getStoredGregDevCards();
-    initialLocalDevEntriesRef.current = getStoredGregDevEntries();
     jobsRef.current = loaded;
     setJobs(loaded);
     if (loaded.length > 0) {
@@ -238,125 +249,56 @@ export default function App() {
     testConnection();
     purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
-    // Helper to heal any zombie job active_timer_start whose session was already stopped & logged
-    const reconcileZombieJobTimers = (cloudJobs: Job[]): Job[] => {
-      const localJobs = initialLocalJobsRef.current;
-      const healedJobsToSync: Job[] = [];
+    // Protect any in-flight job timer Start/Stop/Break/ClockOut writes from stale Firestore snapshots.
+    // NEVER auto-stop a running job timer or write back to Firestore from a snapshot listener!
+    const protectInFlightJobTimers = (cloudJobs: Job[]): Job[] => {
+      const now = Date.now();
+      return cloudJobs.map(job => {
+        const pending = pendingJobTimerMutationRef.current[job.id];
+        if (!pending) return job;
 
-      const sanitized = cloudJobs.map(job => {
-        let modified = false;
-        let nextJob: Job = job;
+        const cloudMatchesExpected =
+          (job.active_timer_start || '') === (pending.active_timer_start || '') &&
+          Boolean(job.paused_by_break) === Boolean(pending.paused_by_break);
 
-        if (job.active_timer_start) {
-          const activeStartMs = new Date(job.active_timer_start).getTime();
-          const cloudLogs = job.time_logs || [];
-          const localMatch = localJobs.find(lj => lj.id === job.id);
-          const localLogs = localMatch?.time_logs || [];
-
-          const matchesStart = (log: TimeLog) => {
-            if (!log.endTime || !log.startTime) return false;
-            const logStartMs = new Date(log.startTime).getTime();
-            if (isNaN(logStartMs) || isNaN(activeStartMs)) return false;
-            return Math.abs(logStartMs - activeStartMs) <= 5000;
-          };
-
-          const alreadyLoggedInCloud = !isNaN(activeStartMs) && cloudLogs.some(matchesStart);
-          const alreadyStoppedLocally = Boolean(
-            localMatch &&
-            !localMatch.active_timer_start &&
-            !isNaN(activeStartMs) &&
-            localLogs.some(matchesStart)
-          );
-
-          if (isNaN(activeStartMs) || alreadyLoggedInCloud || alreadyStoppedLocally) {
-            let mergedLogs = cloudLogs;
-            if (alreadyStoppedLocally) {
-              const missingLocalLogs = localLogs.filter(
-                ll => matchesStart(ll) && !cloudLogs.some(cl => cl.id === ll.id || matchesStart(cl))
-              );
-              if (missingLocalLogs.length > 0) {
-                mergedLogs = [...cloudLogs, ...missingLocalLogs];
-              }
-            }
-
-            const totalSec = mergedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
-            nextJob = {
-              ...nextJob,
-              active_timer_start: undefined,
-              active_timer_task: undefined,
-              active_timer_drafter_id: undefined,
-              active_timer_drafter_name: undefined,
-              active_timer_delegated_task_id: undefined,
-              time_logs: mergedLogs,
-              total_time_entries: mergedLogs.length,
-              total_duration_minutes: Math.round(totalSec / 60),
-              total_duration_hours: Number((totalSec / 3600).toFixed(2))
-            };
-            modified = true;
-          }
+        if (cloudMatchesExpected || now - pending.atMs > 20000) {
+          delete pendingJobTimerMutationRef.current[job.id];
+          return job;
         }
 
-        // Also clear any orphaned delegated task activeTimerStart already logged in time_logs
-        if (nextJob.delegated_tasks && nextJob.delegated_tasks.length > 0) {
-          const logs = nextJob.time_logs || [];
-          let taskChanged = false;
-          const cleanedTasks = nextJob.delegated_tasks.map(t => {
-            if (!t.activeTimerStart) return t;
-            const tStartMs = new Date(t.activeTimerStart).getTime();
-            const isAlreadyLogged =
-              isNaN(tStartMs) ||
-              logs.some(l => l.endTime && l.startTime && Math.abs(new Date(l.startTime).getTime() - tStartMs) <= 5000);
-            if (isAlreadyLogged) {
-              taskChanged = true;
-              return {
-                ...t,
-                activeTimerStart: undefined,
-                activeTimerDrafterName: undefined
-              };
-            }
-            return t;
-          });
-          if (taskChanged) {
-            nextJob = { ...nextJob, delegated_tasks: cleanedTasks };
-            modified = true;
-          }
-        }
-
-        if (modified) {
-          const token = `job:${job.id}:${job.active_timer_start || 'task'}`;
-          if (!healedZombieTokensRef.current.has(token)) {
-            healedZombieTokensRef.current.add(token);
-            healedJobsToSync.push(nextJob);
-          }
-        }
-
-        return nextJob;
+        return {
+          ...job,
+          active_timer_start: pending.active_timer_start,
+          active_timer_task: pending.active_timer_task,
+          active_timer_drafter_id: pending.active_timer_drafter_id,
+          active_timer_drafter_name: pending.active_timer_drafter_name,
+          active_timer_delegated_task_id: pending.active_timer_delegated_task_id,
+          paused_by_break: pending.paused_by_break,
+          paused_timer_task: pending.paused_timer_task,
+          paused_timer_drafter_id: pending.paused_timer_drafter_id,
+          paused_timer_drafter_name: pending.paused_timer_drafter_name,
+          paused_elapsed_seconds: pending.paused_elapsed_seconds
+        };
       });
-
-      healedJobsToSync.forEach(hj => {
-        saveJobToFirestore(hj).catch(err => console.warn('[Firestore] Zombie job timer heal notice:', hj.job_number, err));
-      });
-
-      return sanitized;
     };
 
     // 3. Connect real-time Firestore synchronization
     const unsubscribeJobs = subscribeToJobs(
       (cloudJobs) => {
         if (cloudJobs) {
-          const sanitizedJobs = reconcileZombieJobTimers(cloudJobs);
-          jobsRef.current = sanitizedJobs;
-          setJobs(sanitizedJobs);
-          saveStoredJobs(sanitizedJobs);
+          const protectedJobs = protectInFlightJobTimers(cloudJobs);
+          jobsRef.current = protectedJobs;
+          setJobs(protectedJobs);
+          saveStoredJobs(protectedJobs);
           setSelectedCustomerId(prev => {
-            if (sanitizedJobs.some(j => j.id === prev)) return prev;
-            return sanitizedJobs[0]?.id || '';
+            if (protectedJobs.some(j => j.id === prev)) return prev;
+            return protectedJobs[0]?.id || '';
           });
 
           // Keep selectedJobForDetail synchronized with cloud updates if open
           setSelectedJobForDetail(prevSelected => {
             if (!prevSelected) return null;
-            return sanitizedJobs.find(j => j.id === prevSelected.id) || null;
+            return protectedJobs.find(j => j.id === prevSelected.id) || null;
           });
         }
       },
@@ -422,12 +364,16 @@ export default function App() {
       }
     });
 
-    const reconcileAndHealDevCards = (rawCloudCards: GregDevProjectCard[], entriesForCheck: GregDevTimeEntry[]) => {
+    // Non-destructive Dev Project Cards cloud reconciliation:
+    // NEVER auto-stops a running timer or writes is_active: false to Firestore from a snapshot listener.
+    const applyCloudDevCards = (rawCloudCards: GregDevProjectCard[], entriesForCheck: GregDevTimeEntry[]) => {
       if (!rawCloudCards || rawCloudCards.length === 0) return;
 
-      // 1. Protect any card whose Start/Stop/Break/ClockOut write is still in-flight (last 8s)
+      // 1. Protect any card whose Start/Stop/Break/ClockOut write is still in-flight (20s window)
       const now = Date.now();
-      const protectedCards = rawCloudCards.map(cloudCard => {
+      const seenIds = new Set<string>();
+      const protectedCards: GregDevProjectCard[] = rawCloudCards.map(cloudCard => {
+        seenIds.add(cloudCard.id);
         const pending = pendingDevCardMutationRef.current[cloudCard.id];
         if (!pending) return cloudCard;
 
@@ -435,7 +381,7 @@ export default function App() {
           Boolean(cloudCard.isActive) === Boolean(pending.card.isActive) &&
           (cloudCard.activeTimerStart || '') === (pending.card.activeTimerStart || '');
 
-        if (cloudMatchesExpected || now - pending.atMs > 8000) {
+        if (cloudMatchesExpected || now - pending.atMs > 20000) {
           delete pendingDevCardMutationRef.current[cloudCard.id];
           return cloudCard;
         }
@@ -448,47 +394,42 @@ export default function App() {
           lastStartedAt: pending.card.lastStartedAt,
           lastStoppedAt: pending.card.lastStoppedAt,
           todaySeconds: pending.card.todaySeconds,
-          totalSeconds: pending.card.totalSeconds
+          totalSeconds: pending.card.totalSeconds,
+          currentNotes: pending.card.currentNotes
         };
       });
 
-      // 2. Combine cloud entries with pre-refresh local entries so zombie detection works regardless of listener arrival order
-      const combinedEntries: GregDevTimeEntry[] = [...entriesForCheck];
-      const seenEntryIds = new Set(entriesForCheck.map(e => e.id));
-      for (const localEntry of initialLocalDevEntriesRef.current) {
-        if (!seenEntryIds.has(localEntry.id)) {
-          combinedEntries.push(localEntry);
+      // Preserve any newly-started or newly-added pending card that Firestore hasn't echoed yet
+      Object.keys(pendingDevCardMutationRef.current).forEach((pendingId) => {
+        const pending = pendingDevCardMutationRef.current[pendingId];
+        if (!pending) return;
+        if (now - pending.atMs > 20000) {
+          delete pendingDevCardMutationRef.current[pendingId];
+          return;
         }
-      }
+        if (!seenIds.has(pendingId)) {
+          protectedCards.push(pending.card);
+        }
+      });
 
-      // 3. Auto-heal zombie/corrupt active cards & deduplicate duplicate projectType docs
-      const { cards: cleanCards, healedCards, duplicateIdsToDelete } = sanitizeAndDedupeDevProjectCards(
+      // 2. Deduplicate duplicate projectType docs cleanly without ever stopping a valid running timer
+      const { cards: cleanCards, duplicateIdsToDelete } = sanitizeAndDedupeDevProjectCards(
         protectedCards,
-        combinedEntries,
-        initialLocalDevCardsRef.current
+        entriesForCheck
       );
 
-      // Persist healed zombie cards back to Firestore permanently so future hard refreshes never resurrect them
-      healedCards.forEach(card => {
-        const orig = protectedCards.find(c => c.id === card.id);
-        const token = `dev:${card.id}:${orig?.activeTimerStart || 'null'}:${Boolean(orig?.isActive)}`;
-        if (!healedZombieTokensRef.current.has(token)) {
-          healedZombieTokensRef.current.add(token);
-          pendingDevCardMutationRef.current[card.id] = { atMs: Date.now(), card };
-          saveSingleDevProjectCardToFirestore(card);
-        }
-      });
-
-      // Delete any duplicate projectType docs from Firestore permanently
-      duplicateIdsToDelete.forEach(dupId => {
-        const token = `dev-dup:${dupId}`;
-        if (!healedZombieTokensRef.current.has(token)) {
-          healedZombieTokensRef.current.add(token);
-          deleteDevProjectCardFromFirestore(dupId).catch(err =>
-            console.warn('[Firestore] Duplicate dev card cleanup notice:', dupId, err)
-          );
-        }
-      });
+      // Only Greg Hyatt's own authenticated session may clean up duplicate dev_project_cards docs
+      if (isUserGregHyatt(authenticatedStaffRef.current) && duplicateIdsToDelete.length > 0) {
+        duplicateIdsToDelete.forEach(dupId => {
+          const token = `dev-dup:${dupId}`;
+          if (!healedZombieTokensRef.current.has(token)) {
+            healedZombieTokensRef.current.add(token);
+            deleteDevProjectCardFromFirestore(dupId).catch(err =>
+              console.warn('[Firestore] Duplicate dev card cleanup notice:', dupId, err)
+            );
+          }
+        });
+      }
 
       devCardsRef.current = cleanCards;
       setDevCards(cleanCards);
@@ -500,18 +441,12 @@ export default function App() {
         devEntriesRef.current = entries;
         setDevEntries(entries);
         saveStoredGregDevEntries(entries);
-
-        // Re-run dev card zombie reconciliation now that cloud entries have arrived
-        if (latestCloudDevCardsRef.current.length > 0) {
-          reconcileAndHealDevCards(latestCloudDevCardsRef.current, entries);
-        }
       }
     });
 
     const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
       if (cards && cards.length > 0) {
-        latestCloudDevCardsRef.current = cards;
-        reconcileAndHealDevCards(cards, devEntriesRef.current);
+        applyCloudDevCards(cards, devEntriesRef.current);
       }
     });
 
@@ -929,6 +864,20 @@ export default function App() {
             return t;
           });
 
+          pendingJobTimerMutationRef.current[j.id] = {
+            atMs: Date.now(),
+            active_timer_start: startTimestamp,
+            active_timer_task: trimmed,
+            active_timer_drafter_id: currentStaff.id,
+            active_timer_drafter_name: currentStaff.name,
+            active_timer_delegated_task_id: matchedTaskId,
+            paused_by_break: false,
+            paused_timer_task: undefined,
+            paused_timer_drafter_id: undefined,
+            paused_timer_drafter_name: undefined,
+            paused_elapsed_seconds: undefined
+          };
+
           return {
             ...j,
             active_timer_start: startTimestamp,
@@ -1042,6 +991,20 @@ export default function App() {
           const totalSec = updatedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
           const totalMins = Math.round(totalSec / 60);
           const totalHours = Number((totalSec / 3600).toFixed(2));
+
+          pendingJobTimerMutationRef.current[j.id] = {
+            atMs: Date.now(),
+            active_timer_start: undefined,
+            active_timer_task: undefined,
+            active_timer_drafter_id: undefined,
+            active_timer_drafter_name: undefined,
+            active_timer_delegated_task_id: undefined,
+            paused_by_break: false,
+            paused_timer_task: undefined,
+            paused_timer_drafter_id: undefined,
+            paused_timer_drafter_name: undefined,
+            paused_elapsed_seconds: undefined
+          };
 
           return {
             ...j,
@@ -1487,7 +1450,8 @@ export default function App() {
               isActive: true,
               isPausedByBreak: false,
               activeTimerStart: nowIso,
-              lastStartedAt: nowIso
+              lastStartedAt: nowIso,
+              lastStoppedAt: undefined
             };
             resumedCardsToSave.push(resumedCard);
             return resumedCard;
@@ -1815,6 +1779,7 @@ export default function App() {
         isPausedByBreak: false,
         activeTimerStart: nowIso,
         lastStartedAt: nowIso,
+        lastStoppedAt: undefined,
         currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
       };
       return startedCard;
@@ -1924,6 +1889,7 @@ export default function App() {
     // Functional local update ONLY touches currentNotes — NEVER touches isActive / activeTimerStart
     setDevCards(prev => {
       const next = prev.map(c => (c.id === cardId ? { ...c, currentNotes: notes } : c));
+      devCardsRef.current = next;
       saveStoredGregDevCards(next);
       return next;
     });
@@ -1945,6 +1911,7 @@ export default function App() {
       return;
     }
     const next = [...prevCards, newCard];
+    pendingDevCardMutationRef.current[newCard.id] = { atMs: Date.now(), card: newCard };
     devCardsRef.current = next;
     setDevCards(next);
     saveStoredGregDevCards(next);
