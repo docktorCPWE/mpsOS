@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Job, JobPhase, EmailTemplate, PinnedLocation, TimeLog, JobComment, StaffUser, AppNotification, DelegatedWorkItem, ChatMessage, TimeCardShift, TimeCardBreak, GregDevProjectCard, GregDevTimeEntry, PayrollEntry, DeliverableFile } from './types';
-import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, isLegacyMockStaffDoc, addDeletedStaffId, removeDeletedStaffId, canViewTeamProfiles, canSwitchStaffAccounts, canUserManageStaff, isStaffCurrentlyOnline, formatRelativeLastSeen } from './data/mockData';
+import { getStoredJobs, saveStoredJobs, resetStoredJobs, getStoredChatMessages, saveStoredChatMessages, STAFF_USERS, INITIAL_NOTIFICATIONS, isMessageRelevantForUser, getStoredStaff, saveStoredStaff, resetStoredStaff, getStoredTimeCards, saveStoredTimeCards, resetStoredTimeCards, isStaffExemptFromClock, getStoredNotifications, saveStoredNotifications, addDismissedNotificationId, canUserCreateJob, getStoredActiveStaffId, saveStoredActiveStaffId, getStoredPayrollEntries, saveStoredPayrollEntries, resetStoredPayrollEntries, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted, isLegacyMockStaffDoc, addDeletedStaffId, removeDeletedStaffId, canViewTeamProfiles, canSwitchStaffAccounts, canUserManageStaff, formatRelativeLastSeen } from './data/mockData';
 import { 
   isUserGregHyatt, 
   getStoredGregDevCards, 
@@ -73,7 +73,7 @@ import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSect
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLocalDateString, isShiftForStaff, formatTimeOnly } from './utils/timeCardExport';
-import { formatSecondsToReadable, formatSecondsToHHMMSS, getStaffActiveWork } from './utils/timeUtils';
+import { formatSecondsToReadable, formatSecondsToHHMMSS, getStaffActiveWork, isStaffOnlineWithActivity } from './utils/timeUtils';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -139,9 +139,13 @@ export default function App() {
   const devCardNotesDebounceMapRef = useRef<Record<string, NodeJS.Timeout>>({});
   const devCardsRef = useRef<GregDevProjectCard[]>(devCards);
   const devEntriesRef = useRef<GregDevTimeEntry[]>(devEntries);
+  const jobsRef = useRef<Job[]>(jobs);
+  const pendingDevCardMutationRef = useRef<Record<string, { atMs: number; card: GregDevProjectCard }>>({});
+  const hasActiveWorkOrShiftRef = useRef<boolean>(false);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
   const staffListRef = useRef<StaffUser[]>(staffList);
   const lastActivityRef = useRef<number>(Date.now());
+  const lastHeartbeatSentAtRef = useRef<number>(0);
   const sessionLoginAtRef = useRef<number>(Date.now());
   const initialForceLogoutAtRef = useRef<string | null | undefined>(undefined);
 
@@ -150,12 +154,30 @@ export default function App() {
   }, [staffList]);
 
   useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  useEffect(() => {
     devCardsRef.current = devCards;
   }, [devCards]);
 
   useEffect(() => {
     devEntriesRef.current = devEntries;
   }, [devEntries]);
+
+  useEffect(() => {
+    const me = authenticatedStaff;
+    if (!me) {
+      hasActiveWorkOrShiftRef.current = false;
+      return;
+    }
+    const hasShift = timeCards.some(
+      tc => isShiftForStaff(tc, me) && (tc.status === 'clocked_in' || tc.status === 'on_break')
+    );
+    const work = getStaffActiveWork(me, jobs, devCards, Date.now());
+    const hasTimer = Boolean(work.activeItem && !work.activeItem.isPaused);
+    hasActiveWorkOrShiftRef.current = hasShift || hasTimer;
+  }, [authenticatedStaff, timeCards, jobs, devCards]);
 
   const handleOpenJobDetail = (job: Job, options?: { initialTab?: 'overview' | 'canvas' | 'deliverables' | 'comments' | 'audit' | 'time'; highlightCommentId?: string }) => {
     setSelectedJobForDetail(job);
@@ -185,6 +207,7 @@ export default function App() {
   useEffect(() => {
     // 1. Immediate local fallback load
     const loaded = getStoredJobs();
+    jobsRef.current = loaded;
     setJobs(loaded);
     if (loaded.length > 0) {
       setSelectedCustomerId(loaded[0].id);
@@ -210,6 +233,7 @@ export default function App() {
     const unsubscribeJobs = subscribeToJobs(
       (cloudJobs) => {
         if (cloudJobs) {
+          jobsRef.current = cloudJobs;
           setJobs(cloudJobs);
           saveStoredJobs(cloudJobs);
           setSelectedCustomerId(prev => {
@@ -295,9 +319,36 @@ export default function App() {
 
     const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
       if (cards && cards.length > 0) {
-        // Cloud Firestore is authoritative for running/paused timer state so desktop & phone stay in sync
-        setDevCards(cards);
-        saveStoredGregDevCards(cards);
+        // Protect any card whose Start/Stop write is still in-flight (last 8s) from an older cloud snapshot
+        const now = Date.now();
+        const reconciled = cards.map(cloudCard => {
+          const pending = pendingDevCardMutationRef.current[cloudCard.id];
+          if (!pending) return cloudCard;
+
+          const cloudMatchesExpected =
+            Boolean(cloudCard.isActive) === Boolean(pending.card.isActive) &&
+            (cloudCard.activeTimerStart || '') === (pending.card.activeTimerStart || '');
+
+          if (cloudMatchesExpected || now - pending.atMs > 8000) {
+            delete pendingDevCardMutationRef.current[cloudCard.id];
+            return cloudCard;
+          }
+
+          return {
+            ...cloudCard,
+            isActive: pending.card.isActive,
+            isPausedByBreak: pending.card.isPausedByBreak,
+            activeTimerStart: pending.card.activeTimerStart,
+            lastStartedAt: pending.card.lastStartedAt,
+            lastStoppedAt: pending.card.lastStoppedAt,
+            todaySeconds: pending.card.todaySeconds,
+            totalSeconds: pending.card.totalSeconds
+          };
+        });
+
+        devCardsRef.current = reconciled;
+        setDevCards(reconciled);
+        saveStoredGregDevCards(reconciled);
       }
     });
 
@@ -442,7 +493,7 @@ export default function App() {
     }
   }, [staffList, authUser?.uid, authUser?.emailVerified, authenticatedStaff?.id, authenticatedStaff?.email]);
 
-  // Real-time online presence heartbeat + clean offline on tab close + inactivity auto-sign-out (8h)
+  // Real-time online presence heartbeat + safe pagehide + inactivity auto-sign-out (8h)
   useEffect(() => {
     const staffId = authenticatedStaff?.id;
     if (!authUser || !authUser.emailVerified || !staffId) return;
@@ -451,16 +502,22 @@ export default function App() {
     lastActivityRef.current = Date.now();
 
     const sendHeartbeat = () => {
+      lastHeartbeatSentAtRef.current = Date.now();
       updateStaffPresenceInFirestore(staffId, true).catch(() => {});
     };
 
     const recordActivity = () => {
-      lastActivityRef.current = Date.now();
+      const now = Date.now();
+      lastActivityRef.current = now;
+      // If background throttling delayed setInterval, immediately refresh presence on any interaction
+      if (now - lastHeartbeatSentAtRef.current > 45 * 1000) {
+        sendHeartbeat();
+      }
     };
 
     sendHeartbeat();
     const heartbeatInterval = setInterval(() => {
-      if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
+      if (!hasActiveWorkOrShiftRef.current && Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
         console.log('[Auth] Signing out due to extended inactivity.');
         logoutUser(staffId).catch(() => {});
         setAuthUser(null);
@@ -472,7 +529,7 @@ export default function App() {
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
+        if (!hasActiveWorkOrShiftRef.current && Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
           logoutUser(staffId).catch(() => {});
           setAuthUser(null);
           setAuthenticatedStaff(null);
@@ -482,7 +539,11 @@ export default function App() {
       }
     };
 
-    const handlePageClose = () => {
+    const handlePageClose = (event: Event) => {
+      // Never falsely flip a user offline when mobile/desktop merely backgrounds a page (bfcache)
+      // or when the user is currently clocked in / actively running a timer.
+      if ((event as PageTransitionEvent)?.persisted) return;
+      if (hasActiveWorkOrShiftRef.current) return;
       updateStaffPresenceInFirestore(staffId, false).catch(() => {});
     };
 
@@ -527,61 +588,57 @@ export default function App() {
     );
   };
 
-  // Sync jobs state to localStorage and Firestore whenever modified
+  // Sync jobs state to localStorage and Firestore whenever modified (synchronous ref computation avoids React 18 batching races)
   const updateJobsState = (
     newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
     specificJobId?: string | string[]
   ) => {
-    let computedNextJobs: Job[] = [];
+    const prevJobs = jobsRef.current;
+    const nextJobs = typeof newJobsOrUpdater === 'function'
+      ? newJobsOrUpdater(prevJobs)
+      : newJobsOrUpdater;
 
-    setJobs(prevJobs => {
-      const nextJobs = typeof newJobsOrUpdater === 'function'
-        ? newJobsOrUpdater(prevJobs)
-        : newJobsOrUpdater;
+    jobsRef.current = nextJobs;
+    setJobs(nextJobs);
+    saveStoredJobs(nextJobs);
 
-      computedNextJobs = nextJobs;
-      saveStoredJobs(nextJobs);
-
-      // Sync only modified job(s) to Firestore to avoid redundant concurrent write storms
-      const jobsToSync = Array.isArray(specificJobId)
-        ? nextJobs.filter(j => specificJobId.some(id => isTargetJob(j, id)))
-        : specificJobId
-        ? nextJobs.filter(j => isTargetJob(j, specificJobId))
-        : nextJobs.filter(newJob => {
-            const oldJob = prevJobs.find(j => j.id === newJob.id);
-            if (!oldJob) return true;
-            return JSON.stringify(newJob) !== JSON.stringify(oldJob);
-          });
-
-      jobsToSync.forEach(job => {
-        saveJobToFirestore(job).catch(err => {
-          console.warn('[Firestore] Sync warning for job:', job.job_number, err);
+    // Sync only modified job(s) to Firestore immediately & deterministically
+    const jobsToSync = Array.isArray(specificJobId)
+      ? nextJobs.filter(j => specificJobId.some(id => isTargetJob(j, id)))
+      : specificJobId
+      ? nextJobs.filter(j => isTargetJob(j, specificJobId))
+      : nextJobs.filter(newJob => {
+          const oldJob = prevJobs.find(j => j.id === newJob.id);
+          if (!oldJob) return true;
+          return JSON.stringify(newJob) !== JSON.stringify(oldJob);
         });
-      });
 
-      return nextJobs;
+    jobsToSync.forEach(job => {
+      saveJobToFirestore(job).catch(err => {
+        console.warn('[Firestore] Sync warning for job:', job.job_number, err);
+      });
     });
 
-    // Safely update detail and modal references OUTSIDE the setJobs state updater!
+    // Safely update detail and modal references with the fresh computed list
     setSelectedJobForDetail(prev => {
       if (!prev) return null;
-      return computedNextJobs.find(j => j.id === prev.id) || null;
+      return nextJobs.find(j => j.id === prev.id) || null;
     });
 
     setJobToDelegate(prev => {
       if (!prev) return null;
-      return computedNextJobs.find(j => j.id === prev.id) || null;
+      return nextJobs.find(j => j.id === prev.id) || null;
     });
 
     setTimerPromptJob(prev => {
       if (!prev) return null;
-      const match = computedNextJobs.find(j => j.id === prev.job.id);
+      const match = nextJobs.find(j => j.id === prev.job.id);
       return match ? { ...prev, job: match } : null;
     });
 
     setStopTimerPromptJob(prev => {
       if (!prev) return null;
-      const match = computedNextJobs.find(j => j.id === prev.job.id);
+      const match = nextJobs.find(j => j.id === prev.job.id);
       return match ? { ...prev, job: match } : null;
     });
   };
@@ -738,6 +795,10 @@ export default function App() {
       }),
       jobId
     );
+
+    if (authenticatedStaff?.id) {
+      updateStaffPresenceInFirestore(authenticatedStaff.id, true).catch(() => {});
+    }
 
     setTimerPromptJob(null);
   };
@@ -950,6 +1011,9 @@ export default function App() {
     setTimeCards(updated);
     saveStoredTimeCards(updated);
     saveTimeCardToFirestore(newShift).catch(err => console.warn('[Firestore] Clock-in sync error:', err));
+    if (authenticatedStaff?.id) {
+      updateStaffPresenceInFirestore(authenticatedStaff.id, true).catch(() => {});
+    }
   };
 
   const handleStartBreak = () => {
@@ -1552,7 +1616,9 @@ export default function App() {
     });
   };
 
-  // Atomic single-card Greg Dev Project Card handlers (prevents stale closures or notes edits from ever stopping a running timer)
+  // Atomic single-card Greg Dev Project Card handlers
+  // CRITICAL: Compute the updated card synchronously BEFORE setDevCards so React 18 batching
+  // NEVER skips saveSingleDevProjectCardToFirestore!
   const handleStartDevCardTimer = (cardId: string, notesOverride?: string) => {
     // Cancel any pending notes debounce for this card so it cannot race with start
     if (devCardNotesDebounceMapRef.current[cardId]) {
@@ -1561,27 +1627,32 @@ export default function App() {
     }
 
     const nowIso = new Date().toISOString();
+    const prevCards = devCardsRef.current;
     let startedCard: GregDevProjectCard | null = null;
 
-    setDevCards(prev => {
-      const next = prev.map(c => {
-        if (c.id !== cardId) return c;
-        startedCard = {
-          ...c,
-          isActive: true,
-          isPausedByBreak: false,
-          activeTimerStart: nowIso,
-          lastStartedAt: nowIso,
-          currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
-        };
-        return startedCard;
-      });
-      saveStoredGregDevCards(next);
-      return next;
+    const next = prevCards.map(c => {
+      if (c.id !== cardId) return c;
+      startedCard = {
+        ...c,
+        isActive: true,
+        isPausedByBreak: false,
+        activeTimerStart: nowIso,
+        lastStartedAt: nowIso,
+        currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
+      };
+      return startedCard;
     });
 
-    if (startedCard) {
-      saveSingleDevProjectCardToFirestore(startedCard);
+    if (!startedCard) return;
+
+    pendingDevCardMutationRef.current[cardId] = { atMs: Date.now(), card: startedCard };
+    devCardsRef.current = next;
+    setDevCards(next);
+    saveStoredGregDevCards(next);
+    saveSingleDevProjectCardToFirestore(startedCard);
+
+    if (authenticatedStaff?.id) {
+      updateStaffPresenceInFirestore(authenticatedStaff.id, true).catch(() => {});
     }
   };
 
@@ -1591,7 +1662,8 @@ export default function App() {
       delete devCardNotesDebounceMapRef.current[cardId];
     }
 
-    const currentCard = devCardsRef.current.find(c => c.id === cardId);
+    const prevCards = devCardsRef.current;
+    const currentCard = prevCards.find(c => c.id === cardId);
     if (!currentCard || !currentCard.isActive || !currentCard.activeTimerStart) return 0;
 
     const startMs = new Date(currentCard.activeTimerStart).getTime();
@@ -1620,38 +1692,43 @@ export default function App() {
     };
 
     const updatedEntries = [newEntry, ...devEntriesRef.current];
+    devEntriesRef.current = updatedEntries;
     setDevEntries(updatedEntries);
     saveStoredGregDevEntries(updatedEntries);
     saveDevTimeEntryToFirestore(newEntry);
 
     let stoppedCard: GregDevProjectCard | null = null;
-    setDevCards(prev => {
-      const next = prev.map(c => {
-        if (c.id !== cardId) return c;
-        const cardTodaySec = updatedEntries
-          .filter(e => e.projectType === c.projectType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
-          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
-        const cardTotalSec = updatedEntries
-          .filter(e => e.projectType === c.projectType)
-          .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
-        stoppedCard = {
-          ...c,
-          isActive: false,
-          isPausedByBreak: false,
-          activeTimerStart: undefined,
-          todaySeconds: cardTodaySec,
-          totalSeconds: Math.max(c.totalSeconds || 0, cardTotalSec),
-          lastStoppedAt: new Date(endMs).toISOString(),
-          currentNotes: noteToLog
-        };
-        return stoppedCard;
-      });
-      saveStoredGregDevCards(next);
-      return next;
+    const next = prevCards.map(c => {
+      if (c.id !== cardId) return c;
+      const cardTodaySec = updatedEntries
+        .filter(e => e.projectType === c.projectType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
+        .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+      const cardTotalSec = updatedEntries
+        .filter(e => e.projectType === c.projectType)
+        .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
+      stoppedCard = {
+        ...c,
+        isActive: false,
+        isPausedByBreak: false,
+        activeTimerStart: undefined,
+        todaySeconds: cardTodaySec,
+        totalSeconds: Math.max(c.totalSeconds || 0, cardTotalSec),
+        lastStoppedAt: new Date(endMs).toISOString(),
+        currentNotes: noteToLog
+      };
+      return stoppedCard;
     });
 
     if (stoppedCard) {
+      pendingDevCardMutationRef.current[cardId] = { atMs: Date.now(), card: stoppedCard };
+      devCardsRef.current = next;
+      setDevCards(next);
+      saveStoredGregDevCards(next);
       saveSingleDevProjectCardToFirestore(stoppedCard);
+    }
+
+    if (authenticatedStaff?.id) {
+      updateStaffPresenceInFirestore(authenticatedStaff.id, true).catch(() => {});
     }
 
     return durationSeconds;
@@ -2209,57 +2286,38 @@ export default function App() {
       timestamp: new Date().toISOString()
     };
 
-    const taskDeliverables: DeliverableFile[] = (newTask.attachments || []).map((att, i) => {
-      let category: DeliverableFile['category'] = 'Floor Plan';
-      if (newTask.category === 'Exterior Elevations') category = 'Exterior Elevations';
-      else if (newTask.category === 'Foundation Plan') category = 'Foundation Plan';
-      else if (newTask.category === 'Electrical & Reflected Ceiling') category = 'Electrical & Reflected Ceiling';
-      else if (newTask.category === '3D Render') category = '3D Render';
-      else if (att.name.toLowerCase().endsWith('.dwg') || att.name.toLowerCase().endsWith('.dxf')) category = 'CAD / DWG File';
-      else if (att.name.toLowerCase().endsWith('.pdf')) category = 'PDF Specs';
-
-      return {
-        id: `deliv-task-${Date.now()}-${i}`,
-        title: `${newTask.componentTitle}: ${att.name}`,
-        category,
-        version: 'v1.0 (Task Reference)',
-        uploadedAt: new Date().toISOString(),
-        fileSize: att.size,
-        previewType: (category === 'CAD / DWG File' ? 'cad_file' : (category === '3D Render' || att.name.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/)) ? 'render_image' : 'pdf_spec') as any,
-        fileUrl: att.url,
-        fileName: att.name,
-        changeNotes: `Attached for delegated component "${newTask.componentTitle}" (${newTask.assignedTo})`,
-        authorDrafter: newTask.delegatedBy
-      };
-    });
-
-    const updatedJobs = jobs.map(j => {
-      if (j.id === newTask.jobId) {
-        return {
-          ...j,
-          delegated_tasks: [newTask, ...(j.delegated_tasks || [])],
-          comments: [...j.comments, delegationComment],
-          audit_logs: [
-            {
-              id: `a-${Date.now()}`,
-              action: 'Task Delegated',
-              performedBy: newTask.delegatedBy,
-              timestamp: new Date().toISOString(),
-              details: `Delegated "${newTask.componentTitle}" to ${newTask.assignedTo} with ${(newTask.attachments || []).length} attachments.`
-            },
-            ...j.audit_logs
-          ]
-        };
-      }
-      return j;
-    });
-
-    updateJobsState(updatedJobs, newTask.jobId);
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id === newTask.jobId) {
+            return {
+              ...j,
+              delegated_tasks: [newTask, ...(j.delegated_tasks || [])],
+              comments: [...j.comments, delegationComment],
+              audit_logs: [
+                {
+                  id: `a-${Date.now()}`,
+                  action: 'Task Delegated',
+                  performedBy: newTask.delegatedBy,
+                  timestamp: new Date().toISOString(),
+                  details: `Delegated "${newTask.componentTitle}" to ${newTask.assignedTo} with ${(newTask.attachments || []).length} attachments.`
+                },
+                ...j.audit_logs
+              ]
+            };
+          }
+          return j;
+        }),
+      newTask.jobId
+    );
 
     // Create Notification for the assigned drafter
     if (notifyDrafter) {
-      const assignedStaff = staffList.find(s => s.name.toLowerCase() === newTask.assignedTo.toLowerCase() || s.name.toLowerCase().includes(newTask.assignedTo.toLowerCase())) ||
-                            STAFF_USERS.find(s => s.name === newTask.assignedTo);
+      const targetLower = newTask.assignedTo.trim().toLowerCase();
+      const assignedStaff =
+        staffList.find(s => s.name.trim().toLowerCase() === targetLower) ||
+        staffList.find(s => s.name.trim().toLowerCase().includes(targetLower)) ||
+        STAFF_USERS.find(s => s.name.trim().toLowerCase() === targetLower);
       const newNotification: AppNotification = {
         id: `notif-${Date.now()}`,
         recipientName: newTask.assignedTo,
@@ -2278,6 +2336,72 @@ export default function App() {
     }
 
     setJobToDelegate(null);
+  };
+
+  // 7b. Handle Reassigning an Existing Delegated Task to Another Drafter
+  const handleReassignDelegatedTask = (jobId: string, taskId: string, newAssigneeName: string) => {
+    const cleanAssignee = newAssigneeName.trim();
+    if (!cleanAssignee) return;
+
+    const targetJob = jobs.find(
+      j =>
+        (j.delegated_tasks && j.delegated_tasks.some(t => t.id === taskId)) ||
+        (jobId && (j.id === jobId || isTargetJob(j, jobId)))
+    );
+    if (!targetJob) return;
+
+    const existingTask = (targetJob.delegated_tasks || []).find(t => t.id === taskId);
+    if (!existingTask || existingTask.assignedTo.trim().toLowerCase() === cleanAssignee.toLowerCase()) return;
+
+    const targetLower = cleanAssignee.toLowerCase();
+    const assignedStaff =
+      staffList.find(s => s.name.trim().toLowerCase() === targetLower) ||
+      staffList.find(s => s.name.trim().toLowerCase().includes(targetLower)) ||
+      STAFF_USERS.find(s => s.name.trim().toLowerCase() === targetLower);
+
+    const assignedEmail =
+      assignedStaff?.email || `${cleanAssignee.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`;
+
+    updateJobsState(
+      prevJobs =>
+        prevJobs.map(j => {
+          if (j.id !== targetJob.id || !j.delegated_tasks) return j;
+          return {
+            ...j,
+            delegated_tasks: j.delegated_tasks.map(t =>
+              t.id === taskId
+                ? { ...t, assignedTo: cleanAssignee, assignedToEmail: assignedEmail }
+                : t
+            ),
+            audit_logs: [
+              {
+                id: `a-${Date.now()}`,
+                action: 'Delegated Task Reassigned',
+                performedBy: currentStaff.name,
+                timestamp: new Date().toISOString(),
+                details: `Reassigned "${existingTask.componentTitle}" from ${existingTask.assignedTo} to ${cleanAssignee}.`
+              },
+              ...j.audit_logs
+            ]
+          };
+        }),
+      targetJob.id
+    );
+
+    const reassignNotif: AppNotification = {
+      id: `notif-${Date.now()}`,
+      recipientName: cleanAssignee,
+      recipientEmail: assignedEmail,
+      senderName: currentStaff.name,
+      title: `Component Reassigned to You: ${existingTask.componentTitle}`,
+      message: `${currentStaff.name} reassigned "${existingTask.componentTitle}" on Job #${targetJob.job_number} (${targetJob.customer_name}) to you.`,
+      jobId: targetJob.id,
+      jobNumber: targetJob.job_number,
+      timestamp: new Date().toISOString(),
+      read: false,
+      type: 'delegation'
+    };
+    updateNotificationsState(prev => [reassignNotif, ...prev]);
   };
 
   // 8. Handle Updating Delegated Task Status
@@ -3115,7 +3239,7 @@ export default function App() {
 
       {/* Live Account Inspection Banner when Greg, Kyle, Jason, or Drew switches into another drafter's account */}
       {authenticatedStaff && currentStaff.id !== authenticatedStaff.id && canSwitchStaffAccounts(authenticatedStaff) && (() => {
-        const inspectedOnline = isStaffCurrentlyOnline(currentStaff, nowTimestamp);
+        const inspectedOnline = isStaffOnlineWithActivity(currentStaff, jobs, timeCards, devCards, nowTimestamp);
         const inspectedShift = timeCards.find(
           tc => isShiftForStaff(tc, currentStaff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
         );
@@ -3198,7 +3322,7 @@ export default function App() {
                 >
                   {switchableStaff.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.name}{s.id === authenticatedStaff.id ? ' (My Account)' : isStaffCurrentlyOnline(s, nowTimestamp) ? ' ● Online' : ' (Offline)'}
+                      {s.name}{s.id === authenticatedStaff.id ? ' (My Account)' : isStaffOnlineWithActivity(s, jobs, timeCards, devCards, nowTimestamp) ? ' ● Online' : ' (Offline)'}
                     </option>
                   ))}
                 </select>
@@ -3287,6 +3411,7 @@ export default function App() {
               onApproveTaskReview={handleApproveTaskReview}
               onRequestTaskRevision={handleRequestTaskRevision}
               onDeleteDelegatedTask={handleDeleteDelegatedTask}
+              onReassignDelegatedTask={handleReassignDelegatedTask}
               onDeleteJob={handleDeleteJob}
               onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
               onSaveDefaultLayout={handleUpdatePreferredLayout}

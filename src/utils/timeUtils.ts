@@ -1,4 +1,6 @@
-import { Job, DelegatedWorkItem, StaffUser, GregDevProjectCard } from '../types';
+import { Job, DelegatedWorkItem, StaffUser, GregDevProjectCard, TimeCardShift } from '../types';
+import { isStaffCurrentlyOnline } from '../data/mockData';
+import { isShiftForStaff } from './timeCardExport';
 
 /**
  * Calculate total seconds worked on a specific delegated work item.
@@ -400,11 +402,11 @@ export function getStaffActiveWork(
 
     // Check active running job-level timer for this staff member
     if (!runningJobItem && job.active_timer_start) {
-      const isRunningForStaff = job.active_timer_drafter_id
-        ? job.active_timer_drafter_id === staff.id
-        : job.active_timer_drafter_name
-        ? matchesStaffName(job.active_timer_drafter_name, staff)
-        : matchesStaffName(job.assigned_drafter, staff);
+      const hasExplicitDrafter = Boolean(job.active_timer_drafter_id || job.active_timer_drafter_name);
+      const isRunningForStaff =
+        (Boolean(job.active_timer_drafter_id) && job.active_timer_drafter_id === staff.id) ||
+        (Boolean(job.active_timer_drafter_name) && matchesStaffName(job.active_timer_drafter_name, staff)) ||
+        (!hasExplicitDrafter && matchesStaffName(job.assigned_drafter, staff));
 
       if (isRunningForStaff) {
         const startMs = new Date(job.active_timer_start).getTime();
@@ -423,11 +425,11 @@ export function getStaffActiveWork(
 
     // Check paused-on-break timer for this staff member
     if (!pausedJobItem && job.paused_by_break) {
-      const isPausedForStaff = job.paused_timer_drafter_id
-        ? job.paused_timer_drafter_id === staff.id
-        : job.paused_timer_drafter_name
-        ? matchesStaffName(job.paused_timer_drafter_name, staff)
-        : matchesStaffName(job.assigned_drafter, staff);
+      const hasExplicitPausedDrafter = Boolean(job.paused_timer_drafter_id || job.paused_timer_drafter_name);
+      const isPausedForStaff =
+        (Boolean(job.paused_timer_drafter_id) && job.paused_timer_drafter_id === staff.id) ||
+        (Boolean(job.paused_timer_drafter_name) && matchesStaffName(job.paused_timer_drafter_name, staff)) ||
+        (!hasExplicitPausedDrafter && matchesStaffName(job.assigned_drafter, staff));
 
       if (isPausedForStaff) {
         pausedJobItem = {
@@ -469,4 +471,30 @@ export function getStaffActiveWork(
     assignedJobsCount,
     openTasksCount
   };
+}
+
+/**
+ * Unified real-time online check combining Firestore presence heartbeat, live running timers,
+ * and active clocked-in/on-break shifts so working drafters never falsely show Offline when
+ * their browser tab is backgrounded behind CAD software.
+ */
+export function isStaffOnlineWithActivity(
+  staff: StaffUser | null | undefined,
+  jobs: Job[],
+  timeCards: TimeCardShift[],
+  devCards: GregDevProjectCard[] = [],
+  nowTimestamp: number = Date.now()
+): boolean {
+  if (!staff) return false;
+  const activeShift = timeCards.find(
+    tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
+  );
+  const work = getStaffActiveWork(staff, jobs, devCards, nowTimestamp);
+  const hasActiveTimer = Boolean(work.activeItem && !work.activeItem.isPaused);
+  return isStaffCurrentlyOnline(staff, nowTimestamp, {
+    hasActiveTimer,
+    activeTimerStart: work.activeItem?.startTime,
+    hasActiveShift: Boolean(activeShift),
+    activeShiftStart: activeShift?.clockInTime
+  });
 }

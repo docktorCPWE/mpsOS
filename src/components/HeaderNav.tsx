@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Compass, Users, LayoutDashboard, UserCheck, Plus, RefreshCw, AlertTriangle, Layers, Ruler, Building2, DollarSign, Bell, Lock, ShieldCheck, Share2, Check, CheckCheck, Trash2, ExternalLink, X, Mail, MessageSquare, AtSign, Database, LogOut, ChevronDown } from 'lucide-react';
 import { Job, StaffUser, AppNotification, TimeCardShift, GregDevProjectCard } from '../types';
-import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, canSwitchStaffAccounts, isJobArchived, canUserManageStaff, canUserCreateJob, isStaffDeleted, isLegacyMockStaffDoc, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
+import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, canSwitchStaffAccounts, isJobArchived, canUserManageStaff, canUserCreateJob, isStaffDeleted, isLegacyMockStaffDoc, formatRelativeLastSeen } from '../data/mockData';
 import { formatTimeOnly, isShiftForStaff } from '../utils/timeCardExport';
-import { getStaffActiveWork, formatSecondsToHHMMSS } from '../utils/timeUtils';
+import { getStaffActiveWork, formatSecondsToHHMMSS, isStaffOnlineWithActivity } from '../utils/timeUtils';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderNavProps {
@@ -124,7 +124,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const visibleStaffRoster = (staffList && staffList.length > 0)
     ? staffList.filter(s => !isLegacyMockStaffDoc(s))
     : STAFF_USERS.filter(s => !isStaffDeleted(s));
-  const onlineStaffCount = visibleStaffRoster.filter(s => isStaffCurrentlyOnline(s, nowTimestamp)).length;
+  const onlineStaffCount = visibleStaffRoster.filter(s => isStaffOnlineWithActivity(s, jobs, timeCards, devCards, nowTimestamp)).length;
 
   const isAuthorizedForAdmin = currentStaff.canAccessFinancials || currentStaff.role === 'drafter_lead' || currentStaff.name === 'Kyle' || currentStaff.canAccessPayroll;
 
@@ -291,7 +291,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     {currentStaff.name.toLowerCase().includes('kyle') && waitingForKyleCount > 0 && (
                       <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900 animate-ping"></span>
                     )}
-                    {isStaffCurrentlyOnline(currentStaff, nowTimestamp) && (
+                    {isStaffOnlineWithActivity(currentStaff, jobs, timeCards, devCards, nowTimestamp) && (
                       <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900" title="Online"></span>
                     )}
                   </div>
@@ -383,15 +383,15 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                           const aWork = getStaffActiveWork(a, jobs, devCards, nowTimestamp).activeItem && !getStaffActiveWork(a, jobs, devCards, nowTimestamp).activeItem?.isPaused ? 1 : 0;
                           const bWork = getStaffActiveWork(b, jobs, devCards, nowTimestamp).activeItem && !getStaffActiveWork(b, jobs, devCards, nowTimestamp).activeItem?.isPaused ? 1 : 0;
                           if (aWork !== bWork) return bWork - aWork;
-                          const aOnline = isStaffCurrentlyOnline(a, nowTimestamp) ? 1 : 0;
-                          const bOnline = isStaffCurrentlyOnline(b, nowTimestamp) ? 1 : 0;
+                          const aOnline = isStaffOnlineWithActivity(a, jobs, timeCards, devCards, nowTimestamp) ? 1 : 0;
+                          const bOnline = isStaffOnlineWithActivity(b, jobs, timeCards, devCards, nowTimestamp) ? 1 : 0;
                           if (aOnline !== bOnline) return bOnline - aOnline;
                           return a.name.localeCompare(b.name);
                         })
                         .map((staff) => {
                         const isCurrent = staff.id === currentStaff.id;
                         const isSelf = Boolean(authenticatedStaff && staff.id === authenticatedStaff.id);
-                        const isOnline = isStaffCurrentlyOnline(staff, nowTimestamp);
+                        const isOnline = isStaffOnlineWithActivity(staff, jobs, timeCards, devCards, nowTimestamp);
                         const activeShift = timeCards.find(
                           tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
                         );

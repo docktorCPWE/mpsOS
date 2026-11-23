@@ -33,9 +33,9 @@ import {
   Briefcase
 } from 'lucide-react';
 import { StaffUser, StaffDepartment, Job, TimeCardShift, GregDevProjectCard } from '../types';
-import { isLegacyMockStaffDoc, isStaffCurrentlyOnline, formatRelativeLastSeen } from '../data/mockData';
+import { isLegacyMockStaffDoc, formatRelativeLastSeen } from '../data/mockData';
 import { isShiftForStaff } from '../utils/timeCardExport';
-import { getStaffActiveWork, formatSecondsToHHMMSS } from '../utils/timeUtils';
+import { getStaffActiveWork, formatSecondsToHHMMSS, isStaffOnlineWithActivity } from '../utils/timeUtils';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -628,7 +628,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
               {filteredStaff.map((staff) => {
                 const isOwner = staff.name.toLowerCase().includes('greg hyatt');
                 const isCurrent = staff.id === currentStaff.id;
-                const isOnline = isStaffCurrentlyOnline(staff, nowTimestamp);
+                const isOnline = isStaffOnlineWithActivity(staff, jobs, timeCards, devCards, nowTimestamp);
                 const activeShift = timeCards.find(
                   tc => isShiftForStaff(tc, staff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
                 );

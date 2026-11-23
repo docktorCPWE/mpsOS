@@ -25,6 +25,7 @@ interface DrafterDashboardProps {
   onApproveTaskReview?: (jobId: string, taskId: string, reviewNotes?: string) => void;
   onRequestTaskRevision?: (jobId: string, taskId: string, feedbackNotes: string) => void;
   onDeleteDelegatedTask?: (jobId: string, taskId: string) => void;
+  onReassignDelegatedTask?: (jobId: string, taskId: string, newAssigneeName: string) => void;
   onDeleteJob?: (jobId: string) => void;
   onOpenKyleInbox?: () => void;
   onSaveDefaultLayout?: (staffId: string, layout: 'board' | 'grid' | 'list' | 'table') => void;
@@ -71,6 +72,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   onApproveTaskReview,
   onRequestTaskRevision,
   onDeleteDelegatedTask,
+  onReassignDelegatedTask,
   onDeleteJob,
   onOpenKyleInbox,
   onSaveDefaultLayout,
@@ -1142,8 +1144,12 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               }
 
               if (delegationFilter === 'my_assigned') {
-                return task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase()) ||
-                       currentStaff.name.toLowerCase().includes(task.assignedTo.toLowerCase());
+                const assignedLower = (task.assignedTo || '').trim().toLowerCase();
+                const staffLower = (currentStaff.name || '').trim().toLowerCase();
+                if (!assignedLower || !staffLower) return false;
+                return assignedLower === staffLower ||
+                       assignedLower.includes(staffLower) ||
+                       staffLower.includes(assignedLower);
               }
               if (delegationFilter === 'pending') {
                 return task.status !== 'Completed' || !task.isReviewed;
@@ -1159,8 +1165,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
               const myName = currentStaff.name.trim().toLowerCase();
 
               if (delegatedSortBy === 'my_assigned_first') {
-                const aIsMine = drafterA.includes(myName) ? 0 : 1;
-                const bIsMine = drafterB.includes(myName) ? 0 : 1;
+                const aIsMine = drafterA && (drafterA.includes(myName) || myName.includes(drafterA)) ? 0 : 1;
+                const bIsMine = drafterB && (drafterB.includes(myName) || myName.includes(drafterB)) ? 0 : 1;
                 if (aIsMine !== bIsMine) return aIsMine - bIsMine;
                 return drafterA.localeCompare(drafterB);
               }
@@ -1175,7 +1181,13 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             const renderDelegatedCard = (task: DelegatedWorkItem) => {
               const parentJob = resolveParentJob(task);
               const jobCustomerName = task.customerName || parentJob?.customer_name || parentJob?.project_name || '';
-              const isAssignedToMe = task.assignedTo.toLowerCase().includes(currentStaff.name.toLowerCase());
+              const assignedLower = (task.assignedTo || '').trim().toLowerCase();
+              const staffLower = (currentStaff.name || '').trim().toLowerCase();
+              const isAssignedToMe = Boolean(
+                assignedLower &&
+                staffLower &&
+                (assignedLower === staffLower || assignedLower.includes(staffLower) || staffLower.includes(assignedLower))
+              );
               const delegatorName = task.delegatedBy || 'Kyle';
               const isWaitingReview = (task.status === 'Completed' || task.status === 'Under Review' || Boolean(task.completedAt)) && !task.isReviewed;
               const isRevisionReq = task.status === 'Revision Requested' || Boolean(task.revisionRequested);
@@ -1296,7 +1308,30 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                     {/* Delegated Metadata Line */}
                     <div className="text-[11px] text-slate-600 flex items-center gap-2 flex-wrap font-mono pt-0.5">
                       <span>Delegated by: <strong className="text-slate-800">{task.delegatedBy}</strong></span>
-                      <span>• Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong></span>
+                      {canDelegate && onReassignDelegatedTask && !isTaskFinished ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span>• Assigned to:</span>
+                          <select
+                            value={task.assignedTo}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              onReassignDelegatedTask(parentJob?.id || task.jobId, task.id, e.target.value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded px-1.5 py-0.5 text-[11px] font-bold text-indigo-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-sans"
+                            title="Reassign this delegated component to another drafter"
+                          >
+                            {!effectiveStaff.some(s => s.name === task.assignedTo) && (
+                              <option value={task.assignedTo}>{task.assignedTo}</option>
+                            )}
+                            {effectiveStaff.map(s => (
+                              <option key={s.id} value={s.name}>{s.name}</option>
+                            ))}
+                          </select>
+                        </span>
+                      ) : (
+                        <span>• Assigned to: <strong className="text-slate-800">{task.assignedTo}</strong></span>
+                      )}
                       {task.delegatedAt && (
                         <span className="inline-flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
                           <Calendar className="w-3 h-3 text-indigo-600 shrink-0" />

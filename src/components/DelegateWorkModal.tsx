@@ -73,17 +73,38 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
     s => !drafters.some(d => d.id === s.id)
   );
 
-  // Determine initial drafter assignment
+  // Helper to check if a staff member matches the current delegator
+  const isSameStaffMember = (staff: StaffUser, other: StaffUser) => {
+    if (staff.id && other.id && staff.id === other.id) return true;
+    if (staff.email && other.email && staff.email.toLowerCase() === other.email.toLowerCase()) return true;
+    return staff.name.trim().toLowerCase() === other.name.trim().toLowerCase();
+  };
+
+  // Determine initial drafter assignment (preferring a drafter other than the delegator when delegating from one's own job)
   const getInitialDrafter = () => {
+    const otherDrafters = drafters.filter(s => !isSameStaffMember(s, currentStaff));
+
     if (job?.assigned_drafter) {
-      const match = availableStaff.find(s => 
-        job.assigned_drafter.toLowerCase().includes(s.name.toLowerCase()) ||
-        s.name.toLowerCase().includes(job.assigned_drafter.toLowerCase())
-      );
+      const assignedLower = job.assigned_drafter.toLowerCase();
+      const match =
+        availableStaff.find(s => s.name.toLowerCase() === assignedLower) ||
+        availableStaff.find(s =>
+          assignedLower.includes(s.name.toLowerCase()) ||
+          s.name.toLowerCase().includes(assignedLower)
+        );
+      if (match && !isSameStaffMember(match, currentStaff)) {
+        return match.name;
+      }
+      // If the job's lead drafter is the delegator themselves (e.g., Kyle delegating his own job),
+      // default to another available drafter instead of kicking it back to Kyle.
+      if (otherDrafters.length > 0) {
+        return otherDrafters[0].name;
+      }
       if (match) return match.name;
     }
-    const firstDrafter = drafters[0] || availableStaff[0];
-    return firstDrafter ? firstDrafter.name : 'Kyle Edmonson';
+
+    const firstCandidate = otherDrafters[0] || drafters[0] || availableStaff[0];
+    return firstCandidate ? firstCandidate.name : 'Kyle Edmonson';
   };
 
   const [componentTitle, setComponentTitle] = useState('');
@@ -101,26 +122,37 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [notifyDrafter, setNotifyDrafter] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Sync assigned drafter when opening modal or changing job
+  // Track initialization per modal session & whether the user explicitly chose a drafter.
+  // CRITICAL: Do NOT reset `assignedTo` when `staffList` updates in the background from Firestore presence heartbeats!
+  const initializedJobKeyRef = React.useRef<string | null>(null);
+  const userPickedDrafterRef = React.useRef<boolean>(false);
+
   React.useEffect(() => {
-    if (isOpen) {
-      if (job?.assigned_drafter) {
-        const match = availableStaff.find(s => 
-          job.assigned_drafter.toLowerCase().includes(s.name.toLowerCase()) ||
-          s.name.toLowerCase().includes(job.assigned_drafter.toLowerCase())
-        );
-        if (match) {
-          setAssignedTo(match.name);
-          return;
-        }
-      }
-      const firstCandidate = drafters[0] || availableStaff[0];
-      if (firstCandidate) {
-        setAssignedTo(firstCandidate.name);
-      }
+    if (!isOpen) {
+      initializedJobKeyRef.current = null;
+      userPickedDrafterRef.current = false;
+      setFormError(null);
+      return;
     }
-  }, [isOpen, job?.id, job?.assigned_drafter, availableStaff]);
+
+    const jobKey = job?.id || '__open__';
+    if (initializedJobKeyRef.current !== jobKey) {
+      initializedJobKeyRef.current = jobKey;
+      userPickedDrafterRef.current = false;
+      setFormError(null);
+      setAssignedTo(getInitialDrafter());
+    }
+  }, [isOpen, job?.id]);
+
+  // If the staff roster finishes loading after open and the user has NOT manually picked anyone yet,
+  // only populate a default when `assignedTo` is currently empty.
+  React.useEffect(() => {
+    if (isOpen && !userPickedDrafterRef.current && !assignedTo && availableStaff.length > 0) {
+      setAssignedTo(getInitialDrafter());
+    }
+  }, [isOpen, assignedTo, availableStaff.length]);
 
   if (!isOpen) return null;
 
@@ -165,13 +197,21 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!componentTitle.trim()) {
-      alert('Please provide a component title for the delegated work.');
+      setFormError('Please provide a component title for the delegated work.');
+      return;
+    }
+    if (!assignedTo.trim()) {
+      setFormError('Please select a drafter to delegate this component to.');
       return;
     }
 
-    const assignedStaff = availableStaff.find(s => s.name.toLowerCase() === assignedTo.toLowerCase() || s.name.toLowerCase().includes(assignedTo.toLowerCase())) ||
-                          STAFF_USERS.find(s => s.name === assignedTo);
+    const assignedLower = assignedTo.trim().toLowerCase();
+    const assignedStaff =
+      availableStaff.find(s => s.name.trim().toLowerCase() === assignedLower) ||
+      availableStaff.find(s => s.name.trim().toLowerCase().includes(assignedLower)) ||
+      STAFF_USERS.find(s => s.name.trim().toLowerCase() === assignedLower);
 
     const newTask: DelegatedWorkItem = {
       id: `del-${Date.now()}`,
@@ -181,8 +221,8 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
       componentTitle: componentTitle.trim(),
       category,
       priority,
-      assignedTo,
-      assignedToEmail: assignedStaff?.email || `${assignedTo.toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
+      assignedTo: assignedTo.trim(),
+      assignedToEmail: assignedStaff?.email || `${assignedTo.trim().toLowerCase().replace(/\s+/g, '.')}@myplanstore.com`,
       delegatedBy: currentStaff.name,
       delegatedAt: delegatedDate ? new Date(delegatedDate + 'T12:00:00').toISOString() : new Date().toISOString(),
       dueDate,
@@ -304,7 +344,11 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
               </label>
               <select
                 value={assignedTo}
-                onChange={(e) => setAssignedTo(e.target.value)}
+                onChange={(e) => {
+                  userPickedDrafterRef.current = true;
+                  setAssignedTo(e.target.value);
+                  if (formError) setFormError(null);
+                }}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:bg-white focus:outline-none cursor-pointer"
                 required
               >
@@ -491,6 +535,13 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
               </span>
             </label>
           </div>
+
+          {formError && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{formError}</span>
+            </div>
+          )}
 
           {/* Action Footer */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200">

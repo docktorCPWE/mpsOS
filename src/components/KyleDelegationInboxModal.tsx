@@ -80,16 +80,13 @@ export const KyleDelegationInboxModal: React.FC<KyleDelegationInboxModalProps> =
     }))
   );
 
-  // Dynamic list of drafters (excluding any mock/dummy names)
+  // Dynamic list of all real drafters from tasks and active staff roster
   const availableDrafters = Array.from(
     new Set([
       ...allTasks.map(t => t.assignedTo),
       ...(staffList || []).map(s => s.name)
     ])
-  ).filter(Boolean).filter(name => {
-    const lower = name.trim().toLowerCase();
-    return lower !== 'aaron';
-  });
+  ).filter(Boolean);
 
   // Filter tasks based on selected tab and filters
   const filteredTasks = allTasks.filter(task => {

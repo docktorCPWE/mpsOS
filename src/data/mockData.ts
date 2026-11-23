@@ -230,13 +230,50 @@ export function canSwitchStaffAccounts(userNameOrStaff?: string | StaffUser | nu
   );
 }
 
-export const ONLINE_PRESENCE_TTL_MS = 3 * 60 * 1000; // 3 minutes without heartbeat => offline
+export const ONLINE_PRESENCE_TTL_MS = 20 * 60 * 1000; // 20 minutes (tolerates Chrome/Safari background tab throttling while drafting in CAD)
+export const ACTIVE_SESSION_MAX_AGE_MS = 16 * 60 * 60 * 1000; // 16 hours max age for an active shift or running timer
 
-export function isStaffCurrentlyOnline(staff?: StaffUser | null, nowMs: number = Date.now()): boolean {
-  if (!staff || !staff.isOnline || !staff.lastSeenAt) return false;
-  const lastSeenMs = new Date(staff.lastSeenAt).getTime();
-  if (Number.isNaN(lastSeenMs)) return false;
-  return (nowMs - lastSeenMs) <= ONLINE_PRESENCE_TTL_MS;
+export interface StaffOnlineContext {
+  hasActiveTimer?: boolean;
+  activeTimerStart?: string;
+  hasActiveShift?: boolean;
+  activeShiftStart?: string;
+}
+
+export function isStaffCurrentlyOnline(
+  staff?: StaffUser | null,
+  nowMs: number = Date.now(),
+  context?: StaffOnlineContext
+): boolean {
+  if (!staff) return false;
+
+  // 1. Fresh browser presence heartbeat
+  if (staff.isOnline && staff.lastSeenAt) {
+    const lastSeenMs = new Date(staff.lastSeenAt).getTime();
+    if (!Number.isNaN(lastSeenMs) && (nowMs - lastSeenMs) <= ONLINE_PRESENCE_TTL_MS) {
+      return true;
+    }
+  }
+
+  // 2. Actively running a live project, delegated task, or dev timer (tab may be throttled behind CAD software)
+  if (context?.hasActiveTimer) {
+    if (!context.activeTimerStart) return true;
+    const startMs = new Date(context.activeTimerStart).getTime();
+    if (!Number.isNaN(startMs) && (nowMs - startMs) <= ACTIVE_SESSION_MAX_AGE_MS) {
+      return true;
+    }
+  }
+
+  // 3. Currently clocked in (or on break) on an active shift started today
+  if (context?.hasActiveShift) {
+    if (!context.activeShiftStart) return true;
+    const shiftMs = new Date(context.activeShiftStart).getTime();
+    if (!Number.isNaN(shiftMs) && (nowMs - shiftMs) <= ACTIVE_SESSION_MAX_AGE_MS) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function formatRelativeLastSeen(isoTimestamp?: string, nowMs: number = Date.now()): string {
