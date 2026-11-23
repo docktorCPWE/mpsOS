@@ -686,7 +686,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                   <MessageSquare className={`w-3.5 h-3.5 ${isChatOpen ? 'text-white' : 'text-blue-400'}`} />
                   <span className="hidden sm:inline">Chat</span>
                   {unreadChatCount > 0 && (
-                    <span className="bg-blue-500 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full font-mono animate-pulse">
+                    <span className="inline-flex items-center gap-1 bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 text-[10px] font-extrabold px-1.5 py-0.2 rounded-full font-mono">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.95)] animate-pulse" />
                       {unreadChatCount}
                     </span>
                   )}

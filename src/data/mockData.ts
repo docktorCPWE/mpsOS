@@ -382,62 +382,117 @@ export function canUserCreateJob(userNameOrStaff?: string | StaffUser): boolean 
   return isKyle || isJasonBarnett;
 }
 
+function doesNameMatchStaff(candidate: string | undefined, staff: StaffUser): boolean {
+  if (!candidate) return false;
+  const cand = candidate.trim().toLowerCase();
+  const full = (staff.name || '').trim().toLowerCase();
+  if (!cand || !full) return false;
+  if (cand === full || cand.includes(full) || full.includes(cand)) return true;
+  const first = full.split(/\s+/)[0];
+  const candFirst = cand.split(/\s+/)[0];
+  return Boolean(first && first.length >= 3 && (cand === first || candFirst === first));
+}
+
 /**
- * Determines whether a chat message is specifically relevant to the currently logged in staff user.
- * A message is displayed for a staff profile if:
- * 1. The message was sent by the staff member
- * 2. The staff member is @mentioned in the message
- * 3. The message is a reply to the staff member's message
- * 4. The message directly references an active job/plan the staff member is assigned to or involved with
+ * Determines whether a chat message is visible to the currently logged in staff user.
+ * - Leadership / Project Managers (Kyle, Greg, Jason, Drew, Ethan, or anyone with canViewAllProjects/canDelegate/admin/drafter_lead)
+ *   can view and search all Studio Team Chat conversations.
+ * - General team broadcasts (messages with no @mentions targeting specific other people and no replyToId) are visible to all staff.
+ * - Direct participation (sender, @mention by full or first name, reply chain participant, or assigned/involved on a referenced plan)
+ *   always keeps the message AND its entire nested thread visible.
  */
-export function isMessageRelevantForUser(msg: ChatMessage, staff?: StaffUser, jobs: Job[] = []): boolean {
-  if (!staff) return false;
-  const staffLower = staff.name.toLowerCase();
-  
-  // 1. Sent by current staff
-  if (msg.senderId === staff.id || msg.senderName.toLowerCase().includes(staffLower) || staffLower.includes(msg.senderName.toLowerCase())) {
-    return true;
-  }
-  
-  // 2. Mentions current staff
-  if (msg.mentions && msg.mentions.some(m => m.toLowerCase().includes(staffLower) || staffLower.includes(m.toLowerCase()))) {
-    return true;
-  }
+export function isMessageRelevantForUser(
+  msg: ChatMessage,
+  staff?: StaffUser,
+  jobs: Job[] = [],
+  allMessages?: ChatMessage[]
+): boolean {
+  if (!staff || !msg) return false;
 
-  // 3. Replied to message sent by current staff
-  if (msg.replyToMessage && (
-    msg.replyToMessage.senderName.toLowerCase().includes(staffLower) || 
-    staffLower.includes(msg.replyToMessage.senderName.toLowerCase())
-  )) {
+  // Leadership, admins, lead drafters, and staff with full project visibility can always see & search all team chats (includes Kyle)
+  if (
+    canViewAllProjectCards(staff) ||
+    staff.role === 'admin' ||
+    staff.role === 'drafter_lead' ||
+    staff.canDelegate === true
+  ) {
     return true;
   }
 
-  // 4. Message directly references a job number that this staff member is involved with
-  if (msg.referencedJobNumbers && msg.referencedJobNumbers.length > 0 && jobs.length > 0) {
-    const isUserOnReferencedJob = jobs.some(j => {
-      const isMatchingJob = (msg.referencedJobNumbers || []).some(rjn => {
-        const cleanR = rjn.replace(/^#/, '').toLowerCase();
-        const cleanJ = j.job_number.replace(/^#/, '').toLowerCase();
-        return cleanR === cleanJ || cleanR.includes(cleanJ) || cleanJ.includes(cleanR);
-      });
-      if (!isMatchingJob) return false;
-
-      // Check if current user is involved in this job
-      const isLead = (j.assigned_drafter || '').toLowerCase().includes(staffLower);
-      const isPM = (j.project_manager || '').toLowerCase().includes(staffLower);
-      const isDelegated = (j.delegated_tasks || []).some(t => 
-        (t.assignedTo || '').toLowerCase().includes(staffLower) ||
-        (t.delegatedBy || '').toLowerCase().includes(staffLower)
-      );
-      const isTimeLogger = (j.time_logs || []).some(tl => 
-        (tl.drafterName || '').toLowerCase().includes(staffLower)
-      );
-
-      return isLead || isPM || isDelegated || isTimeLogger;
-    });
-
-    if (isUserOnReferencedJob) {
+  const matchesSingleMessage = (m: ChatMessage): boolean => {
+    // 1. Sent by current staff
+    if (m.senderId === staff.id || doesNameMatchStaff(m.senderName, staff)) {
       return true;
+    }
+
+    // 2. Mentions current staff (supports full name or first name)
+    if (Array.isArray(m.mentions) && m.mentions.some(name => doesNameMatchStaff(name, staff))) {
+      return true;
+    }
+
+    // 2b. Inline @mention in text (e.g. "@Kyle")
+    const first = (staff.name || '').trim().split(/\s+/)[0];
+    if (first && first.length >= 3 && typeof m.text === 'string') {
+      const escapedFirst = first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`@${escapedFirst}\\b`, 'i').test(m.text)) {
+        return true;
+      }
+    }
+
+    // 3. Replied to message sent by current staff
+    if (m.replyToMessage && doesNameMatchStaff(m.replyToMessage.senderName, staff)) {
+      return true;
+    }
+
+    // 4. General studio broadcast (no explicit @mentions and not a reply to someone else's private thread)
+    const hasMentions = Array.isArray(m.mentions) && m.mentions.length > 0;
+    if (!hasMentions && !m.replyToId) {
+      return true;
+    }
+
+    // 5. Message directly references a job number that this staff member is involved with
+    if (m.referencedJobNumbers && m.referencedJobNumbers.length > 0 && jobs.length > 0) {
+      const isUserOnReferencedJob = jobs.some(j => {
+        const isMatchingJob = (m.referencedJobNumbers || []).some(rjn => {
+          const cleanR = rjn.replace(/^#/, '').toLowerCase();
+          const cleanJ = j.job_number.replace(/^#/, '').toLowerCase();
+          return cleanR === cleanJ || cleanR.includes(cleanJ) || cleanJ.includes(cleanR);
+        });
+        if (!isMatchingJob) return false;
+
+        const isLead = doesNameMatchStaff(j.assigned_drafter, staff);
+        const isPM = doesNameMatchStaff(j.project_manager, staff);
+        const isDelegated = (j.delegated_tasks || []).some(t =>
+          doesNameMatchStaff(t.assignedTo, staff) || doesNameMatchStaff(t.delegatedBy, staff)
+        );
+        const isTimeLogger = (j.time_logs || []).some(tl => doesNameMatchStaff(tl.drafterName, staff));
+
+        return isLead || isPM || isDelegated || isTimeLogger;
+      });
+
+      if (isUserOnReferencedJob) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  if (matchesSingleMessage(msg)) {
+    return true;
+  }
+
+  // If this message is part of a nested reply thread, check its ancestor chain so replies-to-replies stay visible
+  if (msg.replyToId && Array.isArray(allMessages) && allMessages.length > 0) {
+    const byId = new Map(allMessages.map(m => [m.id, m]));
+    const visited = new Set<string>([msg.id]);
+    let cursorId: string | undefined = msg.replyToId;
+    while (cursorId && !visited.has(cursorId)) {
+      visited.add(cursorId);
+      const parent = byId.get(cursorId);
+      if (!parent) break;
+      if (matchesSingleMessage(parent)) return true;
+      cursorId = parent.replyToId;
     }
   }
 
@@ -1588,28 +1643,34 @@ export function getStoredChatMessages(): ChatMessage[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const cleaned = parsed.filter((m: ChatMessage) => {
-        const text = (m.text || '').toLowerCase();
-        const hasTestJob = (m.referencedJobNumbers || []).some(j => 
-          j.includes('195') || j.includes('1000') || j.includes('8800') || j.includes('300')
-        );
-        const isTestText = 
-          text.includes('m26-195') || 
-          text.includes('m26-1000') || 
-          text.includes('m26-8800') || 
-          text.includes('m26-300') || 
-          text.includes('smiley') ||
-          text.includes('chelsey') ||
-          text.includes('testing dummy') ||
-          text.includes('draw prelim based on customer plan') ||
-          text.includes('make changes per customer notes') ||
-          text.includes('create prelim based on sketch');
-        const isDummyId = m.id.startsWith('msg-ethan-') || 
-                          m.id.startsWith('msg-jm-') || 
-                          m.id.startsWith('msg-dr-') || 
-                          ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(m.id);
-        return !hasTestJob && !isTestText && !isDummyId;
-      });
+      const cleaned = parsed
+        .filter((m: ChatMessage) => {
+          const text = (m.text || '').toLowerCase();
+          const hasTestJob = (m.referencedJobNumbers || []).some(j => {
+            const clean = String(j || '').replace(/^#/, '').trim().toUpperCase();
+            return ['M26-195', '195', 'M26-1000', '1000', 'M26-8800', '8800', 'M26-300', '300'].includes(clean);
+          });
+          const isTestText = 
+            /\bm26-195\b/i.test(text) || 
+            /\bm26-1000\b/i.test(text) || 
+            /\bm26-8800\b/i.test(text) || 
+            /\bm26-300\b/i.test(text) || 
+            text.includes('smiley') ||
+            text.includes('chelsey') ||
+            text.includes('testing dummy') ||
+            text.includes('draw prelim based on customer plan') ||
+            text.includes('make changes per customer notes') ||
+            text.includes('create prelim based on sketch');
+          const isDummyId = m.id.startsWith('msg-ethan-') || 
+                            m.id.startsWith('msg-jm-') || 
+                            m.id.startsWith('msg-dr-') || 
+                            ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(m.id);
+          return !hasTestJob && !isTestText && !isDummyId;
+        })
+        .map((m: ChatMessage) => ({
+          ...m,
+          readByStaffIds: Array.isArray(m.readByStaffIds) ? m.readByStaffIds : []
+        }));
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;
     }

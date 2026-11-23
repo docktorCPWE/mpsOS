@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   X, 
   Send, 
@@ -8,21 +8,16 @@ import {
   Reply, 
   ExternalLink, 
   Search, 
-  ChevronDown, 
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
   Maximize2, 
   Minimize2, 
-  Users, 
   Trash2,
-  AlertCircle,
   FileText, 
-  Check, 
   CheckCheck, 
   CheckSquare,
-  Square,
-  Sparkles,
-  Paperclip,
-  Clock,
-  Filter
+  Square
 } from 'lucide-react';
 import { ChatMessage, Job, StaffUser } from '../types';
 import { STAFF_USERS, isMessageRelevantForUser } from '../data/mockData';
@@ -38,7 +33,18 @@ interface GeneralChatWidgetProps {
   onDeleteMessage?: (messageId: string) => void;
   onDeleteMultipleMessages?: (messageIds: string[]) => void;
   onSelectJob: (job: Job) => void;
-  onMarkAsRead: () => void;
+  onMarkAsRead: (messageIds?: string[]) => void;
+}
+
+interface ChatThread {
+  root: ChatMessage;
+  replies: ChatMessage[];
+  allMessages: ChatMessage[];
+  latestTimestampMs: number;
+  unreadIds: string[];
+  unreadReplyCount: number;
+  isRootUnread: boolean;
+  hasUnread: boolean;
 }
 
 export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
@@ -65,6 +71,8 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   const [showJobPicker, setShowJobPicker] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [jobQuery, setJobQuery] = useState('');
+  const [collapsedThreadIds, setCollapsedThreadIds] = useState<Record<string, boolean>>({});
+  const [confirmDeleteAllRead, setConfirmDeleteAllRead] = useState(false);
 
   // Multi-message select and bulk delete state
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
@@ -76,11 +84,10 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   const jobSearchInputRef = useRef<HTMLInputElement>(null);
   const mentionSearchInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto scroll to bottom on new messages or when opened
+  // Auto scroll to bottom on new messages or when opened (without wiping unread green dots!)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !searchQuery) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      onMarkAsRead();
     }
   }, [isOpen, messages.length]);
 
@@ -101,6 +108,84 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       }, 50);
     }
   }, [showMentionPicker]);
+
+  // Filter messages visible to current staff user (passes full messages list so nested thread chains stay intact)
+  const userRelevantMessages = useMemo(
+    () => messages.filter(msg => isMessageRelevantForUser(msg, currentStaff, jobs, messages)),
+    [messages, currentStaff, jobs]
+  );
+
+  // Build nested conversation threads (parent + all associated nested replies)
+  const threads: ChatThread[] = useMemo(() => {
+    const byId = new Map<string, ChatMessage>(userRelevantMessages.map(m => [m.id, m]));
+
+    // Trace any reply chain (including replies-to-replies) back to the root message in the thread
+    const resolveRootId = (msg: ChatMessage): string => {
+      const visited = new Set<string>([msg.id]);
+      let curr = msg;
+      while (curr.replyToId && byId.has(curr.replyToId) && !visited.has(curr.replyToId)) {
+        visited.add(curr.replyToId);
+        curr = byId.get(curr.replyToId)!;
+      }
+      return curr.id;
+    };
+
+    const grouped = new Map<string, { root: ChatMessage; replies: ChatMessage[] }>();
+
+    // Register roots first
+    for (const msg of userRelevantMessages) {
+      const rootId = resolveRootId(msg);
+      if (rootId === msg.id) {
+        if (!grouped.has(msg.id)) {
+          grouped.set(msg.id, { root: msg, replies: [] });
+        }
+      }
+    }
+
+    // Attach replies to their root thread
+    for (const msg of userRelevantMessages) {
+      const rootId = resolveRootId(msg);
+      if (rootId !== msg.id) {
+        const entry = grouped.get(rootId);
+        if (entry) {
+          entry.replies.push(msg);
+        } else {
+          grouped.set(msg.id, { root: msg, replies: [] });
+        }
+      }
+    }
+
+    const result: ChatThread[] = [];
+    for (const { root, replies } of grouped.values()) {
+      const sortedReplies = [...replies].sort(
+        (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+      );
+      const allMsgs = [root, ...sortedReplies];
+      const latestTimestampMs = Math.max(
+        ...allMsgs.map(m => new Date(m.timestamp || 0).getTime() || 0)
+      );
+      const isUnread = (m: ChatMessage) =>
+        m.senderId !== currentStaff.id && !(m.readByStaffIds || []).includes(currentStaff.id);
+      const isRootUnread = isUnread(root);
+      const unreadReplies = sortedReplies.filter(isUnread);
+      const unreadIds = allMsgs.filter(isUnread).map(m => m.id);
+
+      result.push({
+        root,
+        replies: sortedReplies,
+        allMessages: allMsgs,
+        latestTimestampMs,
+        unreadIds,
+        unreadReplyCount: unreadReplies.length,
+        isRootUnread,
+        hasUnread: unreadIds.length > 0
+      });
+    }
+
+    // Order threads by latest activity so threads with fresh replies surface naturally
+    result.sort((a, b) => a.latestTimestampMs - b.latestTimestampMs);
+    return result;
+  }, [userRelevantMessages, currentStaff.id]);
 
   if (!isOpen) return null;
 
@@ -165,24 +250,41 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   const handleSend = () => {
     if (!inputText.trim()) return;
 
-    // Detect mentions from text
+    // Detect mentions from text (matches full name OR first name e.g. @Kyle or @Kyle Edmonson)
     const foundMentions: string[] = [];
     effectiveStaffList.forEach(s => {
-      const regex = new RegExp(`@${s.name}`, 'i');
-      if (regex.test(inputText)) {
-        foundMentions.push(s.name);
+      const escapedFull = s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const firstName = s.name.trim().split(/\s+/)[0];
+      const escapedFirst = firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const fullRegex = new RegExp(`@${escapedFull}\\b`, 'i');
+      const firstRegex = firstName.length >= 3 ? new RegExp(`@${escapedFirst}\\b`, 'i') : null;
+      if (fullRegex.test(inputText) || (firstRegex && firstRegex.test(inputText))) {
+        if (!foundMentions.includes(s.name)) {
+          foundMentions.push(s.name);
+        }
       }
     });
 
     // Detect referenced jobs from text
     const foundJobNumbers: string[] = [];
     jobs.forEach(j => {
-      const cleanNum = j.job_number.replace(/^#/, '');
-      const regex = new RegExp(`(#?${cleanNum})`, 'i');
+      const cleanNum = j.job_number.replace(/^#/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(#?${cleanNum})\\b`, 'i');
       if (regex.test(inputText)) {
         foundJobNumbers.push(j.job_number);
       }
     });
+
+    // If replying to a thread, ensure that thread stays expanded and mark its existing unread messages read for sender
+    if (replyingTo) {
+      const parentThread = threads.find(t => t.allMessages.some(m => m.id === replyingTo.id));
+      if (parentThread) {
+        setCollapsedThreadIds(prev => ({ ...prev, [parentThread.root.id]: false }));
+        if (parentThread.unreadIds.length > 0) {
+          onMarkAsRead(parentThread.unreadIds);
+        }
+      }
+    }
 
     onSendMessage(
       inputText.trim(),
@@ -204,12 +306,73 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     }
   };
 
-  // Filter messages specifically relevant to current staff user
-  const userRelevantMessages = messages.filter(msg => isMessageRelevantForUser(msg, currentStaff, jobs));
-
   // Count unread and read messages for this user
-  const unreadCount = userRelevantMessages.filter(m => !(m.readByStaffIds || []).includes(currentStaff.id)).length;
-  const readCount = userRelevantMessages.filter(m => (m.readByStaffIds || []).includes(currentStaff.id)).length;
+  const unreadCount = userRelevantMessages.filter(
+    m => m.senderId !== currentStaff.id && !(m.readByStaffIds || []).includes(currentStaff.id)
+  ).length;
+  const readCount = userRelevantMessages.filter(
+    m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id)
+  ).length;
+
+  const currentFirstName = (currentStaff.name || '').trim().split(/\s+/)[0].toLowerCase();
+  const doesMsgMentionCurrentUser = (msg: ChatMessage): boolean => {
+    const fullLower = (currentStaff.name || '').toLowerCase();
+    const mentionsMe = (msg.mentions || []).some(m => {
+      const ml = m.toLowerCase();
+      return ml.includes(fullLower) || fullLower.includes(ml) || (currentFirstName.length >= 3 && ml.includes(currentFirstName));
+    });
+    const textMentionsMe =
+      currentFirstName.length >= 3 &&
+      new RegExp(`@${currentFirstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(msg.text || '');
+    const repliedToMe = Boolean(
+      msg.replyToMessage &&
+      ((msg.replyToMessage.senderName || '').toLowerCase().includes(fullLower) ||
+        (currentFirstName.length >= 3 && (msg.replyToMessage.senderName || '').toLowerCase().includes(currentFirstName)))
+    );
+    return mentionsMe || textMentionsMe || repliedToMe;
+  };
+
+  const doesMsgMatchSearch = (msg: ChatMessage, q: string): boolean => {
+    if (!q) return true;
+    const textMatch = (msg.text || '').toLowerCase().includes(q);
+    const senderMatch = (msg.senderName || '').toLowerCase().includes(q);
+    const mentionMatch = (msg.mentions || []).some(m => m.toLowerCase().includes(q));
+    const jobMatch = (msg.referencedJobNumbers || []).some(j => j.toLowerCase().includes(q));
+    const customerMatch = (msg.referencedJobNumbers || []).some(rjn => {
+      const cleanR = rjn.replace(/^#/, '').toLowerCase();
+      const job = jobs.find(j => j.job_number.replace(/^#/, '').toLowerCase() === cleanR);
+      return Boolean(
+        job &&
+        ((job.customer_name || '').toLowerCase().includes(q) || (job.project_name || '').toLowerCase().includes(q))
+      );
+    });
+    return textMatch || senderMatch || mentionMatch || jobMatch || customerMatch;
+  };
+
+  // Filter nested threads by search query (matches parent OR any nested reply) and active tab
+  const filteredThreads = threads.filter(thread => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      const anyMatch = thread.allMessages.some(m => doesMsgMatchSearch(m, q));
+      if (!anyMatch) return false;
+    }
+
+    if (activeTab === 'unread') {
+      return thread.hasUnread;
+    }
+
+    if (activeTab === 'mentions') {
+      return thread.allMessages.some(doesMsgMentionCurrentUser);
+    }
+
+    if (activeTab === 'plans') {
+      return thread.allMessages.some(m => m.referencedJobNumbers && m.referencedJobNumbers.length > 0);
+    }
+
+    return true;
+  });
+
+  const filteredMessages = filteredThreads.flatMap(t => t.allMessages);
 
   // Selection handlers
   const toggleSelectMessage = (id: string) => {
@@ -231,7 +394,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
   const handleSelectAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     setSelectedMessageIds(new Set(readIds));
   };
@@ -254,46 +417,26 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     setIsMultiSelectMode(false);
   };
 
-  const handleQuickDeleteAllRead = () => {
+  const executeQuickDeleteAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     if (readIds.length === 0) return;
-    if (window.confirm(`Permanently delete all ${readIds.length} read messages from Studio Chat?`)) {
-      if (onDeleteMultipleMessages) {
-        onDeleteMultipleMessages(readIds);
-      } else if (onDeleteMessage) {
-        readIds.forEach(id => onDeleteMessage(id));
-      }
+    if (onDeleteMultipleMessages) {
+      onDeleteMultipleMessages(readIds);
+    } else if (onDeleteMessage) {
+      readIds.forEach(id => onDeleteMessage(id));
     }
+    setConfirmDeleteAllRead(false);
   };
 
-  // Filter messages by search and active tab
-  const filteredMessages = userRelevantMessages.filter(msg => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const matchText = msg.text.toLowerCase().includes(q);
-      const matchSender = msg.senderName.toLowerCase().includes(q);
-      const matchJob = (msg.referencedJobNumbers || []).some(j => j.toLowerCase().includes(q));
-      if (!matchText && !matchSender && !matchJob) return false;
-    }
-
-    if (activeTab === 'unread') {
-      return !(msg.readByStaffIds || []).includes(currentStaff.id);
-    }
-
-    if (activeTab === 'mentions') {
-      const mentionsMe = (msg.mentions || []).some(m => m.toLowerCase().includes(currentStaff.name.toLowerCase()));
-      const repliedToMe = msg.replyToMessage && msg.replyToMessage.senderName.toLowerCase().includes(currentStaff.name.toLowerCase());
-      return mentionsMe || repliedToMe;
-    }
-
-    if (activeTab === 'plans') {
-      return (msg.referencedJobNumbers && msg.referencedJobNumbers.length > 0);
-    }
-
-    return true;
-  });
+  const toggleThreadExpanded = (thread: ChatThread) => {
+    const currentlyCollapsed = collapsedThreadIds[thread.root.id] ?? false;
+    setCollapsedThreadIds(prev => ({
+      ...prev,
+      [thread.root.id]: !currentlyCollapsed
+    }));
+  };
 
   // Filtered staff for @ autocomplete
   const filteredStaff = effectiveStaffList.filter(s => {
@@ -424,17 +567,50 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Quick Clear All Read Messages Button */}
-          {readCount > 0 && !isMultiSelectMode && (
+          {/* Mark All Read Button (clears all green dots) */}
+          {unreadCount > 0 && !isMultiSelectMode && (
             <button
               type="button"
-              onClick={handleQuickDeleteAllRead}
-              className="px-2 py-1 text-slate-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition flex items-center gap-1 text-[11px] font-medium border border-transparent hover:border-red-500/30 cursor-pointer"
-              title={`Delete all ${readCount} read messages simultaneously`}
+              onClick={() => onMarkAsRead()}
+              className="px-2 py-1 text-emerald-300 hover:text-white bg-emerald-500/15 hover:bg-emerald-600/40 rounded-lg transition flex items-center gap-1 text-[11px] font-semibold border border-emerald-500/30 cursor-pointer"
+              title={`Mark all ${unreadCount} unread messages as read`}
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-              <span className="hidden sm:inline">Delete Read ({readCount})</span>
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Mark All Read</span>
             </button>
+          )}
+
+          {/* Quick Clear All Read Messages Button (inline confirm, no window.confirm) */}
+          {readCount > 0 && !isMultiSelectMode && (
+            confirmDeleteAllRead ? (
+              <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/50 rounded-lg px-2 py-1">
+                <span className="text-[10px] font-bold text-red-200">Delete {readCount} read?</span>
+                <button
+                  type="button"
+                  onClick={executeQuickDeleteAllRead}
+                  className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.5 rounded cursor-pointer"
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteAllRead(false)}
+                  className="text-[10px] text-slate-300 hover:text-white px-1 py-0.5 cursor-pointer"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteAllRead(true)}
+                className="px-2 py-1 text-slate-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition flex items-center gap-1 text-[11px] font-medium border border-transparent hover:border-red-500/30 cursor-pointer"
+                title={`Delete all ${readCount} read messages simultaneously`}
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <span className="hidden sm:inline">Delete Read ({readCount})</span>
+              </button>
+            )
           )}
 
           {/* Multi-Select Messages Mode Toggle */}
@@ -442,6 +618,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             type="button"
             onClick={() => {
               setIsMultiSelectMode(!isMultiSelectMode);
+              setConfirmDeleteAllRead(false);
               if (isMultiSelectMode) {
                 handleClearSelection();
               }
@@ -454,7 +631,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             title={isMultiSelectMode ? "Exit selection mode" : "Select multiple messages to delete simultaneously"}
           >
             <CheckSquare className="w-3.5 h-3.5" />
-            <span>{isMultiSelectMode ? 'Cancel Selection' : 'Select Messages'}</span>
+            <span>{isMultiSelectMode ? 'Cancel' : 'Select'}</span>
           </button>
 
           <button
@@ -626,171 +803,330 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
         )}
       </div>
 
-      {/* Messages Feed */}
-      <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 bg-slate-900/60">
-        {filteredMessages.length === 0 ? (
+      {/* Nested Threads Feed */}
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-3 bg-slate-900/60">
+        {filteredThreads.length === 0 ? (
           <div className="text-center py-12 px-4">
             <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 mx-auto flex items-center justify-center text-slate-500 mb-3">
               <MessageSquare className="w-6 h-6" />
             </div>
-            <p className="text-sm font-semibold text-slate-300">No messages in this view</p>
-            <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-              {activeTab === 'mentions'
-                ? "You don't have any @mentions or replies yet."
-                : "Type below to start chatting with drafters and project managers."}
+            <p className="text-sm font-semibold text-slate-300">
+              {searchQuery ? `No chats matching "${searchQuery}"` : 'No messages in this view'}
             </p>
+            <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              {searchQuery
+                ? 'Try searching by a different word, drafter name, customer name, or plan number.'
+                : activeTab === 'unread'
+                ? 'All caught up! New messages and nested thread replies will appear here with a green dot.'
+                : activeTab === 'mentions'
+                ? "You don't have any @mentions or replies yet."
+                : 'Type below to start chatting with drafters and project managers.'}
+            </p>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="mt-3 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded-lg text-xs font-semibold cursor-pointer"
+              >
+                Clear Search
+              </button>
+            )}
           </div>
         ) : (
-          filteredMessages.map((msg) => {
-            const isMe = msg.senderId === currentStaff.id || msg.senderName === currentStaff.name;
-            const mentionsMe = (msg.mentions || []).some(m => m.toLowerCase().includes(currentStaff.name.toLowerCase()));
-            const isSelected = selectedMessageIds.has(msg.id);
-            const isRead = (msg.readByStaffIds || []).includes(currentStaff.id);
+          filteredThreads.map((thread) => {
+            const { root, replies, unreadIds, unreadReplyCount, isRootUnread, hasUnread } = thread;
+            const isSearchActive = searchQuery.trim().length > 0;
+            // Threads with unread replies or active search auto-show expanded unless explicitly collapsed by user
+            const isThreadExpanded = isSearchActive
+              ? true
+              : collapsedThreadIds[root.id] !== undefined
+              ? !collapsedThreadIds[root.id]
+              : true;
 
-            return (
-              <div
-                key={msg.id}
-                onClick={() => {
-                  if (isMultiSelectMode) {
-                    toggleSelectMessage(msg.id);
-                  }
-                }}
-                className={`group relative flex flex-col gap-1 rounded-xl p-2.5 transition ${
-                  isMultiSelectMode ? 'cursor-pointer' : ''
-                } ${
-                  isSelected
-                    ? 'bg-blue-600/20 border-2 border-blue-400 ring-2 ring-blue-500/20 shadow-md'
-                    : mentionsMe
-                    ? 'bg-amber-500/10 border border-amber-500/30'
-                    : isMe
-                    ? 'bg-blue-600/10 border border-blue-500/20'
-                    : 'bg-slate-950/60 border border-slate-800/80 hover:border-slate-700'
-                }`}
-              >
-                {/* Replying To snippet */}
-                {msg.replyToMessage && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 bg-slate-950/80 border-l-2 border-blue-500 px-2 py-1 rounded mb-1">
-                    <Reply className="w-3 h-3 text-blue-400 shrink-0" />
-                    <span className="font-semibold text-slate-300">@{msg.replyToMessage.senderName}:</span>
-                    <span className="truncate max-w-[280px]">{msg.replyToMessage.text}</span>
-                  </div>
-                )}
+            const renderMessageCard = (msg: ChatMessage, isNestedReply: boolean) => {
+              const isMe = msg.senderId === currentStaff.id || msg.senderName === currentStaff.name;
+              const mentionsMe = doesMsgMentionCurrentUser(msg);
+              const isSelected = selectedMessageIds.has(msg.id);
+              const isMsgUnread = !isMe && !(msg.readByStaffIds || []).includes(currentStaff.id);
+              const showThreadGreenDot = !isNestedReply && hasUnread;
 
-                {/* Message Header */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {/* Multi-Select Checkbox */}
-                    {isMultiSelectMode && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSelectMessage(msg.id);
-                        }}
-                        className={`p-0.5 rounded transition cursor-pointer ${
-                          isSelected ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'
-                        }`}
-                      >
-                        {isSelected ? <CheckSquare className="w-4 h-4 fill-blue-500/20" /> : <Square className="w-4 h-4" />}
-                      </button>
-                    )}
-
-                    <div
-                      className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-extrabold shadow-xs ${getStaffAvatarColor(
-                        msg.senderName
-                      )}`}
-                    >
-                      {getStaffInitials(msg.senderName)}
+              return (
+                <div
+                  key={msg.id}
+                  onClick={() => {
+                    if (isMultiSelectMode) {
+                      toggleSelectMessage(msg.id);
+                    }
+                  }}
+                  className={`group relative flex flex-col gap-1 rounded-xl p-2.5 transition ${
+                    isMultiSelectMode ? 'cursor-pointer' : ''
+                  } ${
+                    isSelected
+                      ? 'bg-blue-600/20 border-2 border-blue-400 ring-2 ring-blue-500/20 shadow-md'
+                      : isMsgUnread || showThreadGreenDot
+                      ? 'bg-emerald-950/20 border border-emerald-500/40 border-l-2 border-l-emerald-400 shadow-xs'
+                      : mentionsMe
+                      ? 'bg-amber-500/10 border border-amber-500/30'
+                      : isMe
+                      ? 'bg-blue-600/10 border border-blue-500/20'
+                      : isNestedReply
+                      ? 'bg-slate-950/80 border border-slate-800/70 hover:border-slate-700'
+                      : 'bg-slate-950/60 border border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  {/* For nested replies-to-replies, show compact quote only if replying to a non-root reply */}
+                  {isNestedReply && msg.replyToId && msg.replyToId !== root.id && msg.replyToMessage && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/90 border-l-2 border-blue-500/70 px-2 py-0.5 rounded mb-0.5">
+                      <Reply className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+                      <span className="font-semibold text-slate-300">@{msg.replyToMessage.senderName}:</span>
+                      <span className="truncate max-w-[240px]">{msg.replyToMessage.text}</span>
                     </div>
-                    <span className="text-xs font-bold text-slate-200">{msg.senderName}</span>
-                    {msg.senderRole && (
-                      <span className="text-[10px] text-slate-400 truncate max-w-[140px] font-mono">
-                        {msg.senderRole.split('&')[0]}
-                      </span>
-                    )}
-                  </div>
+                  )}
 
-                  <div className="flex items-center gap-1.5">
-                    {/* Read / New indicator */}
-                    {isRead ? (
-                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5" title="Read by you">
-                        <CheckCheck className="w-3 h-3 text-blue-400/80" />
-                        <span className="hidden sm:inline">Read</span>
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 rounded-full">
-                        New
-                      </span>
-                    )}
-
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-
-                    {/* Quick Action Buttons on Hover */}
-                    {!isMultiSelectMode && (
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* Reply Button */}
+                  {/* Message Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {/* Multi-Select Checkbox */}
+                      {isMultiSelectMode && (
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setReplyingTo(msg);
+                            toggleSelectMessage(msg.id);
+                          }}
+                          className={`p-0.5 rounded transition cursor-pointer shrink-0 ${
+                            isSelected ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {isSelected ? <CheckSquare className="w-4 h-4 fill-blue-500/20" /> : <Square className="w-4 h-4" />}
+                        </button>
+                      )}
+
+                      {/* Avatar with pulsing green dot when this message or an associated nested reply is new */}
+                      <div className="relative shrink-0">
+                        <div
+                          className={`${isNestedReply ? 'w-5 h-5 text-[9px]' : 'w-6 h-6 text-[10px]'} rounded-lg flex items-center justify-center font-extrabold shadow-xs ${getStaffAvatarColor(
+                            msg.senderName
+                          )}`}
+                        >
+                          {getStaffInitials(msg.senderName)}
+                        </div>
+                        {(isMsgUnread || showThreadGreenDot) && (
+                          <span
+                            className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950 shadow-[0_0_8px_rgba(52,211,153,0.95)] animate-pulse"
+                            title={
+                              showThreadGreenDot && unreadReplyCount > 0
+                                ? `${unreadReplyCount} new nested repl${unreadReplyCount === 1 ? 'y' : 'ies'} in this thread`
+                                : 'New unread message'
+                            }
+                          />
+                        )}
+                      </div>
+
+                      <span className="text-xs font-bold text-slate-200 truncate">{msg.senderName}</span>
+                      {msg.senderRole && !isNestedReply && (
+                        <span className="text-[10px] text-slate-400 truncate max-w-[120px] font-mono hidden sm:inline">
+                          {msg.senderRole.split('&')[0]}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Green Dot / New indicator */}
+                      {isMsgUnread ? (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 px-1.5 py-0.2 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          New
+                        </span>
+                      ) : !isNestedReply && unreadReplyCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 px-1.5 py-0.2 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          {unreadReplyCount} new {unreadReplyCount === 1 ? 'reply' : 'replies'}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 flex items-center gap-0.5" title="Read">
+                          <CheckCheck className="w-3 h-3 text-blue-400/70" />
+                        </span>
+                      )}
+
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+
+                      {/* Quick Action Buttons on Hover (always visible on unread thread mark-read) */}
+                      {!isMultiSelectMode && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReplyingTo(msg);
+                              setCollapsedThreadIds(prev => ({ ...prev, [root.id]: false }));
+                              inputRef.current?.focus();
+                            }}
+                            className="text-[11px] text-slate-300 hover:text-blue-300 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition cursor-pointer"
+                            title="Reply in nested thread"
+                          >
+                            <Reply className="w-3 h-3" />
+                            <span>Reply</span>
+                          </button>
+
+                          {onDeleteMessage && (
+                            deletingMessageId === msg.id ? (
+                              <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/40 rounded px-1.5 py-0.5 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+                                <span className="text-[10px] text-red-300 font-bold">Delete?</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onDeleteMessage(msg.id);
+                                    setDeletingMessageId(null);
+                                  }}
+                                  className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.2 rounded transition cursor-pointer"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingMessageId(null)}
+                                  className="text-[10px] text-slate-400 hover:text-white px-1 py-0.2 rounded transition cursor-pointer"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingMessageId(msg.id);
+                                }}
+                                className="text-[11px] text-slate-400 hover:text-red-400 p-1 hover:bg-red-500/10 rounded transition cursor-pointer"
+                                title="Delete message"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Message Body */}
+                  <div className={`text-xs text-slate-300 leading-relaxed ${isMultiSelectMode ? 'pl-14' : isNestedReply ? 'pl-7' : 'pl-8'} break-words`}>
+                    {renderMessageContent(msg.text)}
+                  </div>
+
+                  {/* Root Footer Bar: Nested Replies Toggle + Thread Mark Read */}
+                  {!isNestedReply && (replies.length > 0 || hasUnread) && (
+                    <div className="flex items-center justify-between gap-2 pt-1.5 mt-1 pl-8 border-t border-slate-800/60">
+                      <div className="flex items-center gap-2">
+                        {replies.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleThreadExpanded(thread);
+                            }}
+                            className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-lg transition cursor-pointer ${
+                              unreadReplyCount > 0
+                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/25'
+                                : 'bg-slate-800/80 text-slate-300 border border-slate-700/70 hover:bg-slate-800 hover:text-white'
+                            }`}
+                          >
+                            {isThreadExpanded ? (
+                              <ChevronDown className="w-3 h-3" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3" />
+                            )}
+                            <CornerDownRight className="w-3 h-3 opacity-80" />
+                            <span>
+                              {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+                            </span>
+                            {unreadReplyCount > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-200 ml-0.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.95)] animate-pulse" />
+                                {unreadReplyCount} new
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReplyingTo(root);
+                              inputRef.current?.focus();
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-blue-300 transition cursor-pointer"
+                          >
+                            <Reply className="w-3 h-3" />
+                            <span>Reply</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {hasUnread && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMarkAsRead(unreadIds);
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-600/30 border border-emerald-500/30 px-2 py-0.5 rounded-md transition cursor-pointer"
+                          title="Mark this conversation and all its nested replies as read"
+                        >
+                          <CheckCheck className="w-3 h-3" />
+                          <span>Mark read</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            };
+
+            return (
+              <div key={root.id} className="space-y-1.5">
+                {/* Parent / Root Message */}
+                {renderMessageCard(root, false)}
+
+                {/* Nested Child Replies Rail */}
+                {replies.length > 0 && isThreadExpanded && (
+                  <div
+                    className={`ml-4 pl-3 space-y-1.5 border-l-2 ${
+                      unreadReplyCount > 0 ? 'border-emerald-500/60' : 'border-slate-700/70'
+                    }`}
+                  >
+                    {replies.map((replyMsg) => renderMessageCard(replyMsg, true))}
+
+                    {/* Quick inline reply button at bottom of nested thread */}
+                    {!isMultiSelectMode && (
+                      <div className="pt-0.5 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyingTo(replies[replies.length - 1] || root);
                             inputRef.current?.focus();
                           }}
-                          className="text-[11px] text-slate-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition cursor-pointer"
-                          title="Reply to this message"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 hover:text-blue-300 px-2 py-0.5 rounded hover:bg-slate-800/70 transition cursor-pointer"
                         >
-                          <Reply className="w-3 h-3" />
-                          <span>Reply</span>
+                          <CornerDownRight className="w-3 h-3" />
+                          <span>Reply to thread...</span>
                         </button>
-
-                        {/* Delete Button */}
-                        {onDeleteMessage && (
-                          deletingMessageId === msg.id ? (
-                            <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/40 rounded px-1.5 py-0.5 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
-                              <span className="text-[10px] text-red-300 font-bold">Delete?</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onDeleteMessage(msg.id);
-                                  setDeletingMessageId(null);
-                                }}
-                                className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.2 rounded transition cursor-pointer"
-                              >
-                                Yes
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDeletingMessageId(null)}
-                                className="text-[10px] text-slate-400 hover:text-white px-1 py-0.2 rounded transition cursor-pointer"
-                              >
-                                No
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletingMessageId(msg.id);
-                              }}
-                              className="text-[11px] text-slate-400 hover:text-red-400 p-1 hover:bg-red-500/10 rounded transition cursor-pointer"
-                              title="Delete message"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )
+                        {unreadReplyCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => onMarkAsRead(unreadIds)}
+                            className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-200 cursor-pointer"
+                          >
+                            Clear green dot
+                          </button>
                         )}
                       </div>
                     )}
                   </div>
-                </div>
-
-                {/* Message Body */}
-                <div className={`text-xs text-slate-300 leading-relaxed ${isMultiSelectMode ? 'pl-14' : 'pl-8'} break-words`}>
-                  {renderMessageContent(msg.text)}
-                </div>
+                )}
               </div>
             );
           })

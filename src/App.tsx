@@ -6,7 +6,8 @@ import {
   getStoredGregDevCards, 
   saveStoredGregDevCards, 
   getStoredGregDevEntries, 
-  saveStoredGregDevEntries 
+  saveStoredGregDevEntries,
+  sanitizeAndDedupeDevProjectCards
 } from './utils/gregDevTimeService';
 import { HeaderNav } from './components/HeaderNav';
 import { AuthScreen } from './components/AuthScreen';
@@ -141,6 +142,11 @@ export default function App() {
   const devEntriesRef = useRef<GregDevTimeEntry[]>(devEntries);
   const jobsRef = useRef<Job[]>(jobs);
   const pendingDevCardMutationRef = useRef<Record<string, { atMs: number; card: GregDevProjectCard }>>({});
+  const initialLocalJobsRef = useRef<Job[]>([]);
+  const initialLocalDevCardsRef = useRef<GregDevProjectCard[]>([]);
+  const initialLocalDevEntriesRef = useRef<GregDevTimeEntry[]>([]);
+  const latestCloudDevCardsRef = useRef<GregDevProjectCard[]>([]);
+  const healedZombieTokensRef = useRef<Set<string>>(new Set());
   const hasActiveWorkOrShiftRef = useRef<boolean>(false);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
   const staffListRef = useRef<StaffUser[]>(staffList);
@@ -205,8 +211,11 @@ export default function App() {
 
   // Initialize jobs, staff, chat, and time cards from local storage or cloud Firestore
   useEffect(() => {
-    // 1. Immediate local fallback load
+    // 1. Immediate local fallback load (also snapshot pre-refresh local state for zombie timer reconciliation)
     const loaded = getStoredJobs();
+    initialLocalJobsRef.current = loaded;
+    initialLocalDevCardsRef.current = getStoredGregDevCards();
+    initialLocalDevEntriesRef.current = getStoredGregDevEntries();
     jobsRef.current = loaded;
     setJobs(loaded);
     if (loaded.length > 0) {
@@ -229,22 +238,125 @@ export default function App() {
     testConnection();
     purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
+    // Helper to heal any zombie job active_timer_start whose session was already stopped & logged
+    const reconcileZombieJobTimers = (cloudJobs: Job[]): Job[] => {
+      const localJobs = initialLocalJobsRef.current;
+      const healedJobsToSync: Job[] = [];
+
+      const sanitized = cloudJobs.map(job => {
+        let modified = false;
+        let nextJob: Job = job;
+
+        if (job.active_timer_start) {
+          const activeStartMs = new Date(job.active_timer_start).getTime();
+          const cloudLogs = job.time_logs || [];
+          const localMatch = localJobs.find(lj => lj.id === job.id);
+          const localLogs = localMatch?.time_logs || [];
+
+          const matchesStart = (log: TimeLog) => {
+            if (!log.endTime || !log.startTime) return false;
+            const logStartMs = new Date(log.startTime).getTime();
+            if (isNaN(logStartMs) || isNaN(activeStartMs)) return false;
+            return Math.abs(logStartMs - activeStartMs) <= 5000;
+          };
+
+          const alreadyLoggedInCloud = !isNaN(activeStartMs) && cloudLogs.some(matchesStart);
+          const alreadyStoppedLocally = Boolean(
+            localMatch &&
+            !localMatch.active_timer_start &&
+            !isNaN(activeStartMs) &&
+            localLogs.some(matchesStart)
+          );
+
+          if (isNaN(activeStartMs) || alreadyLoggedInCloud || alreadyStoppedLocally) {
+            let mergedLogs = cloudLogs;
+            if (alreadyStoppedLocally) {
+              const missingLocalLogs = localLogs.filter(
+                ll => matchesStart(ll) && !cloudLogs.some(cl => cl.id === ll.id || matchesStart(cl))
+              );
+              if (missingLocalLogs.length > 0) {
+                mergedLogs = [...cloudLogs, ...missingLocalLogs];
+              }
+            }
+
+            const totalSec = mergedLogs.reduce((s, l) => s + (l.durationSeconds || 0), 0);
+            nextJob = {
+              ...nextJob,
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              active_timer_delegated_task_id: undefined,
+              time_logs: mergedLogs,
+              total_time_entries: mergedLogs.length,
+              total_duration_minutes: Math.round(totalSec / 60),
+              total_duration_hours: Number((totalSec / 3600).toFixed(2))
+            };
+            modified = true;
+          }
+        }
+
+        // Also clear any orphaned delegated task activeTimerStart already logged in time_logs
+        if (nextJob.delegated_tasks && nextJob.delegated_tasks.length > 0) {
+          const logs = nextJob.time_logs || [];
+          let taskChanged = false;
+          const cleanedTasks = nextJob.delegated_tasks.map(t => {
+            if (!t.activeTimerStart) return t;
+            const tStartMs = new Date(t.activeTimerStart).getTime();
+            const isAlreadyLogged =
+              isNaN(tStartMs) ||
+              logs.some(l => l.endTime && l.startTime && Math.abs(new Date(l.startTime).getTime() - tStartMs) <= 5000);
+            if (isAlreadyLogged) {
+              taskChanged = true;
+              return {
+                ...t,
+                activeTimerStart: undefined,
+                activeTimerDrafterName: undefined
+              };
+            }
+            return t;
+          });
+          if (taskChanged) {
+            nextJob = { ...nextJob, delegated_tasks: cleanedTasks };
+            modified = true;
+          }
+        }
+
+        if (modified) {
+          const token = `job:${job.id}:${job.active_timer_start || 'task'}`;
+          if (!healedZombieTokensRef.current.has(token)) {
+            healedZombieTokensRef.current.add(token);
+            healedJobsToSync.push(nextJob);
+          }
+        }
+
+        return nextJob;
+      });
+
+      healedJobsToSync.forEach(hj => {
+        saveJobToFirestore(hj).catch(err => console.warn('[Firestore] Zombie job timer heal notice:', hj.job_number, err));
+      });
+
+      return sanitized;
+    };
+
     // 3. Connect real-time Firestore synchronization
     const unsubscribeJobs = subscribeToJobs(
       (cloudJobs) => {
         if (cloudJobs) {
-          jobsRef.current = cloudJobs;
-          setJobs(cloudJobs);
-          saveStoredJobs(cloudJobs);
+          const sanitizedJobs = reconcileZombieJobTimers(cloudJobs);
+          jobsRef.current = sanitizedJobs;
+          setJobs(sanitizedJobs);
+          saveStoredJobs(sanitizedJobs);
           setSelectedCustomerId(prev => {
-            if (cloudJobs.some(j => j.id === prev)) return prev;
-            return cloudJobs[0]?.id || '';
+            if (sanitizedJobs.some(j => j.id === prev)) return prev;
+            return sanitizedJobs[0]?.id || '';
           });
 
           // Keep selectedJobForDetail synchronized with cloud updates if open
           setSelectedJobForDetail(prevSelected => {
             if (!prevSelected) return null;
-            return cloudJobs.find(j => j.id === prevSelected.id) || null;
+            return sanitizedJobs.find(j => j.id === prevSelected.id) || null;
           });
         }
       },
@@ -310,45 +422,96 @@ export default function App() {
       }
     });
 
+    const reconcileAndHealDevCards = (rawCloudCards: GregDevProjectCard[], entriesForCheck: GregDevTimeEntry[]) => {
+      if (!rawCloudCards || rawCloudCards.length === 0) return;
+
+      // 1. Protect any card whose Start/Stop/Break/ClockOut write is still in-flight (last 8s)
+      const now = Date.now();
+      const protectedCards = rawCloudCards.map(cloudCard => {
+        const pending = pendingDevCardMutationRef.current[cloudCard.id];
+        if (!pending) return cloudCard;
+
+        const cloudMatchesExpected =
+          Boolean(cloudCard.isActive) === Boolean(pending.card.isActive) &&
+          (cloudCard.activeTimerStart || '') === (pending.card.activeTimerStart || '');
+
+        if (cloudMatchesExpected || now - pending.atMs > 8000) {
+          delete pendingDevCardMutationRef.current[cloudCard.id];
+          return cloudCard;
+        }
+
+        return {
+          ...cloudCard,
+          isActive: pending.card.isActive,
+          isPausedByBreak: pending.card.isPausedByBreak,
+          activeTimerStart: pending.card.activeTimerStart,
+          lastStartedAt: pending.card.lastStartedAt,
+          lastStoppedAt: pending.card.lastStoppedAt,
+          todaySeconds: pending.card.todaySeconds,
+          totalSeconds: pending.card.totalSeconds
+        };
+      });
+
+      // 2. Combine cloud entries with pre-refresh local entries so zombie detection works regardless of listener arrival order
+      const combinedEntries: GregDevTimeEntry[] = [...entriesForCheck];
+      const seenEntryIds = new Set(entriesForCheck.map(e => e.id));
+      for (const localEntry of initialLocalDevEntriesRef.current) {
+        if (!seenEntryIds.has(localEntry.id)) {
+          combinedEntries.push(localEntry);
+        }
+      }
+
+      // 3. Auto-heal zombie/corrupt active cards & deduplicate duplicate projectType docs
+      const { cards: cleanCards, healedCards, duplicateIdsToDelete } = sanitizeAndDedupeDevProjectCards(
+        protectedCards,
+        combinedEntries,
+        initialLocalDevCardsRef.current
+      );
+
+      // Persist healed zombie cards back to Firestore permanently so future hard refreshes never resurrect them
+      healedCards.forEach(card => {
+        const orig = protectedCards.find(c => c.id === card.id);
+        const token = `dev:${card.id}:${orig?.activeTimerStart || 'null'}:${Boolean(orig?.isActive)}`;
+        if (!healedZombieTokensRef.current.has(token)) {
+          healedZombieTokensRef.current.add(token);
+          pendingDevCardMutationRef.current[card.id] = { atMs: Date.now(), card };
+          saveSingleDevProjectCardToFirestore(card);
+        }
+      });
+
+      // Delete any duplicate projectType docs from Firestore permanently
+      duplicateIdsToDelete.forEach(dupId => {
+        const token = `dev-dup:${dupId}`;
+        if (!healedZombieTokensRef.current.has(token)) {
+          healedZombieTokensRef.current.add(token);
+          deleteDevProjectCardFromFirestore(dupId).catch(err =>
+            console.warn('[Firestore] Duplicate dev card cleanup notice:', dupId, err)
+          );
+        }
+      });
+
+      devCardsRef.current = cleanCards;
+      setDevCards(cleanCards);
+      saveStoredGregDevCards(cleanCards);
+    };
+
     const unsubscribeDevEntries = subscribeToDevTimeEntries((entries) => {
       if (entries) {
+        devEntriesRef.current = entries;
         setDevEntries(entries);
         saveStoredGregDevEntries(entries);
+
+        // Re-run dev card zombie reconciliation now that cloud entries have arrived
+        if (latestCloudDevCardsRef.current.length > 0) {
+          reconcileAndHealDevCards(latestCloudDevCardsRef.current, entries);
+        }
       }
     });
 
     const unsubscribeDevCards = subscribeToDevProjectCards((cards) => {
       if (cards && cards.length > 0) {
-        // Protect any card whose Start/Stop write is still in-flight (last 8s) from an older cloud snapshot
-        const now = Date.now();
-        const reconciled = cards.map(cloudCard => {
-          const pending = pendingDevCardMutationRef.current[cloudCard.id];
-          if (!pending) return cloudCard;
-
-          const cloudMatchesExpected =
-            Boolean(cloudCard.isActive) === Boolean(pending.card.isActive) &&
-            (cloudCard.activeTimerStart || '') === (pending.card.activeTimerStart || '');
-
-          if (cloudMatchesExpected || now - pending.atMs > 8000) {
-            delete pendingDevCardMutationRef.current[cloudCard.id];
-            return cloudCard;
-          }
-
-          return {
-            ...cloudCard,
-            isActive: pending.card.isActive,
-            isPausedByBreak: pending.card.isPausedByBreak,
-            activeTimerStart: pending.card.activeTimerStart,
-            lastStartedAt: pending.card.lastStartedAt,
-            lastStoppedAt: pending.card.lastStoppedAt,
-            todaySeconds: pending.card.todaySeconds,
-            totalSeconds: pending.card.totalSeconds
-          };
-        });
-
-        devCardsRef.current = reconciled;
-        setDevCards(reconciled);
-        saveStoredGregDevCards(reconciled);
+        latestCloudDevCardsRef.current = cards;
+        reconcileAndHealDevCards(cards, devEntriesRef.current);
       }
     });
 
@@ -1196,9 +1359,14 @@ export default function App() {
 
         if (newDevLogs.length > 0) {
           const allEntries = [...newDevLogs, ...devEntriesRef.current];
+          devEntriesRef.current = allEntries;
           setDevEntries(allEntries);
           saveStoredGregDevEntries(allEntries);
         }
+        pausedCardsToSave.forEach(card => {
+          pendingDevCardMutationRef.current[card.id] = { atMs: Date.now(), card };
+        });
+        devCardsRef.current = updatedDevCards;
         setDevCards(updatedDevCards);
         saveStoredGregDevCards(updatedDevCards);
         pausedCardsToSave.forEach(card => {
@@ -1326,6 +1494,10 @@ export default function App() {
           }
           return c;
         });
+        resumedCardsToSave.forEach(card => {
+          pendingDevCardMutationRef.current[card.id] = { atMs: Date.now(), card };
+        });
+        devCardsRef.current = updatedDevCards;
         setDevCards(updatedDevCards);
         saveStoredGregDevCards(updatedDevCards);
         resumedCardsToSave.forEach(card => {
@@ -1564,10 +1736,15 @@ export default function App() {
 
       if (newDevLogs.length > 0) {
         const allEntries = [...newDevLogs, ...devEntriesRef.current];
+        devEntriesRef.current = allEntries;
         setDevEntries(allEntries);
         saveStoredGregDevEntries(allEntries);
       }
       if (stoppedCardsToSave.length > 0) {
+        stoppedCardsToSave.forEach(card => {
+          pendingDevCardMutationRef.current[card.id] = { atMs: Date.now(), card };
+        });
+        devCardsRef.current = updatedDevCards;
         setDevCards(updatedDevCards);
         saveStoredGregDevCards(updatedDevCards);
         stoppedCardsToSave.forEach(card => {
@@ -1664,47 +1841,56 @@ export default function App() {
 
     const prevCards = devCardsRef.current;
     const currentCard = prevCards.find(c => c.id === cardId);
-    if (!currentCard || !currentCard.isActive || !currentCard.activeTimerStart) return 0;
+    if (!currentCard || (!currentCard.isActive && !currentCard.activeTimerStart)) return 0;
 
-    const startMs = new Date(currentCard.activeTimerStart).getTime();
     const endMs = Date.now();
-    const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
-    const hours = durationSeconds / 3600;
-    const rate = currentStaff.hourlyRate || 150;
-    const billableAmount = Number((hours * rate).toFixed(2));
-    const todayStr = getLocalDateString(new Date(endMs));
+    const startMs = currentCard.activeTimerStart ? new Date(currentCard.activeTimerStart).getTime() : NaN;
+    const hasValidStart = !isNaN(startMs);
     const noteToLog = (notesOverride !== undefined ? notesOverride : currentCard.currentNotes)?.trim() || `Dev session on ${currentCard.projectType}`;
 
-    const newEntry: GregDevTimeEntry = {
-      id: `dev-entry-${endMs}-${Math.random().toString(36).substr(2, 4)}`,
-      staffId: currentStaff.id,
-      staffName: currentStaff.name,
-      projectType: currentCard.projectType,
-      date: todayStr,
-      startTime: currentCard.activeTimerStart,
-      endTime: new Date(endMs).toISOString(),
-      durationSeconds,
-      notes: noteToLog,
-      hourlyRate: rate,
-      billableAmount,
-      shiftId: activeShiftId,
-      createdAt: new Date(endMs).toISOString()
-    };
+    let durationSeconds = 0;
+    let updatedEntries = devEntriesRef.current;
 
-    const updatedEntries = [newEntry, ...devEntriesRef.current];
-    devEntriesRef.current = updatedEntries;
-    setDevEntries(updatedEntries);
-    saveStoredGregDevEntries(updatedEntries);
-    saveDevTimeEntryToFirestore(newEntry);
+    if (hasValidStart && currentCard.activeTimerStart) {
+      durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
+      const hours = durationSeconds / 3600;
+      const rate = currentStaff.hourlyRate || 150;
+      const billableAmount = Number((hours * rate).toFixed(2));
+      const todayStr = getLocalDateString(new Date(endMs));
 
+      const newEntry: GregDevTimeEntry = {
+        id: `dev-entry-${endMs}-${Math.random().toString(36).substr(2, 4)}`,
+        staffId: currentStaff.id,
+        staffName: currentStaff.name,
+        projectType: currentCard.projectType,
+        date: todayStr,
+        startTime: currentCard.activeTimerStart,
+        endTime: new Date(endMs).toISOString(),
+        durationSeconds,
+        notes: noteToLog,
+        hourlyRate: rate,
+        billableAmount,
+        shiftId: activeShiftId,
+        createdAt: new Date(endMs).toISOString()
+      };
+
+      updatedEntries = [newEntry, ...devEntriesRef.current];
+      devEntriesRef.current = updatedEntries;
+      setDevEntries(updatedEntries);
+      saveStoredGregDevEntries(updatedEntries);
+      saveDevTimeEntryToFirestore(newEntry);
+    }
+
+    const todayStr = getLocalDateString(new Date(endMs));
     let stoppedCard: GregDevProjectCard | null = null;
     const next = prevCards.map(c => {
       if (c.id !== cardId) return c;
+      const normType = (c.projectType || '').trim().toLowerCase();
       const cardTodaySec = updatedEntries
-        .filter(e => e.projectType === c.projectType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
+        .filter(e => (e.projectType || '').trim().toLowerCase() === normType && (e.date === todayStr || (e.startTime && getLocalDateString(new Date(e.startTime)) === todayStr)))
         .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
       const cardTotalSec = updatedEntries
-        .filter(e => e.projectType === c.projectType)
+        .filter(e => (e.projectType || '').trim().toLowerCase() === normType)
         .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
       stoppedCard = {
         ...c,
@@ -1753,12 +1939,15 @@ export default function App() {
   };
 
   const handleAddDevCard = (newCard: GregDevProjectCard) => {
-    setDevCards(prev => {
-      if (prev.some(c => c.id === newCard.id)) return prev;
-      const next = [...prev, newCard];
-      saveStoredGregDevCards(next);
-      return next;
-    });
+    const prevCards = devCardsRef.current;
+    const normNewType = (newCard.projectType || '').trim().toLowerCase();
+    if (prevCards.some(c => c.id === newCard.id || (c.projectType || '').trim().toLowerCase() === normNewType)) {
+      return;
+    }
+    const next = [...prevCards, newCard];
+    devCardsRef.current = next;
+    setDevCards(next);
+    saveStoredGregDevCards(next);
     saveSingleDevProjectCardToFirestore(newCard);
   };
 
@@ -1767,11 +1956,10 @@ export default function App() {
       clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
       delete devCardNotesDebounceMapRef.current[cardId];
     }
-    setDevCards(prev => {
-      const next = prev.filter(c => c.id !== cardId);
-      saveStoredGregDevCards(next);
-      return next;
-    });
+    const next = devCardsRef.current.filter(c => c.id !== cardId);
+    devCardsRef.current = next;
+    setDevCards(next);
+    saveStoredGregDevCards(next);
     deleteDevProjectCardFromFirestore(cardId).catch(err => console.warn('[Firestore] Dev card delete error:', err));
   };
 
@@ -1937,33 +2125,46 @@ export default function App() {
   ) => {
     const replyTarget = replyToId ? chatMessages.find(m => m.id === replyToId) : undefined;
     const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       senderId: currentStaff.id,
       senderName: currentStaff.name,
-      senderRole: currentStaff.title,
+      senderRole: currentStaff.title || '',
       text,
       timestamp: new Date().toISOString(),
-      mentions,
-      referencedJobNumbers,
-      replyToId,
-      replyToMessage: replyTarget ? {
-        id: replyTarget.id,
-        senderName: replyTarget.senderName,
-        text: replyTarget.text.slice(0, 80)
-      } : undefined,
+      ...(mentions && mentions.length > 0 ? { mentions } : {}),
+      ...(referencedJobNumbers && referencedJobNumbers.length > 0 ? { referencedJobNumbers } : {}),
+      ...(replyToId ? { replyToId } : {}),
+      ...(replyTarget
+        ? {
+            replyToMessage: {
+              id: replyTarget.id,
+              senderName: replyTarget.senderName,
+              text: (replyTarget.text || '').slice(0, 80)
+            }
+          }
+        : {}),
       readByStaffIds: [currentStaff.id],
       channelId: 'general'
     };
 
-    const updated = [...chatMessages, newMsg];
-    setChatMessages(updated);
-    saveStoredChatMessages(updated);
+    setChatMessages(prev => {
+      const updated = [...prev, newMsg];
+      saveStoredChatMessages(updated);
+      return updated;
+    });
     saveChatMessageToFirestore(newMsg).catch(err => console.warn('[Firestore] Error saving chat message:', err));
+
+    const lookupRoster = staffList.length > 0 ? staffList : STAFF_USERS;
 
     // If mentions exist, dispatch app notifications to the mentioned staff
     if (mentions && mentions.length > 0) {
       mentions.forEach(mentionedName => {
-        const targetStaff = STAFF_USERS.find(s => s.name.toLowerCase() === mentionedName.toLowerCase());
+        const lowerM = mentionedName.toLowerCase().trim();
+        const targetStaff = lookupRoster.find(
+          s =>
+            s.name.toLowerCase() === lowerM ||
+            s.name.toLowerCase().split(/\s+/)[0] === lowerM
+        );
         if (targetStaff && targetStaff.id !== currentStaff.id) {
           const notif: AppNotification = {
             id: `notif-chat-${Date.now()}-${targetStaff.id}`,
@@ -1983,10 +2184,13 @@ export default function App() {
 
     // If replying to someone else's message, notify them
     if (replyTarget && replyTarget.senderId !== currentStaff.id) {
+      const replyTargetStaff = lookupRoster.find(
+        s => s.id === replyTarget.senderId || s.name.toLowerCase() === (replyTarget.senderName || '').toLowerCase()
+      );
       const notif: AppNotification = {
         id: `notif-reply-${Date.now()}`,
         recipientName: replyTarget.senderName,
-        recipientEmail: '',
+        recipientEmail: replyTargetStaff?.email || '',
         title: `↩️ ${currentStaff.name} replied to your message in Studio Chat`,
         message: `"${text.slice(0, 100)}${text.length > 100 ? '...' : ''}"`,
         timestamp: new Date().toISOString(),
@@ -2018,17 +2222,22 @@ export default function App() {
     deleteMultipleChatMessagesFromFirestore(messageIds).catch(err => console.warn('[Firestore] Error deleting multiple chat messages:', err));
   };
 
-  const handleMarkChatRead = () => {
+  const handleMarkChatRead = (specificMessageIds?: string[]) => {
     setChatMessages(prev => {
-      const relevantMsgs = prev.filter(m => isMessageRelevantForUser(m, currentStaff, jobs));
+      const targetSet = specificMessageIds && specificMessageIds.length > 0 ? new Set(specificMessageIds) : null;
+      const relevantMsgs = prev.filter(m => {
+        if (targetSet) return targetSet.has(m.id);
+        return isMessageRelevantForUser(m, currentStaff, jobs, prev);
+      });
       const unreadIds = relevantMsgs
         .filter(m => !(m.readByStaffIds || []).includes(currentStaff.id))
         .map(m => m.id);
 
       if (unreadIds.length === 0) return prev;
 
+      const unreadSet = new Set(unreadIds);
       const updated = prev.map(m => {
-        if (unreadIds.includes(m.id)) {
+        if (unreadSet.has(m.id)) {
           return { ...m, readByStaffIds: [...(m.readByStaffIds || []), currentStaff.id] };
         }
         return m;
@@ -2039,9 +2248,9 @@ export default function App() {
     });
   };
 
-  // Count unread chat messages for current staff (only counting messages relevant to their profile)
+  // Count unread chat messages for current staff (only counting messages visible to their profile)
   const unreadChatCount = chatMessages.filter(
-    m => isMessageRelevantForUser(m, currentStaff, jobs) && !m.readByStaffIds.includes(currentStaff.id)
+    m => isMessageRelevantForUser(m, currentStaff, jobs, chatMessages) && !(m.readByStaffIds || []).includes(currentStaff.id)
   ).length;
 
   // 1. Update Job Status & Automatically Trigger Email

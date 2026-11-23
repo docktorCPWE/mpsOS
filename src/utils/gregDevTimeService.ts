@@ -223,6 +223,202 @@ export const INITIAL_GREG_DEV_ENTRIES: GregDevTimeEntry[] = [
   }
 ];
 
+export interface ReconciledDevCardsResult {
+  cards: GregDevProjectCard[];
+  healedCards: GregDevProjectCard[];
+  duplicateIdsToDelete: string[];
+}
+
+const CANONICAL_DEV_CARD_IDS = new Set([
+  'dev-card-mps-os',
+  'dev-card-bigx-media',
+  'dev-card-sound-extraction',
+  'dev-card-other-dev',
+  'dev-card-fb-media'
+]);
+
+function normalizeDevProjectType(projectType?: string): string {
+  return (projectType || 'Other Dev').trim().toLowerCase();
+}
+
+function parseTimestampMs(iso?: string): number {
+  if (!iso) return NaN;
+  const ms = new Date(iso).getTime();
+  return isNaN(ms) ? NaN : ms;
+}
+
+/**
+ * Reconciles Greg Dev Project Cards against completed dev_time_entries (and optional local snapshot):
+ * 1. Auto-heals corrupt active cards (isActive: true with missing/invalid activeTimerStart)
+ * 2. Auto-heals zombie active cards whose timer session was ALREADY stopped & logged in dev_time_entries
+ *    or whose lastStoppedAt >= activeTimerStart (e.g. from older stopped-card sync failures)
+ * 3. Clears orphaned activeTimerStart on inactive cards
+ * 4. Deduplicates duplicate Firestore docs for the same projectType so a hard refresh never
+ *    shows phantom duplicate timers.
+ * 5. Recalculates todaySeconds & totalSeconds cleanly from entries.
+ */
+export function sanitizeAndDedupeDevProjectCards(
+  cards: GregDevProjectCard[],
+  entries: GregDevTimeEntry[],
+  localCardsSnapshot?: GregDevProjectCard[],
+  todayStr: string = getLocalDateString(new Date())
+): ReconciledDevCardsResult {
+  const healedMap = new Map<string, GregDevProjectCard>();
+  const duplicateIdsToDelete: string[] = [];
+
+  const sanitized: GregDevProjectCard[] = cards.map(card => {
+    const normType = normalizeDevProjectType(card.projectType);
+    const startMs = parseTimestampMs(card.activeTimerStart);
+    let nextCard: GregDevProjectCard = { ...card };
+    let needsHeal = false;
+
+    if (card.isActive) {
+      if (!card.activeTimerStart || isNaN(startMs)) {
+        // Corrupt active card without a valid start timestamp
+        nextCard = {
+          ...nextCard,
+          isActive: false,
+          isPausedByBreak: false,
+          activeTimerStart: undefined
+        };
+        needsHeal = true;
+      } else {
+        let stopIso: string | undefined;
+
+        // Proof 1: Card's own lastStoppedAt is at or after activeTimerStart
+        const cardStoppedMs = parseTimestampMs(card.lastStoppedAt);
+        if (!isNaN(cardStoppedMs) && cardStoppedMs >= startMs) {
+          stopIso = card.lastStoppedAt;
+        }
+
+        // Proof 2: A completed dev_time_entry already exists for this exact session (or a newer one on this card)
+        if (!stopIso && entries && entries.length > 0) {
+          const matchingEntry = entries.find(e => {
+            if (normalizeDevProjectType(e.projectType) !== normType) return false;
+            if (!e.endTime) return false;
+            const eStartMs = parseTimestampMs(e.startTime);
+            const eEndMs = parseTimestampMs(e.endTime);
+            if (isNaN(eStartMs) || isNaN(eEndMs)) return false;
+            // Exact/near-exact match for this active session start, OR a completed session started at/after startMs
+            return Math.abs(eStartMs - startMs) <= 5000 || eStartMs >= startMs;
+          });
+          if (matchingEntry) {
+            stopIso = matchingEntry.endTime;
+          }
+        }
+
+        // Proof 3: Browser's pre-refresh localStorage snapshot explicitly stopped this exact session
+        if (!stopIso && localCardsSnapshot && localCardsSnapshot.length > 0) {
+          const localMatch = localCardsSnapshot.find(
+            lc => lc.id === card.id || normalizeDevProjectType(lc.projectType) === normType
+          );
+          if (localMatch && !localMatch.isActive) {
+            const localStoppedMs = parseTimestampMs(localMatch.lastStoppedAt);
+            if (!isNaN(localStoppedMs) && localStoppedMs >= startMs) {
+              stopIso = localMatch.lastStoppedAt;
+            }
+          }
+        }
+
+        if (stopIso) {
+          nextCard = {
+            ...nextCard,
+            isActive: false,
+            isPausedByBreak: false,
+            activeTimerStart: undefined,
+            lastStoppedAt: stopIso
+          };
+          needsHeal = true;
+        }
+      }
+    } else if (card.activeTimerStart) {
+      // Inactive card with leftover activeTimerStart
+      nextCard = {
+        ...nextCard,
+        activeTimerStart: undefined
+      };
+      needsHeal = true;
+    }
+
+    if (needsHeal) {
+      healedMap.set(nextCard.id, nextCard);
+    }
+    return nextCard;
+  });
+
+  // Deduplicate cards that share the exact same normalized projectType
+  const byType = new Map<string, GregDevProjectCard[]>();
+  const typeOrder: string[] = [];
+  for (const card of sanitized) {
+    const key = normalizeDevProjectType(card.projectType);
+    if (!byType.has(key)) {
+      byType.set(key, []);
+      typeOrder.push(key);
+    }
+    byType.get(key)!.push(card);
+  }
+
+  const deduped: GregDevProjectCard[] = [];
+  for (const key of typeOrder) {
+    const group = byType.get(key)!;
+    if (group.length === 1) {
+      deduped.push(group[0]);
+      continue;
+    }
+
+    // Pick single authoritative card for this projectType
+    const sorted = [...group].sort((a, b) => {
+      const aRunning = a.isActive && Boolean(a.activeTimerStart) ? 1 : 0;
+      const bRunning = b.isActive && Boolean(b.activeTimerStart) ? 1 : 0;
+      if (aRunning !== bRunning) return bRunning - aRunning;
+
+      if (aRunning && bRunning) {
+        const aStart = parseTimestampMs(a.activeTimerStart) || 0;
+        const bStart = parseTimestampMs(b.activeTimerStart) || 0;
+        if (aStart !== bStart) return bStart - aStart;
+      }
+
+      const aCanonical = CANONICAL_DEV_CARD_IDS.has(a.id) ? 1 : 0;
+      const bCanonical = CANONICAL_DEV_CARD_IDS.has(b.id) ? 1 : 0;
+      if (aCanonical !== bCanonical) return bCanonical - aCanonical;
+
+      const aLast = Math.max(parseTimestampMs(a.lastStoppedAt) || 0, parseTimestampMs(a.lastStartedAt) || 0);
+      const bLast = Math.max(parseTimestampMs(b.lastStoppedAt) || 0, parseTimestampMs(b.lastStartedAt) || 0);
+      if (aLast !== bLast) return bLast - aLast;
+
+      return (b.totalSeconds || 0) - (a.totalSeconds || 0);
+    });
+
+    const winner = { ...sorted[0] };
+    for (let i = 1; i < sorted.length; i++) {
+      const loser = sorted[i];
+      duplicateIdsToDelete.push(loser.id);
+      healedMap.delete(loser.id);
+      winner.todaySeconds = Math.max(winner.todaySeconds || 0, loser.todaySeconds || 0);
+      winner.totalSeconds = Math.max(winner.totalSeconds || 0, loser.totalSeconds || 0);
+      if (!winner.currentNotes && loser.currentNotes) {
+        winner.currentNotes = loser.currentNotes;
+      }
+    }
+    deduped.push(winner);
+  }
+
+  // Reconcile todaySeconds & totalSeconds against entries
+  const finalCards = reconcileGregDevCardsWithEntries(deduped, entries, todayStr);
+  const finalHealed: GregDevProjectCard[] = [];
+  for (const fc of finalCards) {
+    if (healedMap.has(fc.id)) {
+      finalHealed.push(fc);
+    }
+  }
+
+  return {
+    cards: finalCards,
+    healedCards: finalHealed,
+    duplicateIdsToDelete
+  };
+}
+
 /**
  * Reconciles project cards so their todaySeconds accurately reflects ONLY entries
  * completed today, preventing multi-day inflation or runaway numbers.
@@ -233,16 +429,17 @@ export function reconcileGregDevCardsWithEntries(
   todayStr: string = getLocalDateString(new Date())
 ): GregDevProjectCard[] {
   return cards.map(card => {
+    const normType = normalizeDevProjectType(card.projectType);
     const todaySec = entries
       .filter(e => {
-        if (e.projectType !== card.projectType) return false;
+        if (normalizeDevProjectType(e.projectType) !== normType) return false;
         const entryDate = e.date || (e.startTime ? getLocalDateString(new Date(e.startTime)) : '');
         return entryDate === todayStr;
       })
       .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
 
     const allTimeSec = entries
-      .filter(e => e.projectType === card.projectType)
+      .filter(e => normalizeDevProjectType(e.projectType) === normType)
       .reduce((sum, e) => sum + (e.durationSeconds || 0), 0);
 
     return {
@@ -268,9 +465,9 @@ export function getStoredGregDevCards(): GregDevProjectCard[] {
       }
     }
 
-    // Auto-reconcile with stored entries so today's total is strictly accurate for today
+    // Auto-reconcile & sanitize with stored entries so zombies/duplicates never persist locally
     const entries = getStoredGregDevEntries();
-    const reconciled = reconcileGregDevCardsWithEntries(cards, entries);
+    const { cards: reconciled } = sanitizeAndDedupeDevProjectCards(cards, entries);
     localStorage.setItem(GREG_DEV_STORAGE_CARDS_KEY, JSON.stringify(reconciled));
     return reconciled;
   } catch (err) {

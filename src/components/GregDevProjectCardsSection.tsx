@@ -719,12 +719,26 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
   // Stop timer and log session (atomic single-card update)
   const handleStopTimer = (cardId: string, notesOverride?: string) => {
     const card = devCards.find(c => c.id === cardId);
-    if (!card || !card.isActive || !card.activeTimerStart) return;
+    if (!card || (!card.isActive && !card.activeTimerStart)) return;
 
     if (onStopDevCardTimer) {
       const loggedSec = onStopDevCardTimer(cardId, notesOverride, activeShiftId);
-      const mins = typeof loggedSec === 'number' ? Math.max(1, Math.round(loggedSec / 60)) : Math.max(1, Math.round((Date.now() - new Date(card.activeTimerStart).getTime()) / 60000));
-      triggerToast(`Logged ${mins} min${mins === 1 ? '' : 's'} to ${card.projectType}.`);
+      if (loggedSec > 0) {
+        const mins = Math.max(1, Math.round(loggedSec / 60));
+        triggerToast(`Logged ${mins} min${mins === 1 ? '' : 's'} to ${card.projectType}.`);
+      } else {
+        triggerToast(`Stopped timer on ${card.projectType}.`);
+      }
+      return;
+    }
+
+    if (!card.activeTimerStart) {
+      const clearedCards = devCards.map(c =>
+        c.id === cardId ? { ...c, isActive: false, isPausedByBreak: false, activeTimerStart: undefined } : c
+      );
+      onUpdateDevCards(clearedCards);
+      saveStoredGregDevCards(clearedCards);
+      triggerToast(`Stopped timer on ${card.projectType}.`);
       return;
     }
 
@@ -821,8 +835,8 @@ export const GregDevProjectCardsSection: React.FC<GregDevProjectCardsSectionProp
     saveStoredGregDevCards(updated);
   };
 
-  // Count active timers
-  const activeCount = devCards.filter(c => c.isActive).length;
+  // Count active timers (must have valid activeTimerStart, matching TimeClockBar)
+  const activeCount = devCards.filter(c => c.isActive && Boolean(c.activeTimerStart)).length;
   const pausedByBreakCount = devCards.filter(c => c.isPausedByBreak).length;
 
   return (

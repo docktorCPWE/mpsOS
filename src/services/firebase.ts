@@ -530,7 +530,26 @@ export function subscribeToChat(
       (snapshot) => {
         const msgs: ChatMessage[] = [];
         snapshot.forEach((docSnap) => {
-          msgs.push({ ...(docSnap.data() as ChatMessage), id: docSnap.id });
+          const data = docSnap.data() as Record<string, any>;
+          const rawTs = data.timestamp;
+          const normalizedTs =
+            rawTs && typeof rawTs === 'object' && typeof rawTs.toDate === 'function'
+              ? rawTs.toDate().toISOString()
+              : typeof rawTs === 'string' && rawTs
+              ? rawTs
+              : new Date(0).toISOString();
+
+          msgs.push({
+            ...(data as ChatMessage),
+            id: docSnap.id,
+            senderId: typeof data.senderId === 'string' ? data.senderId : '',
+            senderName: typeof data.senderName === 'string' && data.senderName.trim() ? data.senderName : 'Team Member',
+            text: typeof data.text === 'string' ? data.text : '',
+            timestamp: normalizedTs,
+            mentions: Array.isArray(data.mentions) ? data.mentions : undefined,
+            referencedJobNumbers: Array.isArray(data.referencedJobNumbers) ? data.referencedJobNumbers : undefined,
+            readByStaffIds: Array.isArray(data.readByStaffIds) ? data.readByStaffIds : []
+          });
         });
         msgs.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
         onUpdate(msgs);
@@ -549,7 +568,14 @@ export function subscribeToChat(
 export async function saveChatMessageToFirestore(message: ChatMessage): Promise<void> {
   const path = `discussions/${message.id}`;
   try {
-    await setDoc(doc(db, 'discussions', message.id), message, { merge: true });
+    // Strip all undefined fields so Firestore setDoc never rejects optional fields (mentions, replyToId, etc.)
+    const sanitized = JSON.parse(
+      JSON.stringify({
+        ...message,
+        readByStaffIds: Array.isArray(message.readByStaffIds) ? message.readByStaffIds : []
+      })
+    );
+    await setDoc(doc(db, 'discussions', message.id), sanitized, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -742,15 +768,16 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
       chatSnap.forEach((d) => {
         const m = d.data() as ChatMessage;
         const text = (m.text || '').toLowerCase();
-        const hasTestJob = (m.referencedJobNumbers || []).some(j => 
-          j.includes('195') || j.includes('1000') || j.includes('8800') || j.includes('300')
-        );
+        const hasTestJob = (m.referencedJobNumbers || []).some(j => {
+          const clean = String(j || '').replace(/^#/, '').trim().toUpperCase();
+          return ['M26-195', '195', 'M26-1000', '1000', 'M26-8800', '8800', 'M26-300', '300'].includes(clean);
+        });
         const isTestMessage = 
           hasTestJob ||
-          text.includes('m26-195') || 
-          text.includes('m26-1000') || 
-          text.includes('m26-8800') || 
-          text.includes('m26-300') || 
+          /\bm26-195\b/i.test(text) || 
+          /\bm26-1000\b/i.test(text) || 
+          /\bm26-8800\b/i.test(text) || 
+          /\bm26-300\b/i.test(text) || 
           text.includes('smiley') ||
           text.includes('chelsey') ||
           text.includes('testing dummy') ||
