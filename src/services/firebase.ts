@@ -41,7 +41,12 @@ export const ROOT_OWNER_EMAILS = ['arkcwd@gmail.com', 'greg.hyatt@myplanstore.co
 // and legacy browserLocalPersistence sessions from earlier visits are cleanly signed out.
 export const AUTH_SESSION_STORAGE_KEY = 'mps_auth_session_active_v1';
 
+// In-memory session flag guards against both async onAuthStateChanged timing races
+// and environments where sessionStorage may be restricted.
+let inMemoryAuthSessionActive = false;
+
 export function markAuthSessionActive(uid?: string): void {
+  inMemoryAuthSessionActive = true;
   try {
     sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, uid || 'active');
   } catch {
@@ -50,6 +55,7 @@ export function markAuthSessionActive(uid?: string): void {
 }
 
 export function hasActiveAuthSession(): boolean {
+  if (inMemoryAuthSessionActive) return true;
   try {
     return Boolean(sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY));
   } catch {
@@ -58,6 +64,7 @@ export function hasActiveAuthSession(): boolean {
 }
 
 export function clearAuthSessionMarker(): void {
+  inMemoryAuthSessionActive = false;
   try {
     sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
     localStorage.removeItem('my_plan_store_os_active_staff_id_v1');
@@ -793,31 +800,45 @@ export async function registerWithEmail(
   pass: string,
   fullName: string
 ): Promise<User> {
-  await setPersistence(auth, browserSessionPersistence);
-  const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-  const user = userCredential.user;
-  markAuthSessionActive(user.uid);
+  // Mark active BEFORE calling Firebase Auth so onAuthStateChanged never treats this fresh sign-up as stale
+  markAuthSessionActive('pending');
+  try {
+    await setPersistence(auth, browserSessionPersistence);
+    const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+    const user = userCredential.user;
+    markAuthSessionActive(user.uid);
 
-  // Set profile display name
-  if (fullName.trim()) {
-    await updateProfile(user, { displayName: fullName.trim() });
+    // Set profile display name
+    if (fullName.trim()) {
+      await updateProfile(user, { displayName: fullName.trim() });
+    }
+
+    // Send email verification link
+    await sendEmailVerification(user);
+    console.log('[Auth] Verification email sent to:', user.email);
+
+    return user;
+  } catch (err) {
+    clearAuthSessionMarker();
+    throw err;
   }
-
-  // Send email verification link
-  await sendEmailVerification(user);
-  console.log('[Auth] Verification email sent to:', user.email);
-
-  return user;
 }
 
 export async function loginWithEmail(
   email: string,
   pass: string
 ): Promise<User> {
-  await setPersistence(auth, browserSessionPersistence);
-  const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
-  markAuthSessionActive(userCredential.user.uid);
-  return userCredential.user;
+  // Mark active BEFORE calling Firebase Auth because onAuthStateChanged fires before the promise resolves
+  markAuthSessionActive('pending');
+  try {
+    await setPersistence(auth, browserSessionPersistence);
+    const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
+    markAuthSessionActive(userCredential.user.uid);
+    return userCredential.user;
+  } catch (err) {
+    clearAuthSessionMarker();
+    throw err;
+  }
 }
 
 export async function logoutUser(staffId?: string): Promise<void> {

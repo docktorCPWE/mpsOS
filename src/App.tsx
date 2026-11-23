@@ -332,8 +332,13 @@ export default function App() {
 
   // Listen to Firebase Auth state & enforce session-scoped login (no stale cookies keeping users logged in)
   useEffect(() => {
+    let isInitialBootCheck = true;
+
     const unsubscribeAuth = subscribeToAuth(async (user) => {
-      if (user && !hasActiveAuthSession()) {
+      const checkingInitialBoot = isInitialBootCheck;
+      isInitialBootCheck = false;
+
+      if (checkingInitialBoot && user && !hasActiveAuthSession()) {
         // User reopened browser/tab with a stale persistent session from an earlier visit:
         // sign them out cleanly so reopening the app requires logging back in.
         console.log('[Auth] Cleared stale previous-browser session for:', user.email);
@@ -349,6 +354,10 @@ export default function App() {
         setAuthenticatedStaff(null);
         setIsAuthLoading(false);
         return;
+      }
+
+      if (user) {
+        markAuthSessionActive(user.uid);
       }
 
       setAuthUser(user);
