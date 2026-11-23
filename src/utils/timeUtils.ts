@@ -539,3 +539,61 @@ export function isStaffOnlineWithActivity(
     activeShiftStart: activeShift?.clockInTime
   });
 }
+
+export const JOB_TIMER_INTENTS_STORAGE_KEY = 'myplanstore_job_timer_intents_v1';
+
+export type JobTimerIntent =
+  | {
+      state: 'running';
+      active_timer_start: string;
+      active_timer_task?: string;
+      active_timer_drafter_id?: string;
+      active_timer_drafter_name?: string;
+      active_timer_delegated_task_id?: string;
+      updatedAtMs: number;
+    }
+  | {
+      state: 'stopped';
+      stoppedAt: string;
+      pausedByBreak?: boolean;
+      paused_timer_task?: string;
+      paused_timer_drafter_id?: string;
+      paused_timer_drafter_name?: string;
+      updatedAtMs: number;
+    };
+
+export function getStoredJobTimerIntents(): Record<string, JobTimerIntent> {
+  try {
+    const raw = localStorage.getItem(JOB_TIMER_INTENTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveStoredJobTimerIntents(intents: Record<string, JobTimerIntent>): void {
+  try {
+    localStorage.setItem(JOB_TIMER_INTENTS_STORAGE_KEY, JSON.stringify(intents));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function recordJobTimerIntent(jobId: string, intent: JobTimerIntent): void {
+  if (!jobId) return;
+  const intents = getStoredJobTimerIntents();
+  intents[jobId] = intent;
+  saveStoredJobTimerIntents(intents);
+}
+
+export function clearJobTimerIntent(jobId: string): void {
+  if (!jobId) return;
+  const intents = getStoredJobTimerIntents();
+  if (jobId in intents) {
+    delete intents[jobId];
+    saveStoredJobTimerIntents(intents);
+  }
+}
+

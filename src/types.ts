@@ -201,6 +201,8 @@ export interface GregDevProjectCard {
   currentNotes?: string;
   lastStartedAt?: string;
   lastStoppedAt?: string;
+  explicitStopAt?: string; // ISO timestamp written ONLY when explicitly stopped by user action (Stop, Break, Clock Out)
+  stoppedReason?: 'user_stop' | 'break' | 'clock_out';
 }
 
 export interface GregDevTimeEntry {
@@ -393,6 +395,7 @@ export interface Job {
   paused_timer_drafter_id?: string;
   paused_timer_drafter_name?: string;
   paused_elapsed_seconds?: number;
+  timer_explicit_stop_at?: string; // ISO timestamp written ONLY when explicitly stopped by user action
   comments: JobComment[];
   deliverables: DeliverableFile[];
   audit_logs: AuditLog[];

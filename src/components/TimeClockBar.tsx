@@ -34,6 +34,8 @@ import { formatSecondsToHHMMSS } from '../utils/timeUtils';
 
 interface TimeClockBarProps {
   currentStaff: StaffUser;
+  authenticatedStaff?: StaffUser | null;
+  isInspectingOtherAccount?: boolean;
   staffList: StaffUser[];
   timeCards: TimeCardShift[];
   jobs: Job[];
@@ -50,6 +52,8 @@ interface TimeClockBarProps {
 
 export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   currentStaff,
+  authenticatedStaff = null,
+  isInspectingOtherAccount = false,
   staffList,
   timeCards,
   jobs,
@@ -148,6 +152,22 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
   const runningDevTimers = isUserGregHyatt(currentStaff)
     ? devCards.filter(c => c.isActive && c.activeTimerStart)
     : [];
+
+  // When inspecting another staff member's account, keep visibility of the signed-in user's own active timers
+  const selfRunningDevTimers =
+    isInspectingOtherAccount && authenticatedStaff && isUserGregHyatt(authenticatedStaff)
+      ? devCards.filter(c => c.isActive && c.activeTimerStart)
+      : [];
+  const selfNameLower = (authenticatedStaff?.name || '').toLowerCase().trim();
+  const selfRunningJobTimer =
+    isInspectingOtherAccount && authenticatedStaff
+      ? jobs.find(j => {
+          if (!j.active_timer_start) return false;
+          if (j.active_timer_drafter_id) return j.active_timer_drafter_id === authenticatedStaff.id;
+          if (j.active_timer_drafter_name) return j.active_timer_drafter_name.toLowerCase().trim() === selfNameLower;
+          return false;
+        })
+      : undefined;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2 font-sans">
@@ -372,78 +392,100 @@ export const TimeClockBar: React.FC<TimeClockBarProps> = ({
               </button>
             </>
           ) : (
-            /* Standard Employee Actions */
+            /* Standard Employee Actions (Read-Only when inspecting another staff member's account) */
             <>
-              {/* CLOCK IN BUTTON */}
-              {currentStatus === 'clocked_out' && (
-                <button
-                  onClick={() => onClockIn()}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer hover:scale-[1.02]"
-                >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>Clock In</span>
-                </button>
-              )}
-
-              {/* START BREAK BUTTON */}
-              {currentStatus === 'clocked_in' && (
-                <button
-                  onClick={onStartBreak}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
-                  title="Pause shift and any active project timers for break"
-                >
-                  <Coffee className="w-3.5 h-3.5" />
-                  <span>Start Break</span>
-                </button>
-              )}
-
-              {/* RETURN FROM BREAK BUTTON */}
-              {currentStatus === 'on_break' && (
-                <button
-                  onClick={onResumeFromBreak}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer animate-pulse"
-                  title="Return from break and resume shift and project timers"
-                >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>Return From Break</span>
-                </button>
-              )}
-
-              {/* CLOCK OUT BUTTON */}
-              {currentStatus !== 'clocked_out' && (
-                confirmClockOut ? (
-                  <div className="flex flex-wrap items-center gap-1.5 bg-rose-950 border border-rose-600 px-2.5 py-1.5 rounded-xl animate-fadeIn">
-                    <span className="text-[11px] text-rose-200 font-semibold">
-                      {userRunningJobTimer || runningDevTimers.length > 0
-                        ? 'Stop all active timers, end shift & sign out other devices?'
-                        : 'End shift & sign out other devices?'}
+              {isInspectingOtherAccount ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-1.5 bg-indigo-950/80 border border-indigo-500/40 text-indigo-200 rounded-xl text-[11px] font-semibold">
+                    Viewing {currentStaff.name.split(' ')[0]}&apos;s Shift (Read-Only)
+                  </span>
+                  {selfRunningDevTimers.length > 0 && (
+                    <span className="px-2.5 py-1.5 bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 rounded-xl text-[11px] font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Your Timer Active: <strong className="text-white">{selfRunningDevTimers.map(c => c.projectType).join(', ')}</strong>
                     </span>
+                  )}
+                  {selfRunningJobTimer && (
+                    <span className="px-2.5 py-1.5 bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 rounded-xl text-[11px] font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Your Job Timer Active: <strong className="text-white">{selfRunningJobTimer.job_number}</strong>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* CLOCK IN BUTTON */}
+                  {currentStatus === 'clocked_out' && (
                     <button
-                      onClick={() => {
-                        setConfirmClockOut(false);
-                        onClockOut();
-                      }}
-                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                      onClick={() => onClockIn()}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer hover:scale-[1.02]"
                     >
-                      Yes, Clock Out
+                      <Play className="w-3.5 h-3.5 fill-white" />
+                      <span>Clock In</span>
                     </button>
+                  )}
+
+                  {/* START BREAK BUTTON */}
+                  {currentStatus === 'clocked_in' && (
                     <button
-                      onClick={() => setConfirmClockOut(false)}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs cursor-pointer"
+                      onClick={onStartBreak}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+                      title="Pause shift and any active project timers for break"
                     >
-                      Cancel
+                      <Coffee className="w-3.5 h-3.5" />
+                      <span>Start Break</span>
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmClockOut(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-rose-600/90 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-                    title="Finish work, stop all active timers, and automatically sign out other devices"
-                  >
-                    <Square className="w-3.5 h-3.5" />
-                    <span>Clock Out</span>
-                  </button>
-                )
+                  )}
+
+                  {/* RETURN FROM BREAK BUTTON */}
+                  {currentStatus === 'on_break' && (
+                    <button
+                      onClick={onResumeFromBreak}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer animate-pulse"
+                      title="Return from break and resume shift and project timers"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-white" />
+                      <span>Return From Break</span>
+                    </button>
+                  )}
+
+                  {/* CLOCK OUT BUTTON */}
+                  {currentStatus !== 'clocked_out' && (
+                    confirmClockOut ? (
+                      <div className="flex flex-wrap items-center gap-1.5 bg-rose-950 border border-rose-600 px-2.5 py-1.5 rounded-xl animate-fadeIn">
+                        <span className="text-[11px] text-rose-200 font-semibold">
+                          {userRunningJobTimer || runningDevTimers.length > 0
+                            ? 'Stop all active timers, end shift & sign out other devices?'
+                            : 'End shift & sign out other devices?'}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setConfirmClockOut(false);
+                            onClockOut();
+                          }}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Yes, Clock Out
+                        </button>
+                        <button
+                          onClick={() => setConfirmClockOut(false)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmClockOut(true)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-rose-600/90 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+                        title="Finish work, stop all active timers, and automatically sign out other devices"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                        <span>Clock Out</span>
+                      </button>
+                    )
+                  )}
+                </>
               )}
 
               {/* TIME CARD MODAL TRIGGER */}

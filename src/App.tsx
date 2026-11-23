@@ -7,7 +7,12 @@ import {
   saveStoredGregDevCards, 
   getStoredGregDevEntries, 
   saveStoredGregDevEntries,
-  sanitizeAndDedupeDevProjectCards
+  sanitizeAndDedupeDevProjectCards,
+  getStoredDevCardTimerIntents,
+  saveStoredDevCardTimerIntents,
+  recordDevCardTimerIntent,
+  clearDevCardTimerIntent,
+  reconcileDevCardsWithTimerIntents
 } from './utils/gregDevTimeService';
 import { HeaderNav } from './components/HeaderNav';
 import { AuthScreen } from './components/AuthScreen';
@@ -74,7 +79,15 @@ import { GregDevProjectCardsSection } from './components/GregDevProjectCardsSect
 import { GregDevTimeReviewModal } from './components/GregDevTimeReviewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLocalDateString, isShiftForStaff, formatTimeOnly } from './utils/timeCardExport';
-import { formatSecondsToReadable, formatSecondsToHHMMSS, getStaffActiveWork, isStaffOnlineWithActivity } from './utils/timeUtils';
+import {
+  formatSecondsToReadable,
+  formatSecondsToHHMMSS,
+  getStaffActiveWork,
+  isStaffOnlineWithActivity,
+  getStoredJobTimerIntents,
+  saveStoredJobTimerIntents,
+  recordJobTimerIntent
+} from './utils/timeUtils';
 
 const PHASES: JobPhase[] = [
   'Customer Inquiry',
@@ -158,6 +171,8 @@ export default function App() {
   const pendingJobTaskMutationRef = useRef<Record<string, Record<string, { atMs: number; task: DelegatedWorkItem }>>>({});
   const authenticatedStaffRef = useRef<StaffUser | null>(authenticatedStaff);
   const healedZombieTokensRef = useRef<Set<string>>(new Set());
+  const lastDevCardHealAtRef = useRef<Record<string, number>>({});
+  const lastJobTimerHealAtRef = useRef<Record<string, number>>({});
   const hasActiveWorkOrShiftRef = useRef<boolean>(false);
   const hasSeededTimeCardsRef = useRef<boolean>(false);
   const staffListRef = useRef<StaffUser[]>(staffList);
@@ -224,9 +239,8 @@ export default function App() {
     };
   }, []);
 
-  // Initialize jobs, staff, chat, and time cards from local storage or cloud Firestore
+  // 1. One-time immediate localStorage fallback hydration on mount
   useEffect(() => {
-    // 1. Immediate local fallback load
     const loaded = getStoredJobs();
     jobsRef.current = loaded;
     setJobs(loaded);
@@ -246,19 +260,55 @@ export default function App() {
     }
     setTimeCards(getStoredTimeCards());
 
-    // 2. Test Firebase connection & purge dummy data from cloud
+    // Immediately reconcile stored Dev Project Cards with persisted running intents so local boot state is accurate
+    const storedDevCards = getStoredGregDevCards();
+    const storedDevEntries = getStoredGregDevEntries();
+    if (storedDevCards.length > 0) {
+      const { cards: bootReconciled } = reconcileDevCardsWithTimerIntents(
+        storedDevCards,
+        getStoredDevCardTimerIntents(),
+        storedDevCards,
+        storedDevEntries
+      );
+      devCardsRef.current = bootReconciled;
+      setDevCards(bootReconciled);
+    }
+  }, []);
+
+  // 2. Auth-aware real-time Firestore synchronization
+  // CRITICAL: Only attach Firestore onSnapshot listeners once Firebase Auth is ready (or Demo Mode is active)
+  // so unauthenticated boot or switching Firebase accounts NEVER kills listeners with PERMISSION_DENIED.
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!isDemoModeBypassed && (!authUser || !authUser.emailVerified)) return;
+
+    const isAuthGreg = () =>
+      isUserGregHyatt(authenticatedStaffRef.current) ||
+      (authUser?.email || '').toLowerCase().trim() === 'arkcwd@gmail.com';
+
+    // Test Firebase connection & purge dummy data from cloud
     testConnection();
     purgeDummyDataFromFirestore().catch(err => console.warn('Dummy data purge skipped/failed:', err));
 
-    // Protect any in-flight job timer Start/Stop/Break/ClockOut AND delegated task status/completion writes
-    // from stale or out-of-order Firestore snapshots.
+    // Protect any in-flight job timer Start/Stop/Break/ClockOut, persisted running job timer intents,
+    // AND delegated task status/completion writes from stale or out-of-order Firestore snapshots.
     // NEVER auto-stop a running job timer or revert a completed task from a snapshot listener!
     const protectInFlightJobMutations = (cloudJobs: Job[]): Job[] => {
       const now = Date.now();
-      return cloudJobs.map(job => {
+      const jobIntents = getStoredJobTimerIntents();
+      let jobIntentsChanged = false;
+      const myStaffId = authenticatedStaffRef.current?.id;
+
+      const parseMs = (iso?: string): number => {
+        if (!iso) return NaN;
+        const ms = new Date(iso).getTime();
+        return isNaN(ms) ? NaN : ms;
+      };
+
+      const result = cloudJobs.map(job => {
         let protectedJob = job;
 
-        // 1. Protect in-flight job timer mutations (20s window)
+        // 1. Protect in-flight job timer mutations (20s immediate window)
         const pendingTimer = pendingJobTimerMutationRef.current[job.id];
         if (pendingTimer) {
           const cloudMatchesExpected =
@@ -282,6 +332,125 @@ export default function App() {
               paused_elapsed_seconds: pendingTimer.paused_elapsed_seconds
             };
           }
+        }
+
+        // 1b. Authoritative persisted Job Timer Intent Ledger reconciliation (indefinite protection against stale snapshots)
+        const intent = jobIntents[job.id];
+        const cloudStartMs = parseMs(protectedJob.active_timer_start);
+        const cloudHasRunningTimer = Boolean(protectedJob.active_timer_start && !isNaN(cloudStartMs));
+
+        if (intent?.state === 'running') {
+          // Only reconcile/heal a local running intent if it belongs to the currently authenticated user (or before staff finishes hydrating)
+          const belongsToCurrentAuthUser =
+            !myStaffId ||
+            !intent.active_timer_drafter_id ||
+            intent.active_timer_drafter_id === myStaffId;
+
+          if (belongsToCurrentAuthUser) {
+            const intentStartMs = parseMs(intent.active_timer_start);
+            if (cloudHasRunningTimer) {
+              if (!isNaN(cloudStartMs) && !isNaN(intentStartMs) && cloudStartMs > intentStartMs + 1500) {
+                jobIntents[job.id] = {
+                  state: 'running',
+                  active_timer_start: protectedJob.active_timer_start!,
+                  active_timer_task: protectedJob.active_timer_task,
+                  active_timer_drafter_id: protectedJob.active_timer_drafter_id,
+                  active_timer_drafter_name: protectedJob.active_timer_drafter_name,
+                  active_timer_delegated_task_id: protectedJob.active_timer_delegated_task_id,
+                  updatedAtMs: now
+                };
+                jobIntentsChanged = true;
+              }
+            } else {
+              // Cloud says job timer is NOT running while local intent says running!
+              // Accept stop ONLY if proof exists of a genuine explicit stop or finalized time_log for this session.
+              const explicitStopMs = parseMs(protectedJob.timer_explicit_stop_at);
+              const hasNewerExplicitStop =
+                !isNaN(intentStartMs) && !isNaN(explicitStopMs) && explicitStopMs >= intentStartMs - 1500;
+              const hasFinalizedTimeLog = (protectedJob.time_logs || []).some(tl => {
+                const tlStartMs = parseMs(tl.startTime);
+                return !isNaN(tlStartMs) && !isNaN(intentStartMs) && Math.abs(tlStartMs - intentStartMs) <= 2500;
+              });
+
+              if (hasNewerExplicitStop || Boolean(protectedJob.paused_by_break) || hasFinalizedTimeLog) {
+                jobIntents[job.id] = {
+                  state: 'stopped',
+                  stoppedAt: protectedJob.timer_explicit_stop_at || new Date(now).toISOString(),
+                  pausedByBreak: Boolean(protectedJob.paused_by_break),
+                  updatedAtMs: now
+                };
+                jobIntentsChanged = true;
+              } else {
+                // Stale snapshot or non-timer overwrite cleared the timer — preserve & heal to Firestore!
+                protectedJob = {
+                  ...protectedJob,
+                  active_timer_start: intent.active_timer_start,
+                  active_timer_task: intent.active_timer_task || protectedJob.active_timer_task,
+                  active_timer_drafter_id: intent.active_timer_drafter_id || protectedJob.active_timer_drafter_id,
+                  active_timer_drafter_name: intent.active_timer_drafter_name || protectedJob.active_timer_drafter_name,
+                  active_timer_delegated_task_id: intent.active_timer_delegated_task_id,
+                  paused_by_break: false,
+                  timer_explicit_stop_at: undefined
+                };
+
+                if (now - (lastJobTimerHealAtRef.current[job.id] || 0) > 5000) {
+                  lastJobTimerHealAtRef.current[job.id] = now;
+                  saveJobToFirestore(protectedJob).catch(err =>
+                    console.warn('[Firestore] Job timer self-heal notice:', job.job_number, err)
+                  );
+                }
+              }
+            }
+          }
+        } else if (intent?.state === 'stopped') {
+          const intentStopMs = parseMs(intent.stoppedAt);
+          if (cloudHasRunningTimer) {
+            if (!isNaN(cloudStartMs) && !isNaN(intentStopMs) && cloudStartMs > intentStopMs + 1500) {
+              // Strictly newer timer started after our stop — adopt it if ours
+              if (!myStaffId || !protectedJob.active_timer_drafter_id || protectedJob.active_timer_drafter_id === myStaffId) {
+                jobIntents[job.id] = {
+                  state: 'running',
+                  active_timer_start: protectedJob.active_timer_start!,
+                  active_timer_task: protectedJob.active_timer_task,
+                  active_timer_drafter_id: protectedJob.active_timer_drafter_id,
+                  active_timer_drafter_name: protectedJob.active_timer_drafter_name,
+                  active_timer_delegated_task_id: protectedJob.active_timer_delegated_task_id,
+                  updatedAtMs: now
+                };
+                jobIntentsChanged = true;
+              }
+            } else if (!myStaffId || !protectedJob.active_timer_drafter_id || protectedJob.active_timer_drafter_id === myStaffId) {
+              // Stale pre-stop cloud echo: keep stopped and heal cloud
+              protectedJob = {
+                ...protectedJob,
+                active_timer_start: undefined,
+                active_timer_task: undefined,
+                active_timer_drafter_id: undefined,
+                active_timer_drafter_name: undefined,
+                active_timer_delegated_task_id: undefined,
+                paused_by_break: Boolean(intent.pausedByBreak),
+                timer_explicit_stop_at: intent.stoppedAt
+              };
+              if (now - (lastJobTimerHealAtRef.current[job.id] || 0) > 5000) {
+                lastJobTimerHealAtRef.current[job.id] = now;
+                saveJobToFirestore(protectedJob, { allowTimerClear: true }).catch(err =>
+                  console.warn('[Firestore] Job timer stop-heal notice:', job.job_number, err)
+                );
+              }
+            }
+          }
+        } else if (cloudHasRunningTimer && myStaffId && protectedJob.active_timer_drafter_id === myStaffId) {
+          // Record running timer started on another device so this device protects it going forward
+          jobIntents[job.id] = {
+            state: 'running',
+            active_timer_start: protectedJob.active_timer_start!,
+            active_timer_task: protectedJob.active_timer_task,
+            active_timer_drafter_id: protectedJob.active_timer_drafter_id,
+            active_timer_drafter_name: protectedJob.active_timer_drafter_name,
+            active_timer_delegated_task_id: protectedJob.active_timer_delegated_task_id,
+            updatedAtMs: now
+          };
+          jobIntentsChanged = true;
         }
 
         // 2. Protect in-flight delegated task mutations (status / completion / review / revision) for 20s
@@ -336,6 +505,12 @@ export default function App() {
 
         return protectedJob;
       });
+
+      if (jobIntentsChanged) {
+        saveStoredJobTimerIntents(jobIntents);
+      }
+
+      return result;
     };
 
     // 3. Connect real-time Firestore synchronization
@@ -449,6 +624,8 @@ export default function App() {
           activeTimerStart: pending.card.activeTimerStart,
           lastStartedAt: pending.card.lastStartedAt,
           lastStoppedAt: pending.card.lastStoppedAt,
+          explicitStopAt: pending.card.explicitStopAt,
+          stoppedReason: pending.card.stoppedReason,
           todaySeconds: pending.card.todaySeconds,
           totalSeconds: pending.card.totalSeconds,
           currentNotes: pending.card.currentNotes
@@ -468,14 +645,46 @@ export default function App() {
         }
       });
 
-      // 2. Deduplicate duplicate projectType docs cleanly without ever stopping a valid running timer
+      // 2. Authoritative persisted Dev Timer Intent Ledger reconciliation (when authenticated as Greg)
+      let cardsAfterIntentCheck = protectedCards;
+      if (isAuthGreg()) {
+        const {
+          cards: reconciledCards,
+          cardsToHealToCloud,
+          updatedIntents,
+          intentsChanged
+        } = reconcileDevCardsWithTimerIntents(
+          protectedCards,
+          getStoredDevCardTimerIntents(),
+          devCardsRef.current,
+          entriesForCheck
+        );
+
+        cardsAfterIntentCheck = reconciledCards;
+        if (intentsChanged) {
+          saveStoredDevCardTimerIntents(updatedIntents);
+        }
+
+        if (cardsToHealToCloud.length > 0) {
+          cardsToHealToCloud.forEach(cardToHeal => {
+            if (now - (lastDevCardHealAtRef.current[cardToHeal.id] || 0) > 4000) {
+              lastDevCardHealAtRef.current[cardToHeal.id] = now;
+              saveSingleDevProjectCardToFirestore(cardToHeal).catch(err =>
+                console.warn('[Firestore] Dev card timer self-heal notice:', cardToHeal.id, err)
+              );
+            }
+          });
+        }
+      }
+
+      // 3. Deduplicate duplicate projectType docs cleanly without ever stopping a valid running timer
       const { cards: cleanCards, duplicateIdsToDelete } = sanitizeAndDedupeDevProjectCards(
-        protectedCards,
+        cardsAfterIntentCheck,
         entriesForCheck
       );
 
       // Only Greg Hyatt's own authenticated session may clean up duplicate dev_project_cards docs
-      if (isUserGregHyatt(authenticatedStaffRef.current) && duplicateIdsToDelete.length > 0) {
+      if (isAuthGreg() && duplicateIdsToDelete.length > 0) {
         duplicateIdsToDelete.forEach(dupId => {
           const token = `dev-dup:${dupId}`;
           if (!healedZombieTokensRef.current.has(token)) {
@@ -554,7 +763,7 @@ export default function App() {
       unsubscribeTimeCards();
       unsubscribePayroll();
     };
-  }, []);
+  }, [isAuthLoading, authUser?.uid, authUser?.email, authUser?.emailVerified, isDemoModeBypassed]);
 
   // Listen to Firebase Auth state & enforce session-scoped login (no stale cookies keeping users logged in)
   useEffect(() => {
@@ -745,7 +954,8 @@ export default function App() {
   // Sync jobs state to localStorage and Firestore whenever modified (synchronous ref computation avoids React 18 batching races)
   const updateJobsState = (
     newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
-    specificJobId?: string | string[]
+    specificJobId?: string | string[],
+    options?: { allowTimerClear?: boolean }
   ) => {
     const prevJobs = jobsRef.current;
     const nextJobs = typeof newJobsOrUpdater === 'function'
@@ -768,7 +978,7 @@ export default function App() {
         });
 
     jobsToSync.forEach(job => {
-      saveJobToFirestore(job).catch(err => {
+      saveJobToFirestore(job, options).catch(err => {
         console.warn('[Firestore] Sync warning for job:', job.job_number, err);
       });
     });
@@ -812,11 +1022,13 @@ export default function App() {
   // in-flight task/timer mutation guards automatically before syncing to Firestore
   const handleDirectJobUpdate = (updatedJob: Job) => {
     const prevJob = jobsRef.current.find(j => j.id === updatedJob.id);
+    let safeJob = updatedJob;
+    let allowTimerClear = false;
 
     if (prevJob) {
       // Guard any delegated task changes against stale snapshots
       const prevTasksById = new Map<string, DelegatedWorkItem>((prevJob.delegated_tasks || []).map(t => [t.id, t]));
-      for (const nextTask of updatedJob.delegated_tasks || []) {
+      for (const nextTask of safeJob.delegated_tasks || []) {
         const oldTask = prevTasksById.get(nextTask.id);
         if (
           !oldTask ||
@@ -826,34 +1038,56 @@ export default function App() {
           Boolean(oldTask.revisionRequested) !== Boolean(nextTask.revisionRequested) ||
           (oldTask.completionNotes || '') !== (nextTask.completionNotes || '')
         ) {
-          recordPendingTaskMutation(updatedJob.id, nextTask);
+          recordPendingTaskMutation(safeJob.id, nextTask);
         }
       }
 
-      // Guard any timer state changes against stale snapshots
+      // Never allow a stale non-timer modal edit to accidentally wipe an actively running job timer
+      const triedToDropTimer = Boolean(prevJob.active_timer_start && !safeJob.active_timer_start);
+      const isLegitTimerStop = Boolean(
+        safeJob.timer_explicit_stop_at ||
+        safeJob.paused_by_break ||
+        (safeJob.time_logs?.length || 0) > (prevJob.time_logs?.length || 0)
+      );
+
+      if (triedToDropTimer && !isLegitTimerStop) {
+        safeJob = {
+          ...safeJob,
+          active_timer_start: prevJob.active_timer_start,
+          active_timer_task: prevJob.active_timer_task,
+          active_timer_drafter_id: prevJob.active_timer_drafter_id,
+          active_timer_drafter_name: prevJob.active_timer_drafter_name,
+          active_timer_delegated_task_id: prevJob.active_timer_delegated_task_id
+        };
+      } else if (triedToDropTimer && isLegitTimerStop) {
+        allowTimerClear = true;
+      }
+
+      // Guard any genuine timer state changes against stale snapshots
       if (
-        (prevJob.active_timer_start || '') !== (updatedJob.active_timer_start || '') ||
-        Boolean(prevJob.paused_by_break) !== Boolean(updatedJob.paused_by_break)
+        (prevJob.active_timer_start || '') !== (safeJob.active_timer_start || '') ||
+        Boolean(prevJob.paused_by_break) !== Boolean(safeJob.paused_by_break)
       ) {
-        pendingJobTimerMutationRef.current[updatedJob.id] = {
+        pendingJobTimerMutationRef.current[safeJob.id] = {
           atMs: Date.now(),
-          active_timer_start: updatedJob.active_timer_start,
-          active_timer_task: updatedJob.active_timer_task,
-          active_timer_drafter_id: updatedJob.active_timer_drafter_id,
-          active_timer_drafter_name: updatedJob.active_timer_drafter_name,
-          active_timer_delegated_task_id: updatedJob.active_timer_delegated_task_id,
-          paused_by_break: updatedJob.paused_by_break,
-          paused_timer_task: updatedJob.paused_timer_task,
-          paused_timer_drafter_id: updatedJob.paused_timer_drafter_id,
-          paused_timer_drafter_name: updatedJob.paused_timer_drafter_name,
-          paused_elapsed_seconds: updatedJob.paused_elapsed_seconds
+          active_timer_start: safeJob.active_timer_start,
+          active_timer_task: safeJob.active_timer_task,
+          active_timer_drafter_id: safeJob.active_timer_drafter_id,
+          active_timer_drafter_name: safeJob.active_timer_drafter_name,
+          active_timer_delegated_task_id: safeJob.active_timer_delegated_task_id,
+          paused_by_break: safeJob.paused_by_break,
+          paused_timer_task: safeJob.paused_timer_task,
+          paused_timer_drafter_id: safeJob.paused_timer_drafter_id,
+          paused_timer_drafter_name: safeJob.paused_timer_drafter_name,
+          paused_elapsed_seconds: safeJob.paused_elapsed_seconds
         };
       }
     }
 
     updateJobsState(
-      prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)),
-      updatedJob.id
+      prevJobs => prevJobs.map(j => (j.id === safeJob.id ? safeJob : j)),
+      safeJob.id,
+      allowTimerClear ? { allowTimerClear: true } : undefined
     );
   };
 
@@ -994,6 +1228,16 @@ export default function App() {
             paused_elapsed_seconds: undefined
           };
 
+          recordJobTimerIntent(j.id, {
+            state: 'running',
+            active_timer_start: startTimestamp,
+            active_timer_task: trimmed,
+            active_timer_drafter_id: currentStaff.id,
+            active_timer_drafter_name: currentStaff.name,
+            active_timer_delegated_task_id: matchedTaskId,
+            updatedAtMs: Date.now()
+          });
+
           return {
             ...j,
             hourly_rate: j.hourly_rate || 85,
@@ -1002,6 +1246,7 @@ export default function App() {
             active_timer_drafter_id: currentStaff.id,
             active_timer_drafter_name: currentStaff.name,
             active_timer_delegated_task_id: matchedTaskId,
+            timer_explicit_stop_at: undefined,
             paused_by_break: false,
             paused_timer_task: undefined,
             paused_timer_drafter_id: undefined,
@@ -1111,6 +1356,8 @@ export default function App() {
           const totalMins = Math.round(totalSec / 60);
           const totalHours = Number((totalSec / 3600).toFixed(2));
 
+          const stopIso = new Date(endMs).toISOString();
+
           pendingJobTimerMutationRef.current[j.id] = {
             atMs: Date.now(),
             active_timer_start: undefined,
@@ -1125,6 +1372,12 @@ export default function App() {
             paused_elapsed_seconds: undefined
           };
 
+          recordJobTimerIntent(j.id, {
+            state: 'stopped',
+            stoppedAt: stopIso,
+            updatedAtMs: endMs
+          });
+
           return {
             ...j,
             hourly_rate: effectiveRate,
@@ -1133,6 +1386,7 @@ export default function App() {
             active_timer_drafter_id: undefined,
             active_timer_drafter_name: undefined,
             active_timer_delegated_task_id: undefined,
+            timer_explicit_stop_at: stopIso,
             paused_by_break: false,
             paused_timer_task: undefined,
             paused_timer_drafter_id: undefined,
@@ -1149,7 +1403,7 @@ export default function App() {
                 id: `a-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                 action: 'Timer Stopped & Work Logged',
                 performedBy: drafterDisplayName,
-                timestamp: new Date().toISOString(),
+                timestamp: stopIso,
                 details: durationSeconds > 0 
                   ? `Logged ${durationFormatted} for: "${trimmed}" (posted to Messages & Notes)`
                   : `Session stopped for: "${trimmed}"`
@@ -1160,7 +1414,8 @@ export default function App() {
         }
         return j;
       }),
-      jobId
+      jobId,
+      { allowTimerClear: true }
     );
 
     setStopTimerPromptJob(null);
@@ -1233,6 +1488,7 @@ export default function App() {
 
   // Time card & punch clock handlers (synced in real time to Firestore across desktop & mobile)
   const handleClockIn = (notes?: string) => {
+    if (authenticatedStaff && currentStaff.id !== authenticatedStaff.id) return;
     if (isStaffExemptFromClock(currentStaff)) {
       return;
     }
@@ -1263,6 +1519,7 @@ export default function App() {
   };
 
   const handleStartBreak = () => {
+    if (authenticatedStaff && currentStaff.id !== authenticatedStaff.id) return;
     if (isStaffExemptFromClock(currentStaff)) return;
 
     const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
@@ -1314,6 +1571,30 @@ export default function App() {
             const totalMins = Math.round(totalSec / 60);
             const totalHours = Number((totalSec / 3600).toFixed(2));
 
+            const breakIso = new Date(endMs).toISOString();
+            pendingJobTimerMutationRef.current[j.id] = {
+              atMs: Date.now(),
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              active_timer_delegated_task_id: undefined,
+              paused_by_break: true,
+              paused_timer_task: taskNote,
+              paused_timer_drafter_id: currentStaff.id,
+              paused_timer_drafter_name: currentStaff.name,
+              paused_elapsed_seconds: undefined
+            };
+            recordJobTimerIntent(j.id, {
+              state: 'stopped',
+              stoppedAt: breakIso,
+              pausedByBreak: true,
+              paused_timer_task: taskNote,
+              paused_timer_drafter_id: currentStaff.id,
+              paused_timer_drafter_name: currentStaff.name,
+              updatedAtMs: endMs
+            });
+
             return {
               ...j,
               hourly_rate: effectiveBreakRate,
@@ -1321,6 +1602,7 @@ export default function App() {
               active_timer_task: undefined,
               active_timer_drafter_id: undefined,
               active_timer_drafter_name: undefined,
+              timer_explicit_stop_at: breakIso,
               paused_by_break: true,
               paused_timer_task: taskNote,
               paused_timer_drafter_id: currentStaff.id,
@@ -1334,14 +1616,15 @@ export default function App() {
                   id: `a-${Date.now()}`,
                   action: 'Timer Auto-Paused (Break)',
                   performedBy: currentStaff.name,
-                  timestamp: new Date().toISOString(),
+                  timestamp: breakIso,
                   details: `Drafting timer on ${j.job_number} auto-paused for employee break. Logged ${Math.round(durationSeconds / 60)} mins pre-break.`
                 },
                 ...j.audit_logs
               ]
             };
           }),
-        pausedJobIds
+        pausedJobIds,
+        { allowTimerClear: true }
       );
       setPausedJobsNotice({ jobNumbers: pausedJobNumbers, type: 'paused' });
     }
@@ -1428,6 +1711,7 @@ export default function App() {
             newDevLogs.push(log);
             saveDevTimeEntryToFirestore(log);
 
+            const endIso = new Date(endMs).toISOString();
             const pausedCard: GregDevProjectCard = {
               ...c,
               isActive: false,
@@ -1435,8 +1719,16 @@ export default function App() {
               activeTimerStart: undefined,
               todaySeconds: (c.todaySeconds || 0) + durationSeconds,
               totalSeconds: (c.totalSeconds || 0) + durationSeconds,
-              lastStoppedAt: new Date(endMs).toISOString()
+              lastStoppedAt: endIso,
+              explicitStopAt: endIso,
+              stoppedReason: 'break'
             };
+            recordDevCardTimerIntent(c.id, {
+              state: 'stopped',
+              stoppedAt: endIso,
+              updatedAtMs: endMs,
+              reason: 'break'
+            });
             pausedCardsToSave.push(pausedCard);
             return pausedCard;
           }
@@ -1463,6 +1755,7 @@ export default function App() {
   };
 
   const handleResumeFromBreak = () => {
+    if (authenticatedStaff && currentStaff.id !== authenticatedStaff.id) return;
     if (isStaffExemptFromClock(currentStaff)) return;
 
     const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
@@ -1497,6 +1790,28 @@ export default function App() {
           prevJobs.map(j => {
             if (!resumedJobIds.includes(j.id)) return j;
             const taskToResume = j.paused_timer_task || `Drafting ${j.current_status}`;
+            pendingJobTimerMutationRef.current[j.id] = {
+              atMs: Date.now(),
+              active_timer_start: nowIso,
+              active_timer_task: taskToResume,
+              active_timer_drafter_id: currentStaff.id,
+              active_timer_drafter_name: currentStaff.name,
+              active_timer_delegated_task_id: j.active_timer_delegated_task_id,
+              paused_by_break: false,
+              paused_timer_task: undefined,
+              paused_timer_drafter_id: undefined,
+              paused_timer_drafter_name: undefined,
+              paused_elapsed_seconds: undefined
+            };
+            recordJobTimerIntent(j.id, {
+              state: 'running',
+              active_timer_start: nowIso,
+              active_timer_task: taskToResume,
+              active_timer_drafter_id: currentStaff.id,
+              active_timer_drafter_name: currentStaff.name,
+              active_timer_delegated_task_id: j.active_timer_delegated_task_id,
+              updatedAtMs: Date.now()
+            });
             return {
               ...j,
               paused_by_break: false,
@@ -1507,6 +1822,7 @@ export default function App() {
               active_timer_task: taskToResume,
               active_timer_drafter_id: currentStaff.id,
               active_timer_drafter_name: currentStaff.name,
+              timer_explicit_stop_at: undefined,
               audit_logs: [
                 {
                   id: `a-${Date.now()}`,
@@ -1574,8 +1890,17 @@ export default function App() {
               isPausedByBreak: false,
               activeTimerStart: nowIso,
               lastStartedAt: nowIso,
-              lastStoppedAt: undefined
+              lastStoppedAt: undefined,
+              explicitStopAt: undefined,
+              stoppedReason: undefined
             };
+            recordDevCardTimerIntent(c.id, {
+              state: 'running',
+              activeTimerStart: nowIso,
+              updatedAtMs: Date.now(),
+              projectType: c.projectType,
+              currentNotes: c.currentNotes
+            });
             resumedCardsToSave.push(resumedCard);
             return resumedCard;
           }
@@ -1595,6 +1920,7 @@ export default function App() {
   };
 
   const handleClockOut = (notes?: string) => {
+    if (authenticatedStaff && currentStaff.id !== authenticatedStaff.id) return;
     if (isStaffExemptFromClock(currentStaff)) return;
 
     const curStaffLower = (currentStaff.name || '').toLowerCase().trim();
@@ -1699,6 +2025,26 @@ export default function App() {
             const totalMins = Math.round(totalSec / 60);
             const totalHours = Number((totalSec / 3600).toFixed(2));
 
+            pendingJobTimerMutationRef.current[j.id] = {
+              atMs: Date.now(),
+              active_timer_start: undefined,
+              active_timer_task: undefined,
+              active_timer_drafter_id: undefined,
+              active_timer_drafter_name: undefined,
+              active_timer_delegated_task_id: undefined,
+              paused_by_break: false,
+              paused_timer_task: undefined,
+              paused_timer_drafter_id: undefined,
+              paused_timer_drafter_name: undefined,
+              paused_elapsed_seconds: undefined
+            };
+
+            recordJobTimerIntent(j.id, {
+              state: 'stopped',
+              stoppedAt: stopEndIso,
+              updatedAtMs: stopEndMs
+            });
+
             return {
               ...j,
               hourly_rate: effectiveClockOutRate,
@@ -1707,6 +2053,7 @@ export default function App() {
               active_timer_drafter_id: undefined,
               active_timer_drafter_name: undefined,
               active_timer_delegated_task_id: undefined,
+              timer_explicit_stop_at: stopEndIso,
               paused_by_break: false,
               paused_timer_task: undefined,
               paused_timer_drafter_id: undefined,
@@ -1731,7 +2078,8 @@ export default function App() {
               ]
             };
           }),
-        stoppedJobIds
+        stoppedJobIds,
+        { allowTimerClear: true }
       );
     }
 
@@ -1816,6 +2164,8 @@ export default function App() {
           saveDevTimeEntryToFirestore(log);
         }
 
+        const curEndMs = Date.now();
+        const curEndIso = new Date(curEndMs).toISOString();
         const stoppedCard: GregDevProjectCard = {
           ...c,
           isActive: false,
@@ -1823,8 +2173,16 @@ export default function App() {
           activeTimerStart: undefined,
           todaySeconds: (c.todaySeconds || 0) + additionalSec,
           totalSeconds: (c.totalSeconds || 0) + additionalSec,
-          lastStoppedAt: additionalSec > 0 ? new Date().toISOString() : c.lastStoppedAt
+          lastStoppedAt: additionalSec > 0 ? curEndIso : c.lastStoppedAt,
+          explicitStopAt: curEndIso,
+          stoppedReason: 'clock_out'
         };
+        recordDevCardTimerIntent(c.id, {
+          state: 'stopped',
+          stoppedAt: curEndIso,
+          updatedAtMs: curEndMs,
+          reason: 'clock_out'
+        });
         stoppedCardsToSave.push(stoppedCard);
         return stoppedCard;
       });
@@ -1911,6 +2269,8 @@ export default function App() {
         activeTimerStart: nowIso,
         lastStartedAt: nowIso,
         lastStoppedAt: undefined,
+        explicitStopAt: undefined,
+        stoppedReason: undefined,
         currentNotes: notesOverride !== undefined ? notesOverride : c.currentNotes
       };
       return startedCard;
@@ -1918,11 +2278,20 @@ export default function App() {
 
     if (!startedCard) return;
 
-    pendingDevCardMutationRef.current[cardId] = { atMs: Date.now(), card: startedCard };
+    const confirmedStartedCard: GregDevProjectCard = startedCard;
+    recordDevCardTimerIntent(cardId, {
+      state: 'running',
+      activeTimerStart: nowIso,
+      updatedAtMs: Date.now(),
+      projectType: confirmedStartedCard.projectType,
+      currentNotes: confirmedStartedCard.currentNotes
+    });
+
+    pendingDevCardMutationRef.current[cardId] = { atMs: Date.now(), card: confirmedStartedCard };
     devCardsRef.current = next;
     setDevCards(next);
     saveStoredGregDevCards(next);
-    saveSingleDevProjectCardToFirestore(startedCard);
+    saveSingleDevProjectCardToFirestore(confirmedStartedCard);
 
     if (authenticatedStaff?.id) {
       updateStaffPresenceInFirestore(authenticatedStaff.id, true).catch(() => {});
@@ -1978,6 +2347,7 @@ export default function App() {
     }
 
     const todayStr = getLocalDateString(new Date(endMs));
+    const endIso = new Date(endMs).toISOString();
     let stoppedCard: GregDevProjectCard | null = null;
     const next = prevCards.map(c => {
       if (c.id !== cardId) return c;
@@ -1995,13 +2365,21 @@ export default function App() {
         activeTimerStart: undefined,
         todaySeconds: cardTodaySec,
         totalSeconds: Math.max(c.totalSeconds || 0, cardTotalSec),
-        lastStoppedAt: new Date(endMs).toISOString(),
+        lastStoppedAt: endIso,
+        explicitStopAt: endIso,
+        stoppedReason: 'user_stop',
         currentNotes: noteToLog
       };
       return stoppedCard;
     });
 
     if (stoppedCard) {
+      recordDevCardTimerIntent(cardId, {
+        state: 'stopped',
+        stoppedAt: endIso,
+        updatedAtMs: endMs,
+        reason: 'user_stop'
+      });
       pendingDevCardMutationRef.current[cardId] = { atMs: Date.now(), card: stoppedCard };
       devCardsRef.current = next;
       setDevCards(next);
@@ -2054,6 +2432,7 @@ export default function App() {
       clearTimeout(devCardNotesDebounceMapRef.current[cardId]);
       delete devCardNotesDebounceMapRef.current[cardId];
     }
+    clearDevCardTimerIntent(cardId);
     const next = devCardsRef.current.filter(c => c.id !== cardId);
     devCardsRef.current = next;
     setDevCards(next);
@@ -2064,6 +2443,7 @@ export default function App() {
   // Fallback bulk sync handler for any legacy callers (writes only changed cards)
   const handleSyncDevCards = (updated: GregDevProjectCard[]) => {
     const prevCards = devCardsRef.current;
+    devCardsRef.current = updated;
     setDevCards(updated);
     saveStoredGregDevCards(updated);
 
@@ -2723,6 +3103,12 @@ export default function App() {
       (jobId && j.id === jobId)
     );
     const targetJobId = targetJob ? targetJob.id : jobId;
+    const willClearJobTimer = Boolean(
+      newStatus === 'Completed' &&
+      targetJob &&
+      (targetJob.active_timer_start || targetJob.paused_by_break) &&
+      (String(targetJob.active_timer_delegated_task_id || '').trim() === String(taskId).trim() || !targetJob.active_timer_delegated_task_id)
+    );
 
     updateJobsState(prevJobs =>
       prevJobs.map(j => {
@@ -2760,6 +3146,7 @@ export default function App() {
           let activeTimerDrafterId = j.active_timer_drafter_id;
           let activeTimerDrafterName = j.active_timer_drafter_name;
           let activeTimerDelegatedTaskId = j.active_timer_delegated_task_id;
+          let timerExplicitStopAt = j.timer_explicit_stop_at;
           let pausedByBreak = j.paused_by_break;
           let pausedTimerTask = j.paused_timer_task;
           let pausedTimerDrafterId = j.paused_timer_drafter_id;
@@ -2773,25 +3160,42 @@ export default function App() {
             activeTimerDrafterId = currentStaff.id;
             activeTimerDrafterName = currentStaff.name;
             activeTimerDelegatedTaskId = taskId;
+            timerExplicitStopAt = undefined;
             pausedByBreak = false;
             pausedTimerTask = undefined;
             pausedTimerDrafterId = undefined;
             pausedTimerDrafterName = undefined;
             pausedElapsedSeconds = undefined;
             timerChanged = true;
+            recordJobTimerIntent(j.id, {
+              state: 'running',
+              active_timer_start: activeTimerStart,
+              active_timer_task: activeTimerTask,
+              active_timer_drafter_id: currentStaff.id,
+              active_timer_drafter_name: currentStaff.name,
+              active_timer_delegated_task_id: taskId,
+              updatedAtMs: Date.now()
+            });
           } else if (newStatus === 'Completed' && (String(j.active_timer_delegated_task_id || '').trim() === String(taskId).trim() || !j.active_timer_delegated_task_id)) {
             if (j.active_timer_start || j.paused_by_break) {
+              const stopIso = new Date().toISOString();
               activeTimerStart = undefined;
               activeTimerTask = undefined;
               activeTimerDrafterId = undefined;
               activeTimerDrafterName = undefined;
               activeTimerDelegatedTaskId = undefined;
+              timerExplicitStopAt = stopIso;
               pausedByBreak = false;
               pausedTimerTask = undefined;
               pausedTimerDrafterId = undefined;
               pausedTimerDrafterName = undefined;
               pausedElapsedSeconds = undefined;
               timerChanged = true;
+              recordJobTimerIntent(j.id, {
+                state: 'stopped',
+                stoppedAt: stopIso,
+                updatedAtMs: Date.now()
+              });
             }
           }
 
@@ -2818,6 +3222,7 @@ export default function App() {
             active_timer_drafter_id: activeTimerDrafterId,
             active_timer_drafter_name: activeTimerDrafterName,
             active_timer_delegated_task_id: activeTimerDelegatedTaskId,
+            timer_explicit_stop_at: timerExplicitStopAt,
             paused_by_break: pausedByBreak,
             paused_timer_task: pausedTimerTask,
             paused_timer_drafter_id: pausedTimerDrafterId,
@@ -2838,7 +3243,8 @@ export default function App() {
         }
         return j;
       }),
-      targetJobId
+      targetJobId,
+      willClearJobTimer ? { allowTimerClear: true } : undefined
     );
 
     // If marked Completed, notify delegator (Kyle / Jason / Greg)
@@ -2880,6 +3286,15 @@ export default function App() {
     const targetJobId = targetJob.id;
     let targetTaskTitle = '';
     const nowIso = payload.completedAtDate || new Date().toISOString();
+    const preCheckTask = (targetJob.delegated_tasks || []).find(t => String(t.id).trim() === String(payload.taskId).trim());
+    const preCheckTitle = preCheckTask ? preCheckTask.componentTitle : '';
+    const willClearJobTimer = Boolean(
+      (targetJob.active_timer_start || targetJob.paused_by_break) && (
+        (targetJob.active_timer_delegated_task_id && String(targetJob.active_timer_delegated_task_id).trim() === String(payload.taskId).trim()) ||
+        Boolean(preCheckTask?.activeTimerStart) ||
+        (!targetJob.active_timer_delegated_task_id && preCheckTitle && (targetJob.active_timer_task || targetJob.paused_timer_task) && (targetJob.active_timer_task || targetJob.paused_timer_task || '').toLowerCase().includes(preCheckTitle.toLowerCase()))
+      )
+    );
 
     updateJobsState(prevJobs =>
       prevJobs.map(j => {
@@ -2999,6 +3414,11 @@ export default function App() {
               paused_timer_drafter_name: undefined,
               paused_elapsed_seconds: undefined
             };
+            recordJobTimerIntent(j.id, {
+              state: 'stopped',
+              stoppedAt: nowIso,
+              updatedAtMs: Date.now()
+            });
           }
 
           // Add a detailed comment in the project stream for the team
@@ -3018,6 +3438,7 @@ export default function App() {
             active_timer_drafter_id: shouldClearJobTimer ? undefined : j.active_timer_drafter_id,
             active_timer_drafter_name: shouldClearJobTimer ? undefined : j.active_timer_drafter_name,
             active_timer_delegated_task_id: shouldClearJobTimer ? undefined : j.active_timer_delegated_task_id,
+            timer_explicit_stop_at: shouldClearJobTimer ? nowIso : j.timer_explicit_stop_at,
             paused_by_break: shouldClearJobTimer ? false : j.paused_by_break,
             paused_timer_task: shouldClearJobTimer ? undefined : j.paused_timer_task,
             paused_timer_drafter_id: shouldClearJobTimer ? undefined : j.paused_timer_drafter_id,
@@ -3044,7 +3465,8 @@ export default function App() {
         }
         return j;
       }),
-      targetJobId
+      targetJobId,
+      willClearJobTimer ? { allowTimerClear: true } : undefined
     );
 
     const newNotifs: AppNotification[] = [];
@@ -3340,6 +3762,27 @@ export default function App() {
           )
         );
 
+        if (isTimerOnThisTask) {
+          pendingJobTimerMutationRef.current[j.id] = {
+            atMs: Date.now(),
+            active_timer_start: undefined,
+            active_timer_task: undefined,
+            active_timer_drafter_id: undefined,
+            active_timer_drafter_name: undefined,
+            active_timer_delegated_task_id: undefined,
+            paused_by_break: false,
+            paused_timer_task: undefined,
+            paused_timer_drafter_id: undefined,
+            paused_timer_drafter_name: undefined,
+            paused_elapsed_seconds: undefined
+          };
+          recordJobTimerIntent(j.id, {
+            state: 'stopped',
+            stoppedAt: nowIso,
+            updatedAtMs: Date.now()
+          });
+        }
+
         return {
           ...j,
           delegated_tasks: remainingTasks,
@@ -3349,6 +3792,7 @@ export default function App() {
           active_timer_drafter_id: isTimerOnThisTask ? undefined : j.active_timer_drafter_id,
           active_timer_drafter_name: isTimerOnThisTask ? undefined : j.active_timer_drafter_name,
           active_timer_delegated_task_id: isTimerOnThisTask ? undefined : j.active_timer_delegated_task_id,
+          timer_explicit_stop_at: isTimerOnThisTask ? nowIso : j.timer_explicit_stop_at,
           audit_logs: [
             {
               id: `a-${Date.now()}`,
@@ -3364,7 +3808,13 @@ export default function App() {
       return j;
     });
 
-    updateJobsState(updatedJobs, targetJobId);
+    const didClearDeletedTaskTimer = Boolean(
+      targetJob.active_timer_start && (
+        targetJob.active_timer_delegated_task_id === taskId ||
+        (taskTitle && targetJob.active_timer_task && targetJob.active_timer_task.toLowerCase().includes(taskTitle.toLowerCase()))
+      )
+    );
+    updateJobsState(updatedJobs, targetJobId, didClearDeletedTaskTimer ? { allowTimerClear: true } : undefined);
 
     // Call dedicated Firestore deletion helper for instant cloud cleanup
     deleteDelegatedTaskFromFirestore(targetJobId, taskId).catch(err => {
@@ -3630,6 +4080,7 @@ export default function App() {
           tc => isShiftForStaff(tc, currentStaff) && (tc.status === 'clocked_in' || tc.status === 'on_break')
         );
         const inspectedWork = getStaffActiveWork(currentStaff, jobs, devCards, nowTimestamp);
+        const ownWork = getStaffActiveWork(authenticatedStaff, jobs, devCards, nowTimestamp);
         const switchableStaff = staffList.filter(s => !isLegacyMockStaffDoc(s));
 
         return (
@@ -3691,7 +4142,18 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {ownWork.activeItem && !ownWork.activeItem.isPaused && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 font-mono text-[11px] font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Your Timer Running:</span>
+                    <strong className="text-white font-sans">{ownWork.activeItem.label}</strong>
+                    <span className="text-emerald-300 font-bold">
+                      {formatSecondsToHHMMSS(ownWork.activeItem.elapsedSeconds)}
+                    </span>
+                  </span>
+                )}
+
                 <select
                   aria-label="Switch inspected drafter account"
                   value={currentStaff.id}
@@ -3730,6 +4192,8 @@ export default function App() {
       {userRole !== 'customer' && (
         <TimeClockBar
           currentStaff={currentStaff}
+          authenticatedStaff={authenticatedStaff}
+          isInspectingOtherAccount={Boolean(authenticatedStaff && currentStaff.id !== authenticatedStaff.id)}
           staffList={staffList}
           timeCards={timeCards}
           jobs={jobs}

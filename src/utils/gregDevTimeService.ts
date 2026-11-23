@@ -3,6 +3,57 @@ import { getLocalDateString } from './timeCardExport';
 
 export const GREG_DEV_STORAGE_CARDS_KEY = 'myplanstore_greg_dev_cards_v1';
 export const GREG_DEV_STORAGE_ENTRIES_KEY = 'myplanstore_greg_dev_entries_v1';
+export const GREG_DEV_TIMER_INTENTS_KEY = 'myplanstore_greg_dev_timer_intents_v1';
+
+export type DevCardTimerIntent =
+  | {
+      state: 'running';
+      activeTimerStart: string;
+      updatedAtMs: number;
+      projectType?: string;
+      currentNotes?: string;
+    }
+  | {
+      state: 'stopped';
+      stoppedAt: string;
+      updatedAtMs: number;
+      reason: 'user_stop' | 'break' | 'clock_out';
+    };
+
+export function getStoredDevCardTimerIntents(): Record<string, DevCardTimerIntent> {
+  try {
+    const raw = localStorage.getItem(GREG_DEV_TIMER_INTENTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveStoredDevCardTimerIntents(intents: Record<string, DevCardTimerIntent>): void {
+  try {
+    localStorage.setItem(GREG_DEV_TIMER_INTENTS_KEY, JSON.stringify(intents));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function recordDevCardTimerIntent(cardId: string, intent: DevCardTimerIntent): void {
+  if (!cardId) return;
+  const intents = getStoredDevCardTimerIntents();
+  intents[cardId] = intent;
+  saveStoredDevCardTimerIntents(intents);
+}
+
+export function clearDevCardTimerIntent(cardId: string): void {
+  if (!cardId) return;
+  const intents = getStoredDevCardTimerIntents();
+  if (cardId in intents) {
+    delete intents[cardId];
+    saveStoredDevCardTimerIntents(intents);
+  }
+}
 
 export interface ProjectTypeMeta {
   type: StandardGregDevProjectType;
@@ -354,6 +405,191 @@ export function sanitizeAndDedupeDevProjectCards(
   return {
     cards: finalCards,
     duplicateIdsToDelete
+  };
+}
+
+export interface DevCardIntentReconciliationResult {
+  cards: GregDevProjectCard[];
+  cardsToHealToCloud: GregDevProjectCard[];
+  updatedIntents: Record<string, DevCardTimerIntent>;
+  intentsChanged: boolean;
+}
+
+/**
+ * Authoritatively reconciles incoming cloud Dev Project Cards against the persisted local
+ * Timer Intent Ledger so that a running timer started by the user can NEVER be shut off
+ * by a stale snapshot, failed write, account switch, or rogue client overwrite.
+ *
+ * A locally started running timer ONLY transitions to stopped if:
+ *   1. The user explicitly clicked Stop / Break / Clock Out locally (recorded in intents), OR
+ *   2. The cloud card carries an explicitStopAt >= activeTimerStart (genuine explicit stop from another device), OR
+ *   3. The cloud card is explicitly paused by break with lastStoppedAt >= activeTimerStart, OR
+ *   4. A finalized GregDevTimeEntry already exists for this exact session startTime.
+ */
+export function reconcileDevCardsWithTimerIntents(
+  cloudCards: GregDevProjectCard[],
+  intents: Record<string, DevCardTimerIntent>,
+  localCards: GregDevProjectCard[] = [],
+  entries: GregDevTimeEntry[] = []
+): DevCardIntentReconciliationResult {
+  const updatedIntents: Record<string, DevCardTimerIntent> = { ...intents };
+  let intentsChanged = false;
+  const cardsToHealToCloud: GregDevProjectCard[] = [];
+  const seenIds = new Set<string>();
+
+  const hasFinalizedEntryForSession = (projectType: string, startIso: string): boolean => {
+    const targetStartMs = parseTimestampMs(startIso);
+    if (isNaN(targetStartMs)) return false;
+    const normType = normalizeDevProjectType(projectType);
+    return entries.some(e => {
+      if (normalizeDevProjectType(e.projectType) !== normType) return false;
+      const eStartMs = parseTimestampMs(e.startTime);
+      return !isNaN(eStartMs) && Math.abs(eStartMs - targetStartMs) <= 2000;
+    });
+  };
+
+  const reconciled: GregDevProjectCard[] = cloudCards.map(cloudCard => {
+    seenIds.add(cloudCard.id);
+    const intent = updatedIntents[cloudCard.id];
+    const cloudIsRunning = Boolean(cloudCard.isActive && cloudCard.activeTimerStart && !isNaN(parseTimestampMs(cloudCard.activeTimerStart)));
+    const cloudStartMs = parseTimestampMs(cloudCard.activeTimerStart);
+
+    if (intent?.state === 'running') {
+      const intentStartMs = parseTimestampMs(intent.activeTimerStart);
+
+      if (cloudIsRunning) {
+        // Cloud confirms timer is running. If another device started an even newer session, adopt it.
+        if (!isNaN(cloudStartMs) && !isNaN(intentStartMs) && cloudStartMs > intentStartMs + 1500) {
+          updatedIntents[cloudCard.id] = {
+            state: 'running',
+            activeTimerStart: cloudCard.activeTimerStart!,
+            updatedAtMs: Date.now(),
+            projectType: cloudCard.projectType,
+            currentNotes: cloudCard.currentNotes
+          };
+          intentsChanged = true;
+        }
+        return cloudCard;
+      }
+
+      // Cloud says inactive while our persisted intent says running!
+      // Accept the cloud stop ONLY if there is proof of a genuine newer explicit stop (e.g. from another device).
+      const cloudExplicitStopMs = parseTimestampMs(cloudCard.explicitStopAt);
+      const cloudLastStopMs = parseTimestampMs(cloudCard.lastStoppedAt);
+      const hasNewerExplicitStop =
+        !isNaN(intentStartMs) && !isNaN(cloudExplicitStopMs) && cloudExplicitStopMs >= intentStartMs - 1500;
+      const hasNewerBreakPause =
+        Boolean(cloudCard.isPausedByBreak) &&
+        !isNaN(intentStartMs) &&
+        !isNaN(cloudLastStopMs) &&
+        cloudLastStopMs >= intentStartMs - 1500;
+      const hasLoggedSessionEntry = hasFinalizedEntryForSession(
+        cloudCard.projectType || intent.projectType || '',
+        intent.activeTimerStart
+      );
+
+      if (hasNewerExplicitStop || hasNewerBreakPause || hasLoggedSessionEntry) {
+        const stopIso =
+          cloudCard.explicitStopAt ||
+          cloudCard.lastStoppedAt ||
+          new Date().toISOString();
+        updatedIntents[cloudCard.id] = {
+          state: 'stopped',
+          stoppedAt: stopIso,
+          updatedAtMs: Date.now(),
+          reason: cloudCard.stoppedReason || (cloudCard.isPausedByBreak ? 'break' : 'user_stop')
+        };
+        intentsChanged = true;
+        return cloudCard;
+      }
+
+      // Otherwise: stale snapshot, failed write, or rogue non-explicit overwrite!
+      // Preserve the running timer and queue a cloud heal write back to Firestore.
+      const healedCard: GregDevProjectCard = {
+        ...cloudCard,
+        isActive: true,
+        isPausedByBreak: false,
+        activeTimerStart: intent.activeTimerStart,
+        lastStartedAt: intent.activeTimerStart,
+        lastStoppedAt: undefined,
+        explicitStopAt: undefined,
+        stoppedReason: undefined
+      };
+      cardsToHealToCloud.push(healedCard);
+      return healedCard;
+    }
+
+    if (intent?.state === 'stopped') {
+      const intentStopMs = parseTimestampMs(intent.stoppedAt);
+      if (cloudIsRunning) {
+        // Only accept a cloud running timer if it started strictly AFTER our explicit stop
+        if (!isNaN(cloudStartMs) && !isNaN(intentStopMs) && cloudStartMs > intentStopMs + 1500) {
+          updatedIntents[cloudCard.id] = {
+            state: 'running',
+            activeTimerStart: cloudCard.activeTimerStart!,
+            updatedAtMs: Date.now(),
+            projectType: cloudCard.projectType,
+            currentNotes: cloudCard.currentNotes
+          };
+          intentsChanged = true;
+          return cloudCard;
+        }
+        // Stale pre-stop cloud echo: keep stopped and heal cloud
+        const healedStopped: GregDevProjectCard = {
+          ...cloudCard,
+          isActive: false,
+          isPausedByBreak: intent.reason === 'break',
+          activeTimerStart: undefined,
+          lastStoppedAt: intent.stoppedAt,
+          explicitStopAt: intent.stoppedAt,
+          stoppedReason: intent.reason
+        };
+        cardsToHealToCloud.push(healedStopped);
+        return healedStopped;
+      }
+      return cloudCard;
+    }
+
+    // No prior local intent for this card: if cloud shows a valid running timer, protect it going forward
+    if (cloudIsRunning && cloudCard.activeTimerStart) {
+      updatedIntents[cloudCard.id] = {
+        state: 'running',
+        activeTimerStart: cloudCard.activeTimerStart,
+        updatedAtMs: Date.now(),
+        projectType: cloudCard.projectType,
+        currentNotes: cloudCard.currentNotes
+      };
+      intentsChanged = true;
+    }
+
+    return cloudCard;
+  });
+
+  // Preserve any locally started card that hasn't echoed back from Firestore yet
+  Object.entries(updatedIntents).forEach(([cardId, intent]) => {
+    if (seenIds.has(cardId) || intent.state !== 'running') return;
+    const localCard = localCards.find(c => c.id === cardId);
+    if (localCard) {
+      const restored: GregDevProjectCard = {
+        ...localCard,
+        isActive: true,
+        isPausedByBreak: false,
+        activeTimerStart: intent.activeTimerStart,
+        lastStartedAt: intent.activeTimerStart,
+        lastStoppedAt: undefined,
+        explicitStopAt: undefined,
+        stoppedReason: undefined
+      };
+      reconciled.push(restored);
+      cardsToHealToCloud.push(restored);
+    }
+  });
+
+  return {
+    cards: reconciled,
+    cardsToHealToCloud,
+    updatedIntents,
+    intentsChanged
   };
 }
 

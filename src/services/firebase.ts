@@ -336,8 +336,12 @@ function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { tr
   return { trimmed, byteSize };
 }
 
-export async function saveJobToFirestore(job: Job): Promise<void> {
+export async function saveJobToFirestore(
+  job: Job,
+  options?: { allowTimerClear?: boolean }
+): Promise<void> {
   const path = `jobs/${job.id}`;
+  const allowTimerClear = Boolean(options?.allowTimerClear);
   try {
     const cleanJob: Record<string, any> = JSON.parse(JSON.stringify(job));
 
@@ -349,22 +353,48 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
       );
     }
 
-    // Explicitly delete timer fields from Firestore if timer is not currently running
+    // CRITICAL TIMER PROTECTION:
+    // Only send deleteField() for active_timer_* when an EXPLICIT timer-stopping action
+    // (Stop, Break, Clock Out, Task Completion, Task Delete) requests it.
+    // Normal non-timer edits (comments, notes, phases, custom charges, delegations) simply
+    // omit inactive timer fields so a concurrent/stale save can NEVER kill a running timer!
     if (!job.active_timer_start) {
-      cleanJob.active_timer_start = deleteField();
-      cleanJob.active_timer_task = deleteField();
-      cleanJob.active_timer_drafter_id = deleteField();
-      cleanJob.active_timer_drafter_name = deleteField();
-      cleanJob.active_timer_delegated_task_id = deleteField();
+      if (allowTimerClear) {
+        cleanJob.active_timer_start = deleteField();
+        cleanJob.active_timer_task = deleteField();
+        cleanJob.active_timer_drafter_id = deleteField();
+        cleanJob.active_timer_drafter_name = deleteField();
+        cleanJob.active_timer_delegated_task_id = deleteField();
+      } else {
+        delete cleanJob.active_timer_start;
+        delete cleanJob.active_timer_task;
+        delete cleanJob.active_timer_drafter_id;
+        delete cleanJob.active_timer_drafter_name;
+        delete cleanJob.active_timer_delegated_task_id;
+      }
     }
 
-    // Explicitly delete paused timer fields if job is not paused by break
+    // Only clear paused timer fields when explicitly stopping/resuming or when a timer is actively running
     if (!job.paused_by_break) {
-      cleanJob.paused_by_break = false;
-      cleanJob.paused_timer_task = deleteField();
-      cleanJob.paused_timer_drafter_id = deleteField();
-      cleanJob.paused_timer_drafter_name = deleteField();
-      cleanJob.paused_elapsed_seconds = deleteField();
+      if (allowTimerClear || Boolean(job.active_timer_start)) {
+        cleanJob.paused_by_break = false;
+        cleanJob.paused_timer_task = deleteField();
+        cleanJob.paused_timer_drafter_id = deleteField();
+        cleanJob.paused_timer_drafter_name = deleteField();
+        cleanJob.paused_elapsed_seconds = deleteField();
+      } else {
+        delete cleanJob.paused_by_break;
+        delete cleanJob.paused_timer_task;
+        delete cleanJob.paused_timer_drafter_id;
+        delete cleanJob.paused_timer_drafter_name;
+        delete cleanJob.paused_elapsed_seconds;
+      }
+    }
+
+    if (job.active_timer_start) {
+      cleanJob.timer_explicit_stop_at = deleteField();
+    } else if (!job.timer_explicit_stop_at) {
+      delete cleanJob.timer_explicit_stop_at;
     }
 
     const docRef = doc(db, 'jobs', job.id);
@@ -398,24 +428,27 @@ export async function saveJobToFirestore(job: Job): Promise<void> {
               }))
             : [];
 
-          await updateDoc(docRef, {
-            status: cleanJob.status,
+          const emergencyUpdates: Record<string, any> = {
+            current_status: cleanJob.current_status,
             delegated_tasks: strippedTasks,
             time_logs: cleanJob.time_logs || [],
             total_time_entries: cleanJob.total_time_entries || 0,
             total_duration_minutes: cleanJob.total_duration_minutes || 0,
-            total_duration_hours: cleanJob.total_duration_hours || 0,
-            active_timer_start: cleanJob.active_timer_start,
-            active_timer_task: cleanJob.active_timer_task,
-            active_timer_drafter_id: cleanJob.active_timer_drafter_id,
-            active_timer_drafter_name: cleanJob.active_timer_drafter_name,
-            active_timer_delegated_task_id: cleanJob.active_timer_delegated_task_id,
-            paused_by_break: cleanJob.paused_by_break,
-            paused_timer_task: cleanJob.paused_timer_task,
-            paused_timer_drafter_id: cleanJob.paused_timer_drafter_id,
-            paused_timer_drafter_name: cleanJob.paused_timer_drafter_name,
-            paused_elapsed_seconds: cleanJob.paused_elapsed_seconds
-          });
+            total_duration_hours: cleanJob.total_duration_hours || 0
+          };
+          if ('active_timer_start' in cleanJob) emergencyUpdates.active_timer_start = cleanJob.active_timer_start;
+          if ('active_timer_task' in cleanJob) emergencyUpdates.active_timer_task = cleanJob.active_timer_task;
+          if ('active_timer_drafter_id' in cleanJob) emergencyUpdates.active_timer_drafter_id = cleanJob.active_timer_drafter_id;
+          if ('active_timer_drafter_name' in cleanJob) emergencyUpdates.active_timer_drafter_name = cleanJob.active_timer_drafter_name;
+          if ('active_timer_delegated_task_id' in cleanJob) emergencyUpdates.active_timer_delegated_task_id = cleanJob.active_timer_delegated_task_id;
+          if ('paused_by_break' in cleanJob) emergencyUpdates.paused_by_break = cleanJob.paused_by_break;
+          if ('paused_timer_task' in cleanJob) emergencyUpdates.paused_timer_task = cleanJob.paused_timer_task;
+          if ('paused_timer_drafter_id' in cleanJob) emergencyUpdates.paused_timer_drafter_id = cleanJob.paused_timer_drafter_id;
+          if ('paused_timer_drafter_name' in cleanJob) emergencyUpdates.paused_timer_drafter_name = cleanJob.paused_timer_drafter_name;
+          if ('paused_elapsed_seconds' in cleanJob) emergencyUpdates.paused_elapsed_seconds = cleanJob.paused_elapsed_seconds;
+          if ('timer_explicit_stop_at' in cleanJob) emergencyUpdates.timer_explicit_stop_at = cleanJob.timer_explicit_stop_at;
+
+          await updateDoc(docRef, emergencyUpdates);
           console.warn(`[Firestore] Saved critical task/timer fields for job ${job.job_number} via size-safe fallback.`);
           return;
         }
@@ -1436,7 +1469,9 @@ export function subscribeToDevProjectCards(callback: (cards: GregDevProjectCard[
           totalSeconds: Number(d.total_seconds ?? d.totalSeconds ?? 0) || 0,
           currentNotes: typeof (d.current_notes ?? d.currentNotes) === 'string' ? (d.current_notes ?? d.currentNotes) : '',
           lastStartedAt: (d.last_started_at ?? d.lastStartedAt) || undefined,
-          lastStoppedAt: (d.last_stopped_at ?? d.lastStoppedAt) || undefined
+          lastStoppedAt: (d.last_stopped_at ?? d.lastStoppedAt) || undefined,
+          explicitStopAt: (d.explicit_stop_at ?? d.explicitStopAt) || undefined,
+          stoppedReason: (d.stopped_reason ?? d.stoppedReason) || undefined
         });
       });
       if (items.length > 0) {
@@ -1465,6 +1500,10 @@ function buildSanitizedDevCardPayload(card: GregDevProjectCard): Record<string, 
     current_notes: typeof card.currentNotes === 'string' ? card.currentNotes : '',
     last_started_at: card.lastStartedAt ? String(card.lastStartedAt) : null,
     last_stopped_at: active ? null : (card.lastStoppedAt ? String(card.lastStoppedAt) : null),
+    explicit_stop_at: active ? null : (card.explicitStopAt ? String(card.explicitStopAt) : null),
+    stopped_reason: active ? null : (card.stoppedReason || null),
+    timer_updated_at: new Date().toISOString(),
+    origin_session_id: getDeviceSessionId(),
     // Clear any legacy camelCase ghost fields so snake_case is the sole source of truth
     isActive: deleteField(),
     isPausedByBreak: deleteField(),
@@ -1474,23 +1513,30 @@ function buildSanitizedDevCardPayload(card: GregDevProjectCard): Record<string, 
 
 /**
  * Saves a single dev project card document cleanly without touching any other card's running timer.
- * Retries once automatically on transient network glitches so timer start/stop writes never silently drop.
+ * Retries up to 4 times with exponential backoff on transient errors so timer start/stop writes never silently drop.
  */
-export async function saveSingleDevProjectCardToFirestore(card: GregDevProjectCard): Promise<void> {
-  if (!db || !card?.id) return;
+export async function saveSingleDevProjectCardToFirestore(card: GregDevProjectCard): Promise<boolean> {
+  if (!db || !card?.id) return false;
   const docRef = doc(db, 'dev_project_cards', card.id);
   const payload = buildSanitizedDevCardPayload(card);
-  try {
-    await setDoc(docRef, payload, { merge: true });
-  } catch (err) {
-    console.warn('[Firestore] Retrying single dev project card save after transient error:', card.id, err);
+  const backoffDelays = [0, 450, 1200, 2500];
+
+  for (let attempt = 0; attempt < backoffDelays.length; attempt++) {
+    if (backoffDelays[attempt] > 0) {
+      await new Promise(resolve => setTimeout(resolve, backoffDelays[attempt]));
+    }
     try {
-      await new Promise(resolve => setTimeout(resolve, 650));
       await setDoc(docRef, payload, { merge: true });
-    } catch (retryErr) {
-      console.error('[Firestore] error saving single dev project card after retry:', card.id, retryErr);
+      return true;
+    } catch (err) {
+      if (attempt < backoffDelays.length - 1) {
+        console.warn(`[Firestore] Retrying single dev project card save (attempt ${attempt + 1}):`, card.id, err);
+      } else {
+        console.error('[Firestore] error saving single dev project card after retries:', card.id, err);
+      }
     }
   }
+  return false;
 }
 
 /**
