@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, Calendar, Trash2 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobGrossInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
 import { STAFF_USERS, canViewAllProjectCards, canViewTeamProfiles, isJobArchived, getStoredPreferredLayout, saveStoredPreferredLayout, canUserDeleteDelegatedItem, isStaffDeleted } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
 import { RequestRevisionModal } from './RequestRevisionModal';
@@ -596,7 +596,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
   // Time & Invoicing Aggregate Calculations
   const totalTrackedSeconds = filteredJobs.reduce((acc, j) => acc + calculateJobTotalSeconds(j, nowTimestamp), 0);
-  const totalInvoicingValue = filteredJobs.reduce((acc, j) => acc + calculateJobBillableAmount(j, nowTimestamp), 0);
+  const totalInvoicingValue = filteredJobs.reduce((acc, j) => acc + calculateJobGrossInvoiceAmount(j, nowTimestamp), 0);
   const runningTimers = filteredJobs.filter(j => j.active_timer_start);
 
   const activeDrafterStaff = effectiveStaff.find(s => s.name.toLowerCase() === activeDrafterTarget.toLowerCase()) || (isIndividualDrafter ? currentStaff : undefined);
@@ -2408,7 +2408,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                   {phaseJobs.map((job) => {
                     const isRunning = Boolean(job.active_timer_start);
                     const jobSecs = calculateJobTotalSeconds(job, nowTimestamp);
-                    const jobBillable = calculateJobBillableAmount(job, nowTimestamp);
+                    const jobBillable = calculateJobGrossInvoiceAmount(job, nowTimestamp);
+                    const jobRate = job.hourly_rate || 85;
                     const delegatedCount = (job.delegated_tasks || []).length;
 
                     return (
@@ -2595,8 +2596,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
                         <div className="pt-1 flex justify-between items-center text-[10px] text-slate-400">
                           {canAccessFinancials ? (
-                            <span className={`font-semibold ${isRunning ? 'text-emerald-600 font-bold' : 'text-emerald-700'}`}>
-                              ${jobBillable.toFixed(2)} billable
+                            <span className={`font-mono font-semibold flex items-center gap-1 ${isRunning ? 'text-emerald-600 font-bold' : 'text-emerald-700'}`}>
+                              {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />}
+                              <span>${jobBillable.toFixed(2)}</span>
+                              <span className="text-[9px] text-slate-400 font-normal">@{jobRate}/hr</span>
                             </span>
                           ) : (
                             <span>{(job.time_logs || []).length} sessions</span>
@@ -2646,7 +2649,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
           {filteredJobs.map((job) => {
             const isRunning = Boolean(job.active_timer_start);
             const totalSecs = calculateJobTotalSeconds(job, nowTimestamp);
-            const billable = calculateJobBillableAmount(job, nowTimestamp);
+            const billable = calculateJobGrossInvoiceAmount(job, nowTimestamp);
+            const jobRate = job.hourly_rate || 85;
             const delegatedTasks = job.delegated_tasks || [];
 
             return (
@@ -2845,8 +2849,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       </span>
                     </div>
                     {canAccessFinancials ? (
-                      <span className={`text-[10px] font-mono font-semibold block ${isRunning ? 'text-emerald-600 font-bold animate-pulse' : 'text-emerald-700'}`}>
-                        ${billable.toFixed(2)} billable
+                      <span className={`text-[11px] font-mono font-semibold flex items-center gap-1 ${isRunning ? 'text-emerald-600 font-bold' : 'text-emerald-700'}`}>
+                        {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />}
+                        <span>${billable.toFixed(2)}</span>
+                        <span className="text-[9px] text-slate-400 font-normal">@${jobRate}/hr</span>
                       </span>
                     ) : (
                       <span className="text-[10px] text-slate-400 block">
@@ -2962,7 +2968,8 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                 {filteredJobs.map((job) => {
                   const isRunning = Boolean(job.active_timer_start);
                   const totalSecs = calculateJobTotalSeconds(job, nowTimestamp);
-                  const billable = calculateJobBillableAmount(job, nowTimestamp);
+                  const billable = calculateJobGrossInvoiceAmount(job, nowTimestamp);
+                  const jobRate = job.hourly_rate || 85;
                   const delegatedTasks = job.delegated_tasks || [];
                   const delegatedAssignees = Array.from(
                     new Set(delegatedTasks.map(t => t.assignedTo?.trim()).filter(Boolean))
@@ -3118,12 +3125,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
                       {canAccessFinancials && (
                         <td className="p-3.5 font-mono font-bold">
                           {isRunning ? (
-                            <div className="flex items-center gap-1.5 text-emerald-600">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                              <span className="font-mono font-black text-emerald-700">${billable.toFixed(2)}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5 text-emerald-600">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                                <span className="font-mono font-black text-emerald-700">${billable.toFixed(2)}</span>
+                              </div>
+                              <span className="text-[9px] text-emerald-600 font-normal block">LIVE @ ${jobRate}/hr</span>
                             </div>
                           ) : (
-                            <span className="text-emerald-700">${billable.toFixed(2)}</span>
+                            <div>
+                              <span className="text-emerald-700 block">${billable.toFixed(2)}</span>
+                              <span className="text-[9px] text-slate-400 font-normal block">@ ${jobRate}/hr</span>
+                            </div>
                           )}
                         </td>
                       )}

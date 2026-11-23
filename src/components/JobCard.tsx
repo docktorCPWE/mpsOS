@@ -33,7 +33,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem, StaffUser } from '../types';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobCustomChargesTotal, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobGrossInvoiceAmount, calculateJobCustomChargesTotal, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
 import { isJobArchived, canUserDeleteDelegatedItem, canUserAddCustomJobCharge } from '../data/mockData';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
 
@@ -120,7 +120,7 @@ export const JobCard: React.FC<JobCardProps> = ({
   const isTimerRunning = Boolean(job.active_timer_start);
   const isTimerPaused = Boolean(job.paused_by_break);
   const totalSeconds = calculateJobTotalSeconds(job, nowTimestamp);
-  const totalBillable = calculateJobBillableAmount(job, nowTimestamp);
+  const currentTotal = calculateJobGrossInvoiceAmount(job, nowTimestamp);
   const hourlyRate = job.hourly_rate || 85;
   const delegatedTasks = job.delegated_tasks || [];
 
@@ -458,13 +458,25 @@ export const JobCard: React.FC<JobCardProps> = ({
             </div>
 
             <div className="text-right">
-              <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">Total Sessions</div>
-              <div className="text-sm font-bold font-mono text-slate-700">
-                {job.total_time_entries || (job.time_logs || []).length} Recorded
+              <div className="text-[10px] font-semibold uppercase text-slate-400 font-mono">
+                {canAccessFinancials ? `Current Total @ $${hourlyRate}/hr` : 'Total Sessions'}
               </div>
-              {canAccessFinancials && (
-                <div className={`text-[10px] font-mono font-semibold ${isTimerRunning ? 'text-emerald-600 font-bold animate-pulse' : 'text-emerald-700'}`}>
-                  ${totalBillable.toFixed(2)} billable
+              {canAccessFinancials ? (
+                <>
+                  <div className={`text-base font-bold font-mono flex items-center justify-end gap-1.5 ${isTimerRunning ? 'text-emerald-600' : 'text-emerald-700'}`}>
+                    {isTimerRunning && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Live total ticking @ $85/hr" />
+                    )}
+                    <span>${currentTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    {job.total_time_entries || (job.time_logs || []).length} {(job.total_time_entries || (job.time_logs || []).length) === 1 ? 'session' : 'sessions'}
+                    {isTimerRunning ? ' • LIVE' : ''}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm font-bold font-mono text-slate-700">
+                  {job.total_time_entries || (job.time_logs || []).length} Recorded
                 </div>
               )}
             </div>

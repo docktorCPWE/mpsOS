@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye, List, LayoutGrid } from 'lucide-react';
 import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification, CustomJobCharge } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobGrossInvoiceAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
 import { isJobArchived, STAFF_USERS, canUserDeleteDelegatedItem, canUserAddCustomJobCharge } from '../data/mockData';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
@@ -328,6 +328,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
     const shouldStopJobTimer = isTimerOnThisTask;
     let updatedLogs = job.time_logs || [];
     if (shouldStopJobTimer && timerElapsedSec > 0 && job.active_timer_start) {
+      const effectiveRate = job.hourly_rate || 85;
       const liveLog: TimeLog = {
         id: `log-quick-comp-${Date.now()}`,
         drafterName: currentStaff?.name || job.active_timer_drafter_name || targetTask.assignedTo || 'Staff User',
@@ -335,8 +336,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         endTime: nowIso,
         durationSeconds: timerElapsedSec,
         taskDescription: `Completed: ${targetTask.componentTitle}`,
-        hourlyRate: job.hourly_rate || 85,
-        billableAmount: Math.round((timerElapsedSec / 3600) * (job.hourly_rate || 85)),
+        hourlyRate: effectiveRate,
+        billableAmount: Math.round(((timerElapsedSec / 3600) * effectiveRate) * 100) / 100,
         delegatedTaskId: taskId,
         delegatedTaskTitle: targetTask.componentTitle
       };
@@ -473,12 +474,14 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
     const existingLogIdx = updatedLogs.findIndex(tl => tl.delegatedTaskId === taskId);
     const drafterName = targetTask.assignedTo || currentStaff?.name || 'Drafter';
 
+    const effectiveTaskRate = job.hourly_rate || 85;
     if (existingLogIdx >= 0) {
       updatedLogs[existingLogIdx] = {
         ...updatedLogs[existingLogIdx],
         durationSeconds: totalSec,
+        hourlyRate: updatedLogs[existingLogIdx].hourlyRate || effectiveTaskRate,
         billableHours: Number((totalSec / 3600).toFixed(2)),
-        billableAmount: Math.round((totalSec / 3600) * (job.hourly_rate || 85))
+        billableAmount: Math.round(((totalSec / 3600) * (updatedLogs[existingLogIdx].hourlyRate || effectiveTaskRate)) * 100) / 100
       };
     } else if (totalSec > 0) {
       updatedLogs.push({
@@ -488,9 +491,9 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         endTime: targetTask.completedAt || new Date().toISOString(),
         durationSeconds: totalSec,
         taskDescription: `Task: ${targetTask.componentTitle}`,
-        hourlyRate: job.hourly_rate || 85,
+        hourlyRate: effectiveTaskRate,
         billableHours: Number((totalSec / 3600).toFixed(2)),
-        billableAmount: Math.round((totalSec / 3600) * (job.hourly_rate || 85)),
+        billableAmount: Math.round(((totalSec / 3600) * effectiveTaskRate) * 100) / 100,
         delegatedTaskId: taskId,
         delegatedTaskTitle: targetTask.componentTitle
       });
@@ -540,6 +543,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
       const curWorked = task.workedSeconds || 0;
       const newWorked = curWorked + elapsedSeconds;
 
+      const effectiveStopRate = job.hourly_rate || 85;
       const newLog: TimeLog = {
         id: `tl-task-${Date.now()}`,
         drafterName: currentStaff?.name || task.assignedTo || 'Drafter',
@@ -547,7 +551,8 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
         endTime: new Date().toISOString(),
         durationSeconds: elapsedSeconds,
         taskDescription: `Worked on task: ${task.componentTitle}`,
-        hourlyRate: job.hourly_rate || 85,
+        hourlyRate: effectiveStopRate,
+        billableAmount: Math.round(((elapsedSeconds / 3600) * effectiveStopRate) * 100) / 100,
         delegatedTaskId: task.id,
         delegatedTaskTitle: task.componentTitle
       };
@@ -569,6 +574,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
 
       const updatedJob: Job = {
         ...job,
+        hourly_rate: effectiveStopRate,
         active_timer_start: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_start,
         active_timer_task: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_task,
         active_timer_delegated_task_id: job.active_timer_delegated_task_id === task.id ? undefined : job.active_timer_delegated_task_id,
@@ -611,6 +617,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
 
       const updatedJob: Job = {
         ...job,
+        hourly_rate: job.hourly_rate || 85,
         active_timer_start: startIso,
         active_timer_task: `Task: ${task.componentTitle}`,
         active_timer_drafter_id: currentStaff?.id,
@@ -621,7 +628,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
           {
             id: `a-${Date.now()}`,
             action: 'Task Timer Started',
-            details: `Started drafting timer for delegated task "${task.componentTitle}"`,
+            details: `Started drafting timer for delegated task "${task.componentTitle}" (@ $${job.hourly_rate || 85}/hr)`,
             timestamp: startIso,
             performedBy: currentStaff?.name || 'Staff User'
           },
@@ -985,6 +992,12 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [manualHoursInput, setManualHoursInput] = useState('1.5');
   const [manualRateInput, setManualRateInput] = useState<string>(String(job.hourly_rate || 85));
   const [hourlyRateInput, setHourlyRateInput] = useState<number>(job.hourly_rate || 85);
+
+  useEffect(() => {
+    const rate = job.hourly_rate || 85;
+    setHourlyRateInput(rate);
+    setManualRateInput(String(rate));
+  }, [job.id, job.hourly_rate]);
 
   // Upfront Deposit & Retainer Collection State
   const [isEditingDeposit, setIsEditingDeposit] = useState(false);
@@ -2609,13 +2622,31 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                     )}
                   </div>
 
-                  {/* Field 4: Estimated Fee / Square Footage */}
-                  <div className="bg-slate-50/70 p-2.5 rounded-xl border border-slate-200">
-                    <span className="text-slate-400 block font-semibold">
-                      {canAccessFinancials ? 'Estimated Fee:' : 'Square Footage:'}
-                    </span>
-                    <span className="font-medium text-slate-800 block mt-1">
-                      {canAccessFinancials ? `$${job.estimated_cost}` : `${job.sq_ft} sq ft`}
+                  {/* Field 4: Live Current Total ($85/hr) / Square Footage */}
+                  <div className={`p-2.5 rounded-xl border ${
+                    canAccessFinancials && job.active_timer_start
+                      ? 'bg-emerald-50/80 border-emerald-300'
+                      : 'bg-slate-50/70 border-slate-200'
+                  }`}>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-slate-400 block font-semibold">
+                        {canAccessFinancials ? `Current Total (@ $${job.hourly_rate || 85}/hr):` : 'Square Footage:'}
+                      </span>
+                      {canAccessFinancials && job.active_timer_start && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          LIVE
+                        </span>
+                      )}
+                    </div>
+                    <span className={`font-bold font-mono block mt-1 ${
+                      canAccessFinancials
+                        ? (job.active_timer_start ? 'text-emerald-700 text-sm' : 'text-slate-900 text-sm')
+                        : 'font-sans font-medium text-slate-800'
+                    }`}>
+                      {canAccessFinancials
+                        ? `$${calculateJobGrossInvoiceAmount(job, nowTimestamp).toFixed(2)}`
+                        : `${job.sq_ft} sq ft`}
                     </span>
                   </div>
                 </div>
@@ -4769,18 +4800,35 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
 
                 {canAccessFinancials ? (
                   <>
-                    {/* 2. Gross Billable Amount */}
+                    {/* 2. Gross Billable Amount (Drafting @ $85/hr + Custom Add-Ons, live while timer runs) */}
                     <div className="bg-slate-800 text-white p-4 rounded-xl border border-slate-700 flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono uppercase text-slate-300 block font-semibold">Gross Billable Total</span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          @ ${hourlyRateInput}/hr
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[10px] font-mono uppercase text-slate-300 block font-semibold">
+                          Gross Billable Total
                         </span>
+                        <div className="flex items-center gap-1.5">
+                          {Boolean(job.active_timer_start) && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-400/40 px-1.5 py-0.2 rounded">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              LIVE
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            @ ${hourlyRateInput}/hr
+                          </span>
+                        </div>
                       </div>
                       <div className="flex items-baseline justify-between gap-2 mt-2">
-                        <span className="text-xl font-bold font-mono text-white">
-                          ${calculateJobBillableAmount(job, nowTimestamp).toFixed(2)}
-                        </span>
+                        <div>
+                          <span className={`text-xl font-bold font-mono ${Boolean(job.active_timer_start) ? 'text-emerald-300' : 'text-white'}`}>
+                            ${calculateJobGrossInvoiceAmount(job, nowTimestamp).toFixed(2)}
+                          </span>
+                          {jobCustomChargesTotal > 0 && (
+                            <span className="text-[10px] text-amber-300 font-mono block">
+                              incl. +${jobCustomChargesTotal.toFixed(2)} add-ons
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-slate-400">$</span>
                           <input

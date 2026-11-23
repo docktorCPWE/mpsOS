@@ -1,5 +1,11 @@
 import { Job, InvoiceStatus, AppNotification, StaffUser } from '../types';
 import { getLocalDateString } from './timeCardExport';
+import {
+  STANDARD_DRAFTING_HOURLY_RATE,
+  calculateJobTotalSeconds,
+  calculateJobGrossInvoiceAmount,
+  calculateJobNetInvoiceAmount
+} from './timeUtils';
 
 /**
  * Checks whether an item has received Jason's explicit approval for invoicing
@@ -88,13 +94,19 @@ export function applyInvoiceStatusTransition(
   let auditAction = 'Invoice Status Updated';
   let auditDetails = `Changed invoice status to "${newStatus}".`;
 
+  const effectiveRate = job.hourly_rate || STANDARD_DRAFTING_HOURLY_RATE;
+  const totalHours = calculateJobTotalSeconds(job) / 3600;
+  const grossTotal = calculateJobGrossInvoiceAmount({ ...job, hourly_rate: effectiveRate });
+  const netDue = calculateJobNetInvoiceAmount({ ...job, hourly_rate: effectiveRate });
+  const billingSummary = `${totalHours.toFixed(2)} hrs @ $${effectiveRate}/hr • Gross: $${grossTotal.toFixed(2)} • Net Due: $${netDue.toFixed(2)}`;
+
   if (newStatus === 'Pending Invoicing') {
     // Queued for Jason's approval
     jasonApproved = false;
     jasonApprovedAt = undefined;
     jasonApprovedBy = undefined;
     auditAction = 'Routed to Jason for Invoicing Approval';
-    auditDetails = `Item marked as "Pending Invoicing" by ${staffName}. Queued for Jason's sign-off before invoicing.`;
+    auditDetails = `Item marked as "Pending Invoicing" by ${staffName} (${billingSummary}). Queued for Jason's sign-off before invoicing.`;
 
     // Dispatch direct notification to Jason
     newNotifications.push({
@@ -102,7 +114,7 @@ export function applyInvoiceStatusTransition(
       recipientName: 'Jason',
       recipientEmail: 'jason@myplanstore.com',
       title: `Invoice Approval Request: ${job.job_number}`,
-      message: `${job.job_number} (${job.customer_name}) has been submitted for invoicing by ${staffName} and is waiting for your review and approval.`,
+      message: `${job.job_number} (${job.customer_name}) has been submitted for invoicing by ${staffName} (${billingSummary}) and is waiting for your review and approval.`,
       timestamp: nowIso,
       read: false,
       type: 'review_ready',
@@ -116,7 +128,7 @@ export function applyInvoiceStatusTransition(
     jasonApprovedAt = nowIso;
     jasonApprovedBy = staffName;
     auditAction = 'Approved for Invoicing by Jason';
-    auditDetails = `${staffName} approved project for invoicing. Automated alerts dispatched to Ethan and Drew to begin invoicing.`;
+    auditDetails = `${staffName} approved project for invoicing (${billingSummary}). Automated alerts dispatched to Ethan and Drew to begin invoicing.`;
 
     // Dispatch notifications to Ethan & Drew
     newNotifications.push(
@@ -125,7 +137,7 @@ export function applyInvoiceStatusTransition(
         recipientName: 'Ethan',
         recipientEmail: 'ethan@myplanstore.com',
         title: `Ready for Invoicing: ${job.job_number}`,
-        message: `Jason has approved ${job.job_number} (${job.customer_name}) for invoicing. Please start the invoicing process.`,
+        message: `Jason has approved ${job.job_number} (${job.customer_name}) for invoicing (${billingSummary}). Please start the invoicing process.`,
         timestamp: nowIso,
         read: false,
         type: 'status_change',
@@ -138,7 +150,7 @@ export function applyInvoiceStatusTransition(
         recipientName: 'Drew Lupkey',
         recipientEmail: 'drew.lupkey@myplanstore.com',
         title: `Ready for Invoicing: ${job.job_number}`,
-        message: `Jason has approved ${job.job_number} (${job.customer_name}) for invoicing. Please start the invoicing process.`,
+        message: `Jason has approved ${job.job_number} (${job.customer_name}) for invoicing (${billingSummary}). Please start the invoicing process.`,
         timestamp: nowIso,
         read: false,
         type: 'status_change',
@@ -149,7 +161,7 @@ export function applyInvoiceStatusTransition(
     );
   } else if (isPaid) {
     auditAction = 'Project Paid & Archived';
-    auditDetails = `Marked as Paid by ${staffName}. Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`;
+    auditDetails = `Marked as Paid by ${staffName} (${billingSummary}). Project archived and removed from active drafter boards. Retrievable via search by Kyle, Jason, Drew, and Ethan.`;
   } else if (newStatus === 'Uninvoiced') {
     jasonApproved = false;
     jasonApprovedAt = undefined;
@@ -160,6 +172,7 @@ export function applyInvoiceStatusTransition(
 
   const updatedJob: Job = {
     ...job,
+    hourly_rate: effectiveRate,
     invoice_status: newStatus,
     jason_approved: jasonApproved,
     jason_approved_at: jasonApprovedAt,

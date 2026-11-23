@@ -39,11 +39,10 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
   const [sqFt, setSqFt] = useState(2500);
   const [style, setStyle] = useState('Modern Farmhouse');
   const [lotDetails, setLotDetails] = useState('');
-  const [estimatedCost, setEstimatedCost] = useState(3200);
 
   // Upfront Deposit / Retainer fields
   const [depositCollected, setDepositCollected] = useState(false);
-  const [depositAmount, setDepositAmount] = useState<number>(1600); // 50% default
+  const [depositAmount, setDepositAmount] = useState<number>(1000);
   const [depositDate, setDepositDate] = useState(() => getLocalDateString(new Date()));
   const [depositNotes, setDepositNotes] = useState('');
 
@@ -81,13 +80,10 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
     );
   }
 
-  const handleQuickDepositPct = (pct: number) => {
-    const calculated = Math.round(estimatedCost * pct);
-    setDepositAmount(calculated);
+  const handleQuickDepositAmount = (amt: number) => {
+    setDepositAmount(amt);
     setDepositCollected(true);
   };
-
-  const netBalanceDue = Math.max(0, estimatedCost - (depositCollected ? (depositAmount || 0) : 0));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +140,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
       next_step: 'Conducting initial architectural scope intake & lot setback analysis.',
       created_at: new Date().toISOString(),
       target_completion_date: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-      estimated_cost: Number(estimatedCost),
+      estimated_cost: 0,
       hourly_rate: 85,
       deposit_collected: depositCollected && effectiveDepositAmount > 0,
       deposit_amount: effectiveDepositAmount,
@@ -155,9 +151,9 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           id: `c-${Date.now()}`,
           author: 'System Intake',
           role: 'system',
-          text: `Intake order created for ${customerName} (${style} - ${sqFt} sq ft). Job Number: ${finalJobNumber}${
+          text: `Intake order created for ${customerName} (${style} - ${sqFt} sq ft). Job Number: ${finalJobNumber} • Billing Rate: $85.00/hr${
             depositCollected && effectiveDepositAmount > 0 
-              ? ` • Upfront Deposit Collected: $${effectiveDepositAmount.toLocaleString()} (Net Invoice Balance: $${netBalanceDue.toLocaleString()})`
+              ? ` • Upfront Deposit Collected: $${effectiveDepositAmount.toLocaleString()} (credited on final invoice)`
               : ''
           }`,
           timestamp: new Date().toISOString()
@@ -170,7 +166,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           action: 'Job Intake Created',
           performedBy: assignedDrafter.split(',')[0],
           timestamp: new Date().toISOString(),
-          details: `Registered new job with Job Number ${finalJobNumber}. Assigned to ${assignedDrafter}.${
+          details: `Registered new job with Job Number ${finalJobNumber} at $85.00/hr standard drafting rate. Assigned to ${assignedDrafter}.${
             depositCollected && effectiveDepositAmount > 0
               ? ` Deposit recorded: $${effectiveDepositAmount.toLocaleString()} via ${depositNotes || 'Retainer'}.`
               : ''
@@ -191,7 +187,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
     setCustomerPhone('');
     setLotDetails('');
     setDepositCollected(false);
-    setDepositAmount(1600);
+    setDepositAmount(1000);
     setDepositNotes('');
   };
 
@@ -380,28 +376,9 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Estimated Plan Package Fee ($)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-slate-500 font-bold">$</span>
-                <input
-                  type="number"
-                  value={estimatedCost}
-                  onChange={(e) => {
-                    const newEst = Number(e.target.value);
-                    setEstimatedCost(newEst);
-                    if (depositCollected && depositAmount > newEst) {
-                      setDepositAmount(newEst);
-                    }
-                  }}
-                  className="w-full pl-7 bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {/* DEPOSIT AMOUNT COLLECTED & BILLING INVOICE CALCULATION SECTION */}
+            {/* DEPOSIT AMOUNT COLLECTED & HOURLY BILLING SECTION */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -410,7 +387,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
                       const checked = e.target.checked;
                       setDepositCollected(checked);
                       if (checked && (!depositAmount || depositAmount === 0)) {
-                        setDepositAmount(Math.round(estimatedCost * 0.5));
+                        setDepositAmount(1000);
                       }
                     }}
                     className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
@@ -421,39 +398,33 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
                   </span>
                 </label>
 
-                {depositCollected && (
-                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">
-                    Deposit Active
+                <div className="flex items-center gap-1.5">
+                  <span className="bg-blue-50 text-blue-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-blue-200">
+                    Billed @ $85/hr
                   </span>
-                )}
+                  {depositCollected && (
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                      Deposit Active
+                    </span>
+                  )}
+                </div>
               </div>
 
               {depositCollected && (
                 <div className="space-y-3 pt-2 border-t border-slate-200">
-                  {/* Quick percentage shortcuts */}
+                  {/* Quick deposit amount shortcuts */}
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] text-slate-500 font-medium">Quick Amount:</span>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickDepositPct(0.5)}
-                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 transition cursor-pointer"
-                    >
-                      50% (${Math.round(estimatedCost * 0.5).toLocaleString()})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickDepositPct(0.33)}
-                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 transition cursor-pointer"
-                    >
-                      33% (${Math.round(estimatedCost * 0.33).toLocaleString()})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickDepositPct(0.25)}
-                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 transition cursor-pointer"
-                    >
-                      25% (${Math.round(estimatedCost * 0.25).toLocaleString()})
-                    </button>
+                    {[500, 1000, 1500, 2000].map(amt => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => handleQuickDepositAmount(amt)}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 transition cursor-pointer"
+                      >
+                        ${amt.toLocaleString()}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -467,7 +438,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
                           type="number"
                           value={depositAmount}
                           onChange={(e) => setDepositAmount(Math.max(0, Number(e.target.value)))}
-                          placeholder="e.g. 1500"
+                          placeholder="e.g. 1000"
                           className="w-full pl-7 bg-white border border-emerald-300 rounded-lg p-2 text-xs font-mono font-bold text-emerald-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                           required={depositCollected}
                         />
@@ -495,27 +466,24 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
                       type="text"
                       value={depositNotes}
                       onChange={(e) => setDepositNotes(e.target.value)}
-                      placeholder="e.g. Check #1042, Stripe 50% Retainer, Wire transfer..."
+                      placeholder="e.g. Check #1042, Stripe Retainer, Wire transfer..."
                       className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                   </div>
 
-                  {/* Net Invoicing Calculation Breakdown Box */}
+                  {/* Hourly Billing & Retainer Credit Summary Box */}
                   <div className="bg-emerald-50/80 border border-emerald-200 rounded-lg p-3 text-xs space-y-1.5 font-mono">
                     <div className="flex justify-between text-slate-600 font-sans">
-                      <span>Total Estimated Project Fee:</span>
-                      <span className="font-bold font-mono">${estimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <span>Standard Drafting Billing Rate:</span>
+                      <span className="font-bold font-mono">$85.00 / hr</span>
                     </div>
                     <div className="flex justify-between text-emerald-700 font-sans">
-                      <span className="flex items-center gap-1">
-                        <span>Less: Deposit Collected:</span>
-                      </span>
+                      <span>Upfront Deposit Credit:</span>
                       <span className="font-bold font-mono">-${(depositAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="border-t border-emerald-300 pt-1.5 flex justify-between text-emerald-950 font-bold font-sans text-[13px]">
-                      <span>Remaining Balance to Invoice:</span>
-                      <span className="text-emerald-800 font-mono">${netBalanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
+                    <p className="text-[11px] text-emerald-900 font-sans pt-1 border-t border-emerald-200">
+                      Totals accrue automatically at $85/hr whenever any drafter runs a timer on this job; the deposit above is deducted on invoicing.
+                    </p>
                   </div>
                 </div>
               )}

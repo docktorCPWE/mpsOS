@@ -37,7 +37,7 @@ import {
   CartesianGrid 
 } from 'recharts';
 import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification, PayrollEntry, GregDevProjectCard, GregDevTimeEntry } from '../types';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobGrossInvoiceAmount, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { Lock, ShieldCheck, CreditCard } from 'lucide-react';
 import { STAFF_USERS, canUserAccessPayroll, canViewAllProjectCards } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
@@ -420,7 +420,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
       return timeB - timeA;
     }
     if (sortBy === 'cost_desc') {
-      return calculateJobBillableAmount(b, nowTimestamp) - calculateJobBillableAmount(a, nowTimestamp);
+      return calculateJobGrossInvoiceAmount(b, nowTimestamp) - calculateJobGrossInvoiceAmount(a, nowTimestamp);
     }
     if (sortBy === 'job_number') {
       return a.job_number.localeCompare(b.job_number);
@@ -433,12 +433,12 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   const activeRoadblocksCount = jobs.filter(j => j.roadblock).length;
   const totalPendingInvoicingGross = jobs
     .filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing' || (j.invoice_status || 'Uninvoiced') === 'Uninvoiced' || (j.invoice_status || 'Uninvoiced') === 'Jason Approved')
-    .reduce((sum, j) => sum + calculateJobBillableAmount(j, nowTimestamp), 0);
+    .reduce((sum, j) => sum + calculateJobGrossInvoiceAmount(j, nowTimestamp), 0);
   const totalPendingInvoicingNet = jobs
     .filter(j => (j.invoice_status || 'Uninvoiced') === 'Pending Invoicing' || (j.invoice_status || 'Uninvoiced') === 'Uninvoiced' || (j.invoice_status || 'Uninvoiced') === 'Jason Approved')
     .reduce((sum, j) => sum + calculateJobNetInvoiceAmount(j, nowTimestamp), 0);
   const totalDepositsCollected = jobs.reduce((sum, j) => sum + calculateJobDepositAmount(j), 0);
-  const totalPaidInvoiced = jobs.filter(j => j.invoice_status === 'Paid' || j.invoice_status === 'Invoiced').reduce((sum, j) => sum + calculateJobBillableAmount(j, nowTimestamp), 0);
+  const totalPaidInvoiced = jobs.filter(j => j.invoice_status === 'Paid' || j.invoice_status === 'Invoiced').reduce((sum, j) => sum + calculateJobGrossInvoiceAmount(j, nowTimestamp), 0);
   const avgDaysInPhase = jobs.length > 0 ? (jobs.reduce((sum, j) => sum + getDaysInPhase(j), 0) / jobs.length).toFixed(1) : '0';
 
   // Chart Data 1: Phase Distribution
@@ -1159,7 +1159,10 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                     const daysInPhase = getDaysInPhase(job);
                     const lastAct = getLastActivityDetails(job);
                     const billableAmt = calculateJobBillableAmount(job, nowTimestamp);
+                    const grossAmt = calculateJobGrossInvoiceAmount(job, nowTimestamp);
                     const customChargesAmt = calculateJobCustomChargesTotal(job);
+                    const isTimerRunning = Boolean(job.active_timer_start);
+                    const effectiveRate = job.hourly_rate || 85;
                     const invoiceStatus = job.invoice_status || 'Uninvoiced';
 
                     // Phase age color badge
@@ -1262,9 +1265,17 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                         <td className="p-3.5">
                           <div className="space-y-1.5">
                             <div>
-                              <span className="font-black font-mono text-slate-900 block text-sm">
-                                ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-black font-mono text-sm ${isTimerRunning ? 'text-emerald-700' : 'text-slate-900'}`}>
+                                  ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
+                                </span>
+                                {isTimerRunning && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    LIVE
+                                  </span>
+                                )}
+                              </div>
                               {customChargesAmt > 0 && (
                                 <div
                                   className="text-[10px] font-mono font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 inline-block mr-1"
@@ -1275,11 +1286,11 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                               )}
                               {job.deposit_collected && (job.deposit_amount || 0) > 0 ? (
                                 <div className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-0.5 inline-block">
-                                  Gross: ${billableAmt.toFixed(2)} (-${(job.deposit_amount || 0).toFixed(2)} dep)
+                                  Gross: ${grossAmt.toFixed(2)} (-${(job.deposit_amount || 0).toFixed(2)} dep)
                                 </div>
                               ) : (
                                 <span className="text-[10px] font-mono text-slate-400 block">
-                                  Drafting: ${billableAmt.toFixed(2)}
+                                  Drafting: ${billableAmt.toFixed(2)} @ ${effectiveRate}/hr
                                 </span>
                               )}
                             </div>
@@ -1366,7 +1377,8 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
           {sortedJobs.map((job) => {
             const daysInPhase = getDaysInPhase(job);
             const lastAct = getLastActivityDetails(job);
-            const billableAmt = calculateJobBillableAmount(job, nowTimestamp);
+            const isTimerRunning = Boolean(job.active_timer_start);
+            const effectiveRate = job.hourly_rate || 85;
             const invoiceStatus = job.invoice_status || 'Uninvoiced';
 
             return (
@@ -1434,9 +1446,19 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                 {/* Financials & Action */}
                 <div className="pt-2 border-t flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] text-slate-400 block font-mono">NET TO INVOICE</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-400 block font-mono">
+                        NET TO INVOICE (@ ${effectiveRate}/hr)
+                      </span>
+                      {isTimerRunning && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          LIVE
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-sm font-black font-mono text-slate-900">
+                      <span className={`text-sm font-black font-mono ${isTimerRunning ? 'text-emerald-700' : 'text-slate-900'}`}>
                         ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
                       </span>
                       {job.deposit_collected && (job.deposit_amount || 0) > 0 && (
@@ -1565,7 +1587,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
       {/* MODAL: OFFICIAL INVOICE GENERATOR */}
       {invoiceModalJob && (
         <OfficialInvoiceModal
-          job={invoiceModalJob}
+          job={jobs.find(j => j.id === invoiceModalJob.id) || invoiceModalJob}
           isOpen={Boolean(invoiceModalJob)}
           onClose={() => setInvoiceModalJob(null)}
           onUpdateJob={(updatedJob) => {

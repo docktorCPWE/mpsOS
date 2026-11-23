@@ -996,6 +996,7 @@ export default function App() {
 
           return {
             ...j,
+            hourly_rate: j.hourly_rate || 85,
             active_timer_start: startTimestamp,
             active_timer_task: trimmed,
             active_timer_drafter_id: currentStaff.id,
@@ -1013,7 +1014,7 @@ export default function App() {
                 action: 'Timer Started',
                 performedBy: currentStaff.name || j.assigned_drafter.split(',')[0],
                 timestamp: startTimestamp,
-                details: `Started drafting timer for: ${trimmed}`
+                details: `Started drafting timer for: ${trimmed} (@ $${j.hourly_rate || 85}/hr)`
               },
               ...j.audit_logs
             ]
@@ -1081,6 +1082,7 @@ export default function App() {
           });
 
           // Only add a new time log if there was an active timer session
+          const effectiveRate = j.hourly_rate || 85;
           const newLog: TimeLog | null = hasRunningTimer && durationSeconds > 0 ? {
             id: `tl-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             drafterName: drafterDisplayName,
@@ -1088,7 +1090,8 @@ export default function App() {
             endTime: new Date(endMs).toISOString(),
             durationSeconds,
             taskDescription: trimmed,
-            hourlyRate: j.hourly_rate || 85,
+            hourlyRate: effectiveRate,
+            billableAmount: Math.round(((durationSeconds / 3600) * effectiveRate) * 100) / 100,
             delegatedTaskId: effectiveTaskId,
             delegatedTaskTitle: matchedTaskTitle
           } : null;
@@ -1124,6 +1127,7 @@ export default function App() {
 
           return {
             ...j,
+            hourly_rate: effectiveRate,
             active_timer_start: undefined,
             active_timer_task: undefined,
             active_timer_drafter_id: undefined,
@@ -1293,6 +1297,7 @@ export default function App() {
             const durationSeconds = Math.max(1, Math.floor((endMs - startMs) / 1000));
             const taskNote = j.active_timer_task || `Drafting ${j.current_status}`;
 
+            const effectiveBreakRate = j.hourly_rate || 85;
             const partialLog: TimeLog = {
               id: `tl-break-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
               drafterName: currentStaff.name,
@@ -1300,7 +1305,8 @@ export default function App() {
               endTime: new Date(endMs).toISOString(),
               durationSeconds,
               taskDescription: `${taskNote} (Pre-Break Segment)`,
-              hourlyRate: j.hourly_rate || 85
+              hourlyRate: effectiveBreakRate,
+              billableAmount: Math.round(((durationSeconds / 3600) * effectiveBreakRate) * 100) / 100
             };
 
             const updatedLogs = [...(j.time_logs || []), partialLog];
@@ -1310,6 +1316,7 @@ export default function App() {
 
             return {
               ...j,
+              hourly_rate: effectiveBreakRate,
               active_timer_start: undefined,
               active_timer_task: undefined,
               active_timer_drafter_id: undefined,
@@ -1636,6 +1643,7 @@ export default function App() {
             let durationSeconds = 0;
             const taskNote = j.active_timer_task || j.paused_timer_task || `Drafting ${j.current_status}`;
 
+            const effectiveClockOutRate = j.hourly_rate || 85;
             if (j.active_timer_start) {
               const startMs = new Date(j.active_timer_start).getTime();
               durationSeconds = Math.max(1, Math.floor((stopEndMs - startMs) / 1000));
@@ -1646,7 +1654,8 @@ export default function App() {
                 endTime: stopEndIso,
                 durationSeconds,
                 taskDescription: `${taskNote} (Shift End Auto-Stop)`,
-                hourlyRate: j.hourly_rate || 85,
+                hourlyRate: effectiveClockOutRate,
+                billableAmount: Math.round(((durationSeconds / 3600) * effectiveClockOutRate) * 100) / 100,
                 delegatedTaskId: j.active_timer_delegated_task_id
               });
             }
@@ -1669,7 +1678,8 @@ export default function App() {
                   endTime: stopEndIso,
                   durationSeconds: tElapsed,
                   taskDescription: `Task: ${t.componentTitle} (Shift End Auto-Stop)`,
-                  hourlyRate: j.hourly_rate || 85,
+                  hourlyRate: effectiveClockOutRate,
+                  billableAmount: Math.round(((tElapsed / 3600) * effectiveClockOutRate) * 100) / 100,
                   delegatedTaskId: t.id,
                   delegatedTaskTitle: t.componentTitle
                 });
@@ -1691,6 +1701,7 @@ export default function App() {
 
             return {
               ...j,
+              hourly_rate: effectiveClockOutRate,
               active_timer_start: undefined,
               active_timer_task: undefined,
               active_timer_drafter_id: undefined,
@@ -2936,6 +2947,7 @@ export default function App() {
             : (j.deliverables || []);
 
           // If user logged time spent during completion or had active timer running
+          const effectiveCompRate = j.hourly_rate || 85;
           let updatedTimeLogs = j.time_logs || [];
           if (manualLoggedSec > 0) {
             const manualLog: TimeLog = {
@@ -2945,8 +2957,8 @@ export default function App() {
               endTime: nowIso,
               durationSeconds: manualLoggedSec,
               taskDescription: payload.loggedTaskDescription || `Completed task: ${targetTaskTitle}`,
-              hourlyRate: j.hourly_rate || 85,
-              billableAmount: Math.round((manualLoggedSec / 3600) * (j.hourly_rate || 85)),
+              hourlyRate: effectiveCompRate,
+              billableAmount: Math.round(((manualLoggedSec / 3600) * effectiveCompRate) * 100) / 100,
               delegatedTaskId: payload.taskId,
               delegatedTaskTitle: targetTaskTitle
             };
@@ -2959,8 +2971,8 @@ export default function App() {
               endTime: nowIso,
               durationSeconds: liveTimerSec,
               taskDescription: `Completed: ${targetTaskTitle}`,
-              hourlyRate: j.hourly_rate || 85,
-              billableAmount: Math.round((liveTimerSec / 3600) * (j.hourly_rate || 85)),
+              hourlyRate: effectiveCompRate,
+              billableAmount: Math.round(((liveTimerSec / 3600) * effectiveCompRate) * 100) / 100,
               delegatedTaskId: payload.taskId,
               delegatedTaskTitle: targetTaskTitle
             };
@@ -3000,6 +3012,7 @@ export default function App() {
 
           return {
             ...j,
+            hourly_rate: effectiveCompRate,
             active_timer_start: shouldClearJobTimer ? undefined : j.active_timer_start,
             active_timer_task: shouldClearJobTimer ? undefined : j.active_timer_task,
             active_timer_drafter_id: shouldClearJobTimer ? undefined : j.active_timer_drafter_id,

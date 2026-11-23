@@ -80,30 +80,36 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   const [sqFtGoal, setSqFtGoal] = useState<string>(job.sq_ft_goal || '');
   const [owner, setOwner] = useState<string>(job.owner || '');
 
-  // Editable Time Logs Array
-  const [timeLogs, setTimeLogs] = useState<TimeLog[]>(() => {
-    if (job.time_logs && job.time_logs.length > 0) {
-      return JSON.parse(JSON.stringify(job.time_logs));
+  // Editable Time Logs Array (real recorded sessions or imported sheet hours; no synthetic estimate fallback)
+  const buildInitialTimeLogs = (targetJob: Job): TimeLog[] => {
+    if (targetJob.time_logs && targetJob.time_logs.length > 0) {
+      return JSON.parse(JSON.stringify(targetJob.time_logs));
     }
-    const fallbackHours = job.total_duration_hours
-      ? job.total_duration_hours
-      : job.total_duration_minutes
-        ? job.total_duration_minutes / 60
-        : 10.5;
-    return [
-      {
-        id: `t-init-${Date.now()}`,
-        drafterName: (job.assigned_drafter || 'Kyle').split(',')[0].trim(),
-        startTime: new Date().toISOString(),
-        durationSeconds: Math.round(fallbackHours * 3600),
-        taskDescription: job.phase_name ? `CAD Drafting Services - ${job.phase_name}` : 'Architectural Design & CAD Drafting Services',
-        billingCategory: 'Standard Offline CAD Drafting',
-        hourlyRate: job.hourly_rate || 85,
-        billableHours: fallbackHours,
-        billableAmount: Math.round(fallbackHours * (job.hourly_rate || 85) * 100) / 100
-      }
-    ];
-  });
+    const importedHours = targetJob.total_duration_hours
+      ? targetJob.total_duration_hours
+      : targetJob.total_duration_minutes
+        ? targetJob.total_duration_minutes / 60
+        : 0;
+    if (importedHours > 0) {
+      const effectiveRate = targetJob.hourly_rate || 85;
+      return [
+        {
+          id: `t-init-${Date.now()}`,
+          drafterName: (targetJob.assigned_drafter || 'Kyle').split(',')[0].trim(),
+          startTime: new Date().toISOString(),
+          durationSeconds: Math.round(importedHours * 3600),
+          taskDescription: targetJob.phase_name ? `CAD Drafting Services - ${targetJob.phase_name}` : 'Architectural Design & CAD Drafting Services',
+          billingCategory: 'Standard Offline CAD Drafting',
+          hourlyRate: effectiveRate,
+          billableHours: importedHours,
+          billableAmount: Math.round(importedHours * effectiveRate * 100) / 100
+        }
+      ];
+    }
+    return [];
+  };
+
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>(() => buildInitialTimeLogs(job));
 
   // Editor Panel & Tabs UI State
   const [isEditingSettings, setIsEditingSettings] = useState(false);
@@ -154,9 +160,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       setSqFt(job.sq_ft || 0);
       setCurrentPhase(job.current_status || 'Construction Prints');
       setAssignedDrafter(job.assigned_drafter || '');
-      if (job.time_logs && job.time_logs.length > 0) {
-        setTimeLogs(JSON.parse(JSON.stringify(job.time_logs)));
-      }
+      setTimeLogs(buildInitialTimeLogs(job));
       setCustomCharges(
         job.custom_charges && job.custom_charges.length > 0 ? JSON.parse(JSON.stringify(job.custom_charges)) : []
       );
@@ -165,25 +169,30 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Real-time calculations based on currently edited time entries and financials
-  const calculateTotalSeconds = () => {
-    return timeLogs.reduce((sum, log) => {
-      if (typeof log.billableHours === 'number') {
-        return sum + Math.round(log.billableHours * 3600);
-      }
-      return sum + (log.durationSeconds || 0);
-    }, 0);
-  };
+  // Real-time calculations based on recorded time entries + live in-progress timer (@ $85/hr default)
+  const effectiveHourlyRate = hourlyRate || 85;
 
-  const totalCalculatedSeconds = calculateTotalSeconds();
+  const savedLogsSeconds = timeLogs.reduce((sum, log) => {
+    if (typeof log.billableHours === 'number') {
+      return sum + Math.round(log.billableHours * 3600);
+    }
+    return sum + (log.durationSeconds || 0);
+  }, 0);
+  const savedLogsHours = savedLogsSeconds / 3600;
+
+  // Include live in-progress timer session so invoice preview reflects real-time total mid-job
+  const activeTimerSeconds = job.active_timer_start
+    ? Math.max(0, Math.floor((nowTimestamp - new Date(job.active_timer_start).getTime()) / 1000))
+    : 0;
+  const activeTimerHours = activeTimerSeconds / 3600;
+  const activeTimerBillable = Math.round((activeTimerHours * effectiveHourlyRate) * 100) / 100;
+
+  const totalCalculatedSeconds = savedLogsSeconds + activeTimerSeconds;
   const totalCalculatedHours = totalCalculatedSeconds / 3600;
 
   const calculateDraftingBillable = () => {
-    if (timeLogs.length === 0) {
-      return (job.estimated_cost || 0);
-    }
-    return timeLogs.reduce((sum, log) => {
-      const rate = log.hourlyRate || hourlyRate || 85;
+    const savedBillable = timeLogs.reduce((sum, log) => {
+      const rate = log.hourlyRate || effectiveHourlyRate;
       if (typeof log.billableAmount === 'number') {
         return sum + log.billableAmount;
       }
@@ -193,6 +202,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       const hrs = (log.durationSeconds || 0) / 3600;
       return sum + (hrs * rate);
     }, 0);
+    return savedBillable + activeTimerBillable;
   };
 
   const draftingBillableTotal = Math.round(calculateDraftingBillable() * 100) / 100;
@@ -401,7 +411,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       online_payment_link: paymentLink.trim(),
       invoice_notes: invoiceNotes.trim(),
       invoice_status: invoiceStatus,
-      hourly_rate: hourlyRate,
+      hourly_rate: effectiveHourlyRate,
       deposit_collected: depositCollected,
       deposit_amount: effectiveDepositAmount,
       deposit_date: depositDate,
@@ -420,8 +430,8 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       sq_ft_goal: sqFtGoal.trim() || job.sq_ft_goal,
       owner: owner.trim() || job.owner,
       total_time_entries: timeLogs.length,
-      total_duration_hours: Number(totalCalculatedHours.toFixed(2)),
-      total_duration_minutes: Math.round(totalCalculatedHours * 60),
+      total_duration_hours: Number(savedLogsHours.toFixed(2)),
+      total_duration_minutes: Math.round(savedLogsHours * 60),
       time_logs: timeLogs,
       custom_charges: customCharges,
       audit_logs: [
@@ -1892,11 +1902,19 @@ My Plan Store`,
               {/* ITEMIZED BILLABLE DETAILS TABLE */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
-                    Billable Services & Drafting Summary
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
+                      Billable Services & Drafting Summary
+                    </h3>
+                    {activeTimerSeconds > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded print:hidden">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        LIVE IN-PROGRESS TIMER INCLUDED
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-mono text-slate-500">
-                    Billing Rate: ${hourlyRate}.00 / hr
+                    Billing Rate: ${effectiveHourlyRate.toFixed(2)} / hr
                   </span>
                 </div>
 
@@ -1928,7 +1946,7 @@ My Plan Store`,
                           {totalCalculatedHours.toFixed(2)} hrs
                         </td>
                         <td className="p-2.5 sm:p-3 text-right font-mono text-slate-600">
-                          ${hourlyRate.toFixed(2)}
+                          ${effectiveHourlyRate.toFixed(2)}
                         </td>
                         <td className="p-2.5 sm:p-3 text-right font-mono font-bold text-slate-950">
                           ${draftingBillableTotal.toFixed(2)}
@@ -1971,6 +1989,33 @@ My Plan Store`,
                           </tr>
                         );
                       })}
+
+                      {/* Live In-Progress Timer Session Row */}
+                      {activeTimerSeconds > 0 && (
+                        <tr className="text-emerald-900 text-[11px] bg-emerald-50/70 border-t border-emerald-200">
+                          <td className="py-2 px-3 pl-5">
+                            <span className="font-bold text-emerald-900 inline-flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0 print:hidden" />
+                              <span>In Progress (Active Timer): {job.active_timer_task || `Drafting ${job.current_status}`}</span>
+                            </span>
+                            <span className="text-emerald-700 font-mono text-[10px] ml-2">
+                              ({formatSecondsToReadable(activeTimerSeconds)} elapsed)
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-center text-emerald-800 font-mono text-[10px]">
+                            {job.active_timer_drafter_name || assignedDrafter.split(',')[0]}
+                          </td>
+                          <td className="py-2 px-3 text-center font-mono font-bold text-[10px] text-emerald-800">
+                            {activeTimerHours.toFixed(2)} hrs
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-[10px] text-emerald-700">
+                            ${effectiveHourlyRate.toFixed(2)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-900">
+                            ${activeTimerBillable.toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
 
                       {/* Separate Line Item(s) for Custom Job Charges (when used) */}
                       {customCharges.length > 0 && customCharges.map((charge) => (

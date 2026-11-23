@@ -2,6 +2,9 @@ import { Job, DelegatedWorkItem, StaffUser, GregDevProjectCard, TimeCardShift } 
 import { isStaffCurrentlyOnline } from '../data/mockData';
 import { isShiftForStaff } from './timeCardExport';
 
+/** Standard hourly billing rate applied when any drafter runs a timer on a job */
+export const STANDARD_DRAFTING_HOURLY_RATE = 85;
+
 /**
  * Calculate total seconds worked on a specific delegated work item.
  * Combines task.workedSeconds, any time logs explicitly tagged with task.id or matching task title,
@@ -115,20 +118,31 @@ export function calculateAdditionalBillableHours(rawHours: number): number {
 }
 
 /**
- * Calculate billable total for a job based on all logs (with individual rates & billable hours) and any active timer.
+ * Calculate billable drafting total for a job based on all logs (at $85/hr standard rate unless overridden)
+ * and any currently running active timer (live ticking while in progress).
  */
 export function calculateJobBillableAmount(job: Job, nowTimestamp?: number): number {
+  const defaultRate = job.hourly_rate || STANDARD_DRAFTING_HOURLY_RATE;
   let completedBillable = 0;
-  for (const log of (job.time_logs || [])) {
-    const rate = log.hourlyRate || job.hourly_rate || 85;
-    if (typeof log.billableAmount === 'number') {
-      completedBillable += log.billableAmount;
-    } else if (typeof log.billableHours === 'number') {
-      completedBillable += log.billableHours * rate;
-    } else {
-      const hours = (log.durationSeconds || 0) / 3600;
-      completedBillable += hours * rate;
+
+  if (job.time_logs && job.time_logs.length > 0) {
+    for (const log of job.time_logs) {
+      const rate = log.hourlyRate || defaultRate;
+      if (typeof log.billableAmount === 'number') {
+        completedBillable += log.billableAmount;
+      } else if (typeof log.billableHours === 'number') {
+        completedBillable += log.billableHours * rate;
+      } else {
+        const hours = (log.durationSeconds || 0) / 3600;
+        completedBillable += hours * rate;
+      }
     }
+  } else if (job.total_duration_minutes || job.total_duration_hours) {
+    // Fallback to imported sheet duration if time_logs array is empty
+    const fallbackHours = job.total_duration_minutes
+      ? job.total_duration_minutes / 60
+      : (job.total_duration_hours || 0);
+    completedBillable = Math.max(0, fallbackHours) * defaultRate;
   }
 
   let activeBillable = 0;
@@ -136,8 +150,7 @@ export function calculateJobBillableAmount(job: Job, nowTimestamp?: number): num
     const startMs = new Date(job.active_timer_start).getTime();
     const currentMs = nowTimestamp || Date.now();
     const activeSec = Math.max(0, Math.floor((currentMs - startMs) / 1000));
-    const rate = job.hourly_rate || 85;
-    activeBillable = (activeSec / 3600) * rate;
+    activeBillable = (activeSec / 3600) * defaultRate;
   }
 
   return Math.max(0, Math.round((completedBillable + activeBillable) * 100) / 100);
@@ -166,14 +179,20 @@ export function calculateJobCustomChargesTotal(job: Job): number {
 }
 
 /**
- * Calculate net amount due for invoicing (Total Billable Amount + Custom Charges minus Deposit Collected).
- * If billable time is 0 but estimated_cost exists, it uses estimated_cost as the baseline project total.
+ * Calculate gross billable total for a job (Drafting Time @ $85/hr + Custom Charges),
+ * including any live in-progress timer session.
+ */
+export function calculateJobGrossInvoiceAmount(job: Job, nowTimestamp?: number): number {
+  const loggedBillable = calculateJobBillableAmount(job, nowTimestamp);
+  const customChargesTotal = calculateJobCustomChargesTotal(job);
+  return Math.max(0, Math.round((loggedBillable + customChargesTotal) * 100) / 100);
+}
+
+/**
+ * Calculate net amount due for invoicing (Drafting Time @ $85/hr + Custom Charges minus Deposit Collected).
  */
 export function calculateJobNetInvoiceAmount(job: Job, nowTimestamp?: number): number {
-  const loggedBillable = calculateJobBillableAmount(job, nowTimestamp);
-  const baseGross = loggedBillable > 0 ? loggedBillable : (job.estimated_cost || 0);
-  const customChargesTotal = calculateJobCustomChargesTotal(job);
-  const grossTotal = baseGross + customChargesTotal;
+  const grossTotal = calculateJobGrossInvoiceAmount(job, nowTimestamp);
   const deposit = calculateJobDepositAmount(job);
   return Math.max(0, Math.round((grossTotal - deposit) * 100) / 100);
 }
@@ -192,7 +211,6 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     'House Style',
     'Square Footage',
     'Current Phase',
-    'Estimated Base Fee ($)',
     'Hourly Rate ($)',
     'Total Seconds Logged',
     'Total Hours Logged',
@@ -211,16 +229,15 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
   const rows = jobsToExport.map(job => {
     const totalSec = calculateJobTotalSeconds(job);
     const totalHours = (totalSec / 3600).toFixed(2);
-    const grossBillable = calculateJobBillableAmount(job);
-    const baseGross = grossBillable > 0 ? grossBillable : (job.estimated_cost || 0);
+    const draftingBillable = calculateJobBillableAmount(job);
     const customChargesTotal = calculateJobCustomChargesTotal(job);
     const customChargeNotes = (job.custom_charges || [])
       .map(c => `$${Number(c.amount || 0).toFixed(2)}: ${c.note}`)
       .join(' | ');
-    const effectiveGross = Math.round((baseGross + customChargesTotal) * 100) / 100;
+    const effectiveGross = Math.round((draftingBillable + customChargesTotal) * 100) / 100;
     const deposit = calculateJobDepositAmount(job);
     const netDue = Math.max(0, effectiveGross - deposit).toFixed(2);
-    const rate = (job.hourly_rate || 85).toFixed(2);
+    const rate = (job.hourly_rate || STANDARD_DRAFTING_HOURLY_RATE).toFixed(2);
     const sessionsCount = (job.time_logs || []).length;
 
     return [
@@ -231,11 +248,10 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
       `"${job.style.replace(/"/g, '""')}"`,
       job.sq_ft,
       `"${job.current_status}"`,
-      (job.estimated_cost || 0).toFixed(2),
       rate,
       totalSec,
       totalHours,
-      baseGross.toFixed(2),
+      draftingBillable.toFixed(2),
       customChargesTotal.toFixed(2),
       `"${customChargeNotes.replace(/"/g, '""')}"`,
       effectiveGross.toFixed(2),
