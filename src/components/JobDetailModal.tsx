@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, CheckCircle2, Clock, FileText, Send, Plus, Trash2, Mail, ShieldAlert, Layers, User, Phone, MapPin, DollarSign, Calendar, RefreshCw, Play, Square, Download, FileSpreadsheet, History, Image, Upload, Paperclip, Sparkles, Maximize2, ExternalLink, FileCode, Edit3, Share2, ListTodo, Lock, RotateCcw, CheckCircle, Archive, Coffee, Receipt, AtSign, Reply, Bell, Users, CornerDownRight, MessageSquare, ChevronDown, Check, Tag, Building, Eye, List, LayoutGrid } from 'lucide-react';
-import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification } from '../types';
+import { Job, JobPhase, DeliverableFile, EmailTemplate, TimeLog, JobVersionSnapshot, JobComment, DelegatedWorkItem, StaffUser, AdditionalBillingCategory, InvoiceStatus, AppNotification, CustomJobCharge } from '../types';
 import { BlueprintCanvas } from './BlueprintCanvas';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateAdditionalBillableHours, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
 import { RequestRevisionModal } from './RequestRevisionModal';
-import { isJobArchived, STAFF_USERS, canUserDeleteDelegatedItem } from '../data/mockData';
+import { isJobArchived, STAFF_USERS, canUserDeleteDelegatedItem, canUserAddCustomJobCharge } from '../data/mockData';
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 import { deleteFileFromJobInFirestore } from '../services/firebase';
@@ -89,6 +89,133 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const canDeleteDelegated = canUserDeleteDelegatedItem(currentStaff);
+
+  // Custom Dollar Amount Charges (Strictly Kyle, Jason, or Drew ONLY)
+  const canAddCustomCharge = canUserAddCustomJobCharge(currentStaff);
+  const isJobInvoicedOut = job.invoice_status === 'Invoiced' || job.invoice_status === 'Paid';
+  const [customChargeAmountInput, setCustomChargeAmountInput] = useState('');
+  const [customChargeNoteInput, setCustomChargeNoteInput] = useState('');
+  const [customChargeError, setCustomChargeError] = useState<string | null>(null);
+  const [customChargeFeedback, setCustomChargeFeedback] = useState<string | null>(null);
+  const [editingCustomChargeId, setEditingCustomChargeId] = useState<string | null>(null);
+  const [editChargeAmountInput, setEditChargeAmountInput] = useState('');
+  const [editChargeNoteInput, setEditChargeNoteInput] = useState('');
+  const [confirmRemoveChargeId, setConfirmRemoveChargeId] = useState<string | null>(null);
+
+  const jobCustomCharges: CustomJobCharge[] = job.custom_charges || [];
+  const jobCustomChargesTotal = calculateJobCustomChargesTotal(job);
+
+  const handleAddCustomCharge = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canAddCustomCharge || isJobInvoicedOut) return;
+    const parsedAmount = parseFloat(customChargeAmountInput);
+    const trimmedNote = customChargeNoteInput.trim();
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setCustomChargeError('Please enter a valid dollar amount greater than $0.00.');
+      return;
+    }
+    if (!trimmedNote) {
+      setCustomChargeError('Please enter a note explaining the reason for this custom charge.');
+      return;
+    }
+    const roundedAmount = Math.round(parsedAmount * 100) / 100;
+    const nowIso = new Date().toISOString();
+    const addedByName = currentStaff?.name || 'Authorized Manager';
+    const newCharge: CustomJobCharge = {
+      id: `chg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      amount: roundedAmount,
+      note: trimmedNote,
+      addedBy: addedByName,
+      addedById: currentStaff?.id,
+      addedAt: nowIso
+    };
+
+    const updatedCharges = [...jobCustomCharges, newCharge];
+    onUpdateJob({
+      ...job,
+      custom_charges: updatedCharges,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Custom Job Charge Added',
+          performedBy: addedByName,
+          timestamp: nowIso,
+          details: `Added custom charge of $${roundedAmount.toFixed(2)} — Reason: "${trimmedNote}" (will appear as a separate invoice line item).`
+        },
+        ...job.audit_logs
+      ]
+    });
+
+    setCustomChargeAmountInput('');
+    setCustomChargeNoteInput('');
+    setCustomChargeError(null);
+    setCustomChargeFeedback(`Added $${roundedAmount.toFixed(2)} custom charge to #${job.job_number}.`);
+    setTimeout(() => setCustomChargeFeedback(null), 4000);
+  };
+
+  const handleSaveEditedCustomCharge = (chargeId: string) => {
+    if (!canAddCustomCharge || isJobInvoicedOut) return;
+    const parsedAmount = parseFloat(editChargeAmountInput);
+    const trimmedNote = editChargeNoteInput.trim();
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setCustomChargeError('Please enter a valid dollar amount greater than $0.00.');
+      return;
+    }
+    if (!trimmedNote) {
+      setCustomChargeError('Please enter a note explaining the reason for this custom charge.');
+      return;
+    }
+    const roundedAmount = Math.round(parsedAmount * 100) / 100;
+    const nowIso = new Date().toISOString();
+    const editorName = currentStaff?.name || 'Authorized Manager';
+    const updatedCharges = jobCustomCharges.map(c =>
+      c.id === chargeId
+        ? { ...c, amount: roundedAmount, note: trimmedNote, updatedAt: nowIso }
+        : c
+    );
+    onUpdateJob({
+      ...job,
+      custom_charges: updatedCharges,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Custom Job Charge Updated',
+          performedBy: editorName,
+          timestamp: nowIso,
+          details: `Updated custom charge to $${roundedAmount.toFixed(2)} — Reason: "${trimmedNote}".`
+        },
+        ...job.audit_logs
+      ]
+    });
+    setEditingCustomChargeId(null);
+    setCustomChargeError(null);
+    setCustomChargeFeedback('Custom charge updated.');
+    setTimeout(() => setCustomChargeFeedback(null), 3500);
+  };
+
+  const handleRemoveCustomCharge = (charge: CustomJobCharge) => {
+    if (!canAddCustomCharge || isJobInvoicedOut) return;
+    const nowIso = new Date().toISOString();
+    const removerName = currentStaff?.name || 'Authorized Manager';
+    const updatedCharges = jobCustomCharges.filter(c => c.id !== charge.id);
+    onUpdateJob({
+      ...job,
+      custom_charges: updatedCharges,
+      audit_logs: [
+        {
+          id: `a-${Date.now()}`,
+          action: 'Custom Job Charge Removed',
+          performedBy: removerName,
+          timestamp: nowIso,
+          details: `Removed custom charge of $${Number(charge.amount || 0).toFixed(2)} ("${charge.note}").`
+        },
+        ...job.audit_logs
+      ]
+    });
+    setConfirmRemoveChargeId(null);
+    setCustomChargeFeedback(`Removed $${Number(charge.amount || 0).toFixed(2)} custom charge.`);
+    setTimeout(() => setCustomChargeFeedback(null), 3500);
+  };
 
   // Helper to determine if a comment is an automated duplicate of an audit log entry
   const isAuditLogDuplicate = (c: JobComment) => {
@@ -2510,6 +2637,263 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 </div>
               </div>
 
+              {/* Custom Dollar Amount Charge Card (STRICTLY Kyle, Jason, or Drew ONLY) */}
+              {canAddCustomCharge && (
+                <div className="bg-white p-4 rounded-xl border border-amber-300/80 space-y-3 shadow-2xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
+                        <DollarSign className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                          <span>Custom Job Charge / Fee Addition</span>
+                          {jobCustomCharges.length > 0 && (
+                            <span className="font-mono text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md">
+                              +${jobCustomChargesTotal.toFixed(2)} ({jobCustomCharges.length})
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          {isJobInvoicedOut
+                            ? 'This job has been invoiced out. Custom additions below were included as separate invoice line items.'
+                            : 'Authorized for Kyle, Jason & Drew only. Stays with this job until invoiced out and prints as a separate invoice line item.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-md border ${
+                      isJobInvoicedOut
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}>
+                      {isJobInvoicedOut ? `Invoiced (${job.invoice_status})` : 'Pending Invoice Line Item'}
+                    </span>
+                  </div>
+
+                  {customChargeFeedback && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{customChargeFeedback}</span>
+                    </div>
+                  )}
+
+                  {customChargeError && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                      <span>{customChargeError}</span>
+                    </div>
+                  )}
+
+                  {/* Active / Attached Custom Charges List */}
+                  {jobCustomCharges.length > 0 && (
+                    <div className="space-y-2">
+                      {jobCustomCharges.map((charge) => {
+                        const isEditingThis = editingCustomChargeId === charge.id;
+                        const isConfirmingRemove = confirmRemoveChargeId === charge.id;
+                        return (
+                          <div
+                            key={charge.id}
+                            className={`rounded-lg border p-3 transition ${
+                              isJobInvoicedOut
+                                ? 'bg-slate-50 border-slate-200'
+                                : 'bg-amber-50/50 border-amber-200'
+                            }`}
+                          >
+                            {isEditingThis && !isJobInvoicedOut ? (
+                              <div className="space-y-2.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+                                      Dollar Amount ($)
+                                    </label>
+                                    <div className="relative">
+                                      <span className="absolute left-2.5 top-2 text-slate-400 font-bold text-xs">$</span>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0.01"
+                                        value={editChargeAmountInput}
+                                        onChange={(e) => setEditChargeAmountInput(e.target.value)}
+                                        className="w-full pl-6 pr-2.5 py-1.5 text-xs font-mono font-bold bg-white border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+                                      Reason / Invoice Line Note
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={editChargeNoteInput}
+                                      onChange={(e) => setEditChargeNoteInput(e.target.value)}
+                                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingCustomChargeId(null);
+                                      setCustomChargeError(null);
+                                    }}
+                                    className="px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEditedCustomCharge(charge.id)}
+                                    className="px-3 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-2xs cursor-pointer"
+                                  >
+                                    Save Changes
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono font-black text-sm text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md">
+                                      +${Number(charge.amount || 0).toFixed(2)}
+                                    </span>
+                                    <span className="text-[11px] font-semibold text-slate-500">
+                                      Added by <strong className="text-slate-700">{charge.addedBy}</strong>
+                                      {charge.addedAt && ` • ${new Date(charge.addedAt).toLocaleDateString()}`}
+                                    </span>
+                                    {isJobInvoicedOut && (
+                                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                        Invoiced Line Item
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-800 font-medium leading-relaxed break-words">
+                                    {charge.note}
+                                  </p>
+                                </div>
+
+                                {!isJobInvoicedOut && (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {isConfirmingRemove ? (
+                                      <div className="flex items-center gap-1 bg-red-50 border border-red-200 px-2 py-1 rounded-lg">
+                                        <span className="text-[10px] font-bold text-red-700">Remove?</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveCustomCharge(charge)}
+                                          className="text-[10px] font-bold bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded cursor-pointer"
+                                        >
+                                          Yes
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setConfirmRemoveChargeId(null)}
+                                          className="text-[10px] font-semibold text-slate-600 hover:text-slate-900 px-1 cursor-pointer"
+                                        >
+                                          No
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingCustomChargeId(charge.id);
+                                            setEditChargeAmountInput(String(charge.amount));
+                                            setEditChargeNoteInput(charge.note);
+                                            setConfirmRemoveChargeId(null);
+                                            setCustomChargeError(null);
+                                          }}
+                                          className="p-1.5 text-slate-500 hover:text-amber-800 hover:bg-amber-100 rounded-md transition cursor-pointer"
+                                          title="Edit custom charge"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setConfirmRemoveChargeId(charge.id);
+                                            setEditingCustomChargeId(null);
+                                          }}
+                                          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition cursor-pointer"
+                                          title="Remove custom charge"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Add Custom Dollar Charge Form (Hidden once job is invoiced out) */}
+                  {!isJobInvoicedOut ? (
+                    <form onSubmit={handleAddCustomCharge} className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-start">
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                            Custom Amount ($) *
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={customChargeAmountInput}
+                              onChange={(e) => {
+                                setCustomChargeAmountInput(e.target.value);
+                                if (customChargeError) setCustomChargeError(null);
+                              }}
+                              placeholder="250.00"
+                              className="w-full pl-7 pr-3 py-1.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-6">
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                            Reason / Invoice Line Note *
+                          </label>
+                          <input
+                            type="text"
+                            value={customChargeNoteInput}
+                            onChange={(e) => {
+                              setCustomChargeNoteInput(e.target.value);
+                              if (customChargeError) setCustomChargeError(null);
+                            }}
+                            placeholder="e.g. Rush turnaround fee, added detached garage, extra structural revisions..."
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3 sm:pt-5">
+                          <button
+                            type="submit"
+                            className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add to Job</span>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    jobCustomCharges.length === 0 && (
+                      <p className="text-xs text-slate-500 italic bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                        No custom charges were added prior to invoicing.
+                      </p>
+                    )
+                  )}
+                </div>
+              )}
+
               {/* Delegated Work Items & Sub-Tasks Card */}
               <div className="bg-white p-4 rounded-xl border border-indigo-200 space-y-3 shadow-2xs">
                 <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
@@ -4470,11 +4854,17 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                     </div>
 
                     {/* Live Calculation Formula Banner */}
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className={`bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-1 ${jobCustomChargesTotal > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2 text-xs`}>
                       <div className="flex items-center justify-between sm:justify-start sm:gap-2">
-                        <span className="text-slate-500 font-medium">Gross Billable:</span>
+                        <span className="text-slate-500 font-medium">Drafting Billable:</span>
                         <strong className="font-mono text-slate-900">${calculateJobBillableAmount(job, nowTimestamp).toFixed(2)}</strong>
                       </div>
+                      {jobCustomChargesTotal > 0 && (
+                        <div className="flex items-center justify-between sm:justify-start sm:gap-2 text-amber-800 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                          <span className="text-amber-700 font-medium">Custom Add-Ons:</span>
+                          <strong className="font-mono">+${jobCustomChargesTotal.toFixed(2)}</strong>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between sm:justify-start sm:gap-2 text-emerald-700">
                         <span className="text-slate-500 font-medium">Less Deposit:</span>
                         <strong className="font-mono">-${calculateJobDepositAmount(job).toFixed(2)}</strong>

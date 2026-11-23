@@ -33,8 +33,8 @@ import {
   Trash2
 } from 'lucide-react';
 import { Job, JobPhase, DelegatedWorkItem, StaffUser } from '../types';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
-import { isJobArchived, canUserDeleteDelegatedItem } from '../data/mockData';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobCustomChargesTotal, formatSecondsToHHMMSS, formatSecondsToReadable } from '../utils/timeUtils';
+import { isJobArchived, canUserDeleteDelegatedItem, canUserAddCustomJobCharge } from '../data/mockData';
 import { EditCustomerContactModal } from './EditCustomerContactModal';
 
 interface JobCardProps {
@@ -112,6 +112,10 @@ export const JobCard: React.FC<JobCardProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
 
   const canDelete = canUserDeleteDelegatedItem(currentStaff);
+  const canSeeCustomCharge = canUserAddCustomJobCharge(currentStaff);
+  const isJobInvoicedOut = job.invoice_status === 'Invoiced' || job.invoice_status === 'Paid';
+  const customChargesTotal = calculateJobCustomChargesTotal(job);
+  const hasPendingCustomCharges = canSeeCustomCharge && !isJobInvoicedOut && customChargesTotal > 0;
 
   const isTimerRunning = Boolean(job.active_timer_start);
   const isTimerPaused = Boolean(job.paused_by_break);
@@ -214,6 +218,17 @@ export const JobCard: React.FC<JobCardProps> = ({
               <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
                 <Archive className="w-3 h-3 text-emerald-600" />
                 <span>Paid & Archived</span>
+              </span>
+            )}
+
+            {/* Pending Custom Dollar Charge Badge (Strictly Kyle, Jason, or Drew until invoiced out) */}
+            {hasPendingCustomCharges && (
+              <span
+                className="text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs"
+                title={(job.custom_charges || []).map(c => `+$${Number(c.amount || 0).toFixed(2)}: ${c.note}`).join(' | ')}
+              >
+                <DollarSign className="w-3 h-3 text-amber-600" />
+                <span>+${customChargesTotal.toFixed(2)} Add-On</span>
               </span>
             )}
           </div>

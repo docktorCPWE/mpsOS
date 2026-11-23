@@ -230,6 +230,35 @@ export function canSwitchStaffAccounts(userNameOrStaff?: string | StaffUser | nu
   );
 }
 
+/**
+ * Strictly restricts custom dollar amount job charges & reason notes inside project cards
+ * to ONLY Kyle Edmonson, Jason Barnett, or Drew Lupkey.
+ */
+export function canUserAddCustomJobCharge(userNameOrStaff?: string | StaffUser | null): boolean {
+  if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    const id = (userNameOrStaff.id || '').toLowerCase().trim();
+    const email = (userNameOrStaff.email || '').toLowerCase().trim();
+    const name = (userNameOrStaff.name || '').toLowerCase().trim();
+    return Boolean(
+      id === 'staff-kyle' ||
+      id === 'staff-jason' ||
+      id === 'staff-drew' ||
+      email === 'kyle@myplanstore.com' ||
+      email === 'jason@myplanstore.com' ||
+      email === 'drew@myplanstore.com' ||
+      email.startsWith('kyle@') ||
+      email.startsWith('jason@') ||
+      email.startsWith('drew@') ||
+      name.includes('kyle') ||
+      name.includes('jason') ||
+      name.includes('drew')
+    );
+  }
+  const name = String(userNameOrStaff).toLowerCase().trim();
+  return name.includes('kyle') || name.includes('jason') || name.includes('drew');
+}
+
 export const ONLINE_PRESENCE_TTL_MS = 20 * 60 * 1000; // 20 minutes (tolerates Chrome/Safari background tab throttling while drafting in CAD)
 export const ACTIVE_SESSION_MAX_AGE_MS = 16 * 60 * 60 * 1000; // 16 hours max age for an active shift or running timer
 

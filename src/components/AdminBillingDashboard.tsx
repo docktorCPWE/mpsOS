@@ -37,7 +37,7 @@ import {
   CartesianGrid 
 } from 'recharts';
 import { Job, JobPhase, JobComment, StaffUser, InvoiceStatus, AppNotification, PayrollEntry, GregDevProjectCard, GregDevTimeEntry } from '../types';
-import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
+import { calculateJobTotalSeconds, calculateJobBillableAmount, calculateJobDepositAmount, calculateJobCustomChargesTotal, calculateJobNetInvoiceAmount, formatSecondsToReadable, exportInvoicingCSV } from '../utils/timeUtils';
 import { Lock, ShieldCheck, CreditCard } from 'lucide-react';
 import { STAFF_USERS, canUserAccessPayroll, canViewAllProjectCards } from '../data/mockData';
 import { JasonDrafterProjectBoard } from './JasonDrafterProjectBoard';
@@ -1159,6 +1159,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                     const daysInPhase = getDaysInPhase(job);
                     const lastAct = getLastActivityDetails(job);
                     const billableAmt = calculateJobBillableAmount(job, nowTimestamp);
+                    const customChargesAmt = calculateJobCustomChargesTotal(job);
                     const invoiceStatus = job.invoice_status || 'Uninvoiced';
 
                     // Phase age color badge
@@ -1264,13 +1265,21 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                               <span className="font-black font-mono text-slate-900 block text-sm">
                                 ${calculateJobNetInvoiceAmount(job, nowTimestamp).toFixed(2)}
                               </span>
+                              {customChargesAmt > 0 && (
+                                <div
+                                  className="text-[10px] font-mono font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 inline-block mr-1"
+                                  title={(job.custom_charges || []).map(c => `+$${Number(c.amount || 0).toFixed(2)}: ${c.note}`).join(' | ')}
+                                >
+                                  +${customChargesAmt.toFixed(2)} custom
+                                </div>
+                              )}
                               {job.deposit_collected && (job.deposit_amount || 0) > 0 ? (
                                 <div className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-0.5 inline-block">
                                   Gross: ${billableAmt.toFixed(2)} (-${(job.deposit_amount || 0).toFixed(2)} dep)
                                 </div>
                               ) : (
                                 <span className="text-[10px] font-mono text-slate-400 block">
-                                  Gross: ${billableAmt.toFixed(2)}
+                                  Drafting: ${billableAmt.toFixed(2)}
                                 </span>
                               )}
                             </div>

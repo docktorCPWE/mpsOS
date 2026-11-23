@@ -5,11 +5,12 @@ import {
   AlertCircle, Loader2, Paperclip, Plus, Trash2, RotateCcw, User, Home, 
   Receipt, Layers, Sliders, ChevronDown, ChevronUp, Sparkles, Tag, ArrowRight
 } from 'lucide-react';
-import { Job, StaffUser, InvoiceStatus, EmailTemplate, AppNotification, TimeLog, JobPhase, AdditionalBillingCategory } from '../types';
+import { Job, StaffUser, InvoiceStatus, EmailTemplate, AppNotification, TimeLog, JobPhase, AdditionalBillingCategory, CustomJobCharge } from '../types';
 import { calculateBusinessDueDate, applyInvoiceStatusTransition, isJasonApproved } from '../utils/invoiceWorkflow';
 import { generateInvoicePDF, triggerDownloadBlob } from '../utils/pdfGenerator';
 import { formatSecondsToReadable } from '../utils/timeUtils';
 import { getLocalDateString } from '../utils/timeCardExport';
+import { canUserAddCustomJobCharge } from '../data/mockData';
 
 interface OfficialInvoiceModalProps {
   job: Job;
@@ -55,6 +56,14 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   const [depositAmount, setDepositAmount] = useState<number>(job.deposit_amount || 0);
   const [depositDate, setDepositDate] = useState<string>(job.deposit_date || defaultInvoiceDate);
   const [depositNotes, setDepositNotes] = useState<string>(job.deposit_notes || '');
+
+  // Custom Job Charges (Separate Invoice Line Items — Kyle, Jason, or Drew only to edit)
+  const canEditCustomCharges = canUserAddCustomJobCharge(currentStaff);
+  const [customCharges, setCustomCharges] = useState<CustomJobCharge[]>(() =>
+    job.custom_charges && job.custom_charges.length > 0 ? JSON.parse(JSON.stringify(job.custom_charges)) : []
+  );
+  const [newChargeAmount, setNewChargeAmount] = useState('');
+  const [newChargeNote, setNewChargeNote] = useState('');
 
   // Customer & Plan Specifications State
   const [customerName, setCustomerName] = useState<string>(job.customer_name || '');
@@ -148,8 +157,11 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       if (job.time_logs && job.time_logs.length > 0) {
         setTimeLogs(JSON.parse(JSON.stringify(job.time_logs)));
       }
+      setCustomCharges(
+        job.custom_charges && job.custom_charges.length > 0 ? JSON.parse(JSON.stringify(job.custom_charges)) : []
+      );
     }
-  }, [job.id]);
+  }, [job.id, job.custom_charges]);
 
   if (!isOpen) return null;
 
@@ -166,7 +178,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   const totalCalculatedSeconds = calculateTotalSeconds();
   const totalCalculatedHours = totalCalculatedSeconds / 3600;
 
-  const calculateGrossBillable = () => {
+  const calculateDraftingBillable = () => {
     if (timeLogs.length === 0) {
       return (job.estimated_cost || 0);
     }
@@ -183,7 +195,11 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
     }, 0);
   };
 
-  const grossBillableTotal = calculateGrossBillable();
+  const draftingBillableTotal = Math.round(calculateDraftingBillable() * 100) / 100;
+  const customChargesTotal = Math.round(
+    customCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) * 100
+  ) / 100;
+  const grossBillableTotal = Math.round((draftingBillableTotal + customChargesTotal) * 100) / 100;
   const effectiveDepositAmount = depositCollected ? (Number(depositAmount) || 0) : 0;
   const netBalanceDue = Math.max(0, Math.round((grossBillableTotal - effectiveDepositAmount) * 100) / 100);
 
@@ -220,6 +236,7 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
     setSqFtGoal(job.sq_ft_goal || '');
     setOwner(job.owner || '');
     setTimeLogs(job.time_logs && job.time_logs.length > 0 ? JSON.parse(JSON.stringify(job.time_logs)) : []);
+    setCustomCharges(job.custom_charges && job.custom_charges.length > 0 ? JSON.parse(JSON.stringify(job.custom_charges)) : []);
     setIsAddingTimeLog(false);
     setEditingLogId(null);
     setStatusFeedback('Reset all invoice and time entry values to original project data.');
@@ -406,13 +423,14 @@ export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
       total_duration_hours: Number(totalCalculatedHours.toFixed(2)),
       total_duration_minutes: Math.round(totalCalculatedHours * 60),
       time_logs: timeLogs,
+      custom_charges: customCharges,
       audit_logs: [
         {
           id: `a-${Date.now()}`,
           action: 'Invoice Data & Time Entries Edited',
           performedBy: currentStaff?.name || 'Billing Specialist',
           timestamp: new Date().toISOString(),
-          details: `Invoice #${invoiceNumber} updated. Hours: ${totalCalculatedHours.toFixed(2)} hrs, Gross: $${grossBillableTotal.toFixed(2)}, Deposit: -$${effectiveDepositAmount.toFixed(2)}, Net Balance: $${netBalanceDue.toFixed(2)}. (${timeLogs.length} time entries saved).`
+          details: `Invoice #${invoiceNumber} updated. Hours: ${totalCalculatedHours.toFixed(2)} hrs, Drafting: $${draftingBillableTotal.toFixed(2)}${customChargesTotal > 0 ? `, Custom Additions: +$${customChargesTotal.toFixed(2)} (${customCharges.length} item${customCharges.length === 1 ? '' : 's'})` : ''}, Gross: $${grossBillableTotal.toFixed(2)}, Deposit: -$${effectiveDepositAmount.toFixed(2)}, Net Balance: $${netBalanceDue.toFixed(2)}. (${timeLogs.length} time entries saved).`
         },
         ...job.audit_logs
       ]
@@ -486,7 +504,8 @@ Payment Terms: Net 7 Business Days (Due by ${dueDate})
 
 FINANCIAL SUMMARY:
 --------------------------------------------------
-Gross Billable Services: $${grossBillableTotal.toFixed(2)} (${totalCalculatedHours.toFixed(2)} hrs @ $${hourlyRate}/hr)
+Drafting Services: $${draftingBillableTotal.toFixed(2)} (${totalCalculatedHours.toFixed(2)} hrs @ $${hourlyRate}/hr)${customCharges.length > 0 ? '\n' + customCharges.map(c => `Custom Addition: $${Number(c.amount || 0).toFixed(2)} — ${c.note}`).join('\n') : ''}
+Gross Billable Subtotal: $${grossBillableTotal.toFixed(2)}
 Upfront Deposit / Retainer: -$${effectiveDepositAmount.toFixed(2)}
 --------------------------------------------------
 TOTAL NET AMOUNT DUE: $${netBalanceDue.toFixed(2)}
@@ -1318,12 +1337,115 @@ My Plan Store`,
                     </div>
                   </div>
 
-                  {/* Financial Breakdown Live Summary */}
-                  <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Gross Billable Subtotal</span>
-                      <strong className="text-sm font-bold text-white">${grossBillableTotal.toFixed(2)}</strong>
+                  {/* Custom Job Additions (Separate Invoice Line Items) */}
+                  {(customCharges.length > 0 || canEditCustomCharges) && (
+                    <div className="bg-amber-50/70 p-4 rounded-xl border border-amber-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h6 className="text-xs font-bold uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+                            <DollarSign className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Custom Job Additions ({customCharges.length})</span>
+                          </h6>
+                          <p className="text-[11px] text-amber-800/80">
+                            Displayed as separate line items on the invoice below architectural drafting services.
+                          </p>
+                        </div>
+                        <span className="font-mono font-black text-xs text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg">
+                          +${customChargesTotal.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {customCharges.length > 0 && (
+                        <div className="space-y-1.5">
+                          {customCharges.map((chg) => (
+                            <div key={chg.id} className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-lg border border-amber-200 text-xs">
+                              <div className="min-w-0">
+                                <span className="font-mono font-bold text-amber-900 mr-2">+${Number(chg.amount || 0).toFixed(2)}</span>
+                                <span className="text-slate-800 font-medium">{chg.note}</span>
+                                <span className="text-[10px] text-slate-400 ml-2">({chg.addedBy})</span>
+                              </div>
+                              {canEditCustomCharges && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomCharges(prev => prev.filter(c => c.id !== chg.id))}
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer shrink-0"
+                                  title="Remove custom line item"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {canEditCustomCharges && (
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
+                          <div className="sm:col-span-3 relative">
+                            <span className="absolute left-2.5 top-2 text-slate-400 font-bold text-xs">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={newChargeAmount}
+                              onChange={(e) => setNewChargeAmount(e.target.value)}
+                              placeholder="Amount"
+                              className="w-full pl-6 pr-2.5 py-1.5 text-xs font-mono font-bold bg-white border border-amber-300 rounded-lg text-slate-900"
+                            />
+                          </div>
+                          <div className="sm:col-span-6">
+                            <input
+                              type="text"
+                              value={newChargeNote}
+                              onChange={(e) => setNewChargeNote(e.target.value)}
+                              placeholder="Reason / note for separate invoice line item..."
+                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-amber-300 rounded-lg text-slate-900"
+                            />
+                          </div>
+                          <div className="sm:col-span-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const amt = parseFloat(newChargeAmount);
+                                const note = newChargeNote.trim();
+                                if (!Number.isFinite(amt) || amt <= 0 || !note) return;
+                                setCustomCharges(prev => [
+                                  ...prev,
+                                  {
+                                    id: `chg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                    amount: Math.round(amt * 100) / 100,
+                                    note,
+                                    addedBy: currentStaff?.name || 'Authorized Manager',
+                                    addedById: currentStaff?.id,
+                                    addedAt: new Date().toISOString()
+                                  }
+                                ]);
+                                setNewChargeAmount('');
+                                setNewChargeNote('');
+                              }}
+                              className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Add Line Item</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
+                  )}
+
+                  {/* Financial Breakdown Live Summary */}
+                  <div className={`bg-slate-900 text-white p-4 rounded-xl border border-slate-800 grid grid-cols-1 ${customChargesTotal > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3 font-mono text-xs`}>
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Drafting Subtotal</span>
+                      <strong className="text-sm font-bold text-white">${draftingBillableTotal.toFixed(2)}</strong>
+                    </div>
+                    {customChargesTotal > 0 && (
+                      <div>
+                        <span className="text-amber-400 block text-[10px] uppercase font-semibold">Custom Additions</span>
+                        <strong className="text-sm font-bold text-amber-300">+${customChargesTotal.toFixed(2)}</strong>
+                      </div>
+                    )}
                     <div>
                       <span className="text-emerald-400 block text-[10px] uppercase font-semibold">Less Deposit Retainer</span>
                       <strong className="text-sm font-bold text-emerald-300">
@@ -1809,7 +1931,7 @@ My Plan Store`,
                           ${hourlyRate.toFixed(2)}
                         </td>
                         <td className="p-2.5 sm:p-3 text-right font-mono font-bold text-slate-950">
-                          ${grossBillableTotal.toFixed(2)}
+                          ${draftingBillableTotal.toFixed(2)}
                         </td>
                       </tr>
 
@@ -1850,6 +1972,32 @@ My Plan Store`,
                         );
                       })}
 
+                      {/* Separate Line Item(s) for Custom Job Charges (when used) */}
+                      {customCharges.length > 0 && customCharges.map((charge) => (
+                        <tr key={charge.id} className="bg-amber-50/60 font-medium border-t border-amber-200">
+                          <td className="p-2.5 sm:p-3">
+                            <strong className="text-slate-950 font-bold block">
+                              Custom Addition / Additional Project Fee
+                            </strong>
+                            <span className="text-slate-700 text-[11px] block mt-0.5">
+                              {charge.note}
+                            </span>
+                          </td>
+                          <td className="p-2.5 sm:p-3 text-center font-mono text-slate-600">
+                            {(charge.addedBy || 'Billing').split(' ')[0]}
+                          </td>
+                          <td className="p-2.5 sm:p-3 text-center font-mono font-bold text-slate-700">
+                            1 Flat Fee
+                          </td>
+                          <td className="p-2.5 sm:p-3 text-right font-mono text-slate-600">
+                            ${Number(charge.amount || 0).toFixed(2)}
+                          </td>
+                          <td className="p-2.5 sm:p-3 text-right font-mono font-bold text-slate-950">
+                            ${Number(charge.amount || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+
                     </tbody>
                   </table>
                 </div>
@@ -1872,6 +2020,19 @@ My Plan Store`,
                 <div className="w-full sm:w-1/2 max-w-sm ml-auto space-y-2 font-mono text-xs">
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
                     
+                    {customChargesTotal > 0 && (
+                      <>
+                        <div className="flex justify-between items-center text-slate-600 text-[11px]">
+                          <span className="font-sans">Drafting Services:</span>
+                          <span className="font-semibold text-slate-800">${draftingBillableTotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-amber-800 text-[11px]">
+                          <span className="font-sans font-semibold">Custom Additions ({customCharges.length}):</span>
+                          <span className="font-bold">+${customChargesTotal.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+
                     {/* Gross Total */}
                     <div className="flex justify-between items-center text-slate-700">
                       <span className="font-sans font-medium">Gross Billable Subtotal:</span>

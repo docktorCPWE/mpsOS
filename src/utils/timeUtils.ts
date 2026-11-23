@@ -154,12 +154,26 @@ export function calculateJobDepositAmount(job: Job): number {
 }
 
 /**
- * Calculate net amount due for invoicing (Total Billable Amount minus Deposit Collected).
+ * Calculate total custom dollar additions attached to a job (entered by Kyle, Jason, or Drew).
+ */
+export function calculateJobCustomChargesTotal(job: Job): number {
+  const charges = job.custom_charges || [];
+  const total = charges.reduce((sum, charge) => {
+    const amt = typeof charge.amount === 'number' ? charge.amount : parseFloat(String(charge.amount || 0));
+    return sum + (Number.isFinite(amt) ? amt : 0);
+  }, 0);
+  return Math.round(total * 100) / 100;
+}
+
+/**
+ * Calculate net amount due for invoicing (Total Billable Amount + Custom Charges minus Deposit Collected).
  * If billable time is 0 but estimated_cost exists, it uses estimated_cost as the baseline project total.
  */
 export function calculateJobNetInvoiceAmount(job: Job, nowTimestamp?: number): number {
   const loggedBillable = calculateJobBillableAmount(job, nowTimestamp);
-  const grossTotal = loggedBillable > 0 ? loggedBillable : (job.estimated_cost || 0);
+  const baseGross = loggedBillable > 0 ? loggedBillable : (job.estimated_cost || 0);
+  const customChargesTotal = calculateJobCustomChargesTotal(job);
+  const grossTotal = baseGross + customChargesTotal;
   const deposit = calculateJobDepositAmount(job);
   return Math.max(0, Math.round((grossTotal - deposit) * 100) / 100);
 }
@@ -182,6 +196,9 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     'Hourly Rate ($)',
     'Total Seconds Logged',
     'Total Hours Logged',
+    'Drafting Billable Subtotal ($)',
+    'Custom Additions / Charges ($)',
+    'Custom Charge Reasons',
     'Gross Billable Total ($)',
     'Deposit Collected ($)',
     'Deposit Notes / Ref',
@@ -195,7 +212,12 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
     const totalSec = calculateJobTotalSeconds(job);
     const totalHours = (totalSec / 3600).toFixed(2);
     const grossBillable = calculateJobBillableAmount(job);
-    const effectiveGross = grossBillable > 0 ? grossBillable : (job.estimated_cost || 0);
+    const baseGross = grossBillable > 0 ? grossBillable : (job.estimated_cost || 0);
+    const customChargesTotal = calculateJobCustomChargesTotal(job);
+    const customChargeNotes = (job.custom_charges || [])
+      .map(c => `$${Number(c.amount || 0).toFixed(2)}: ${c.note}`)
+      .join(' | ');
+    const effectiveGross = Math.round((baseGross + customChargesTotal) * 100) / 100;
     const deposit = calculateJobDepositAmount(job);
     const netDue = Math.max(0, effectiveGross - deposit).toFixed(2);
     const rate = (job.hourly_rate || 85).toFixed(2);
@@ -213,6 +235,9 @@ export function exportInvoicingCSV(jobs: Job[], selectedJobId?: string) {
       rate,
       totalSec,
       totalHours,
+      baseGross.toFixed(2),
+      customChargesTotal.toFixed(2),
+      `"${customChargeNotes.replace(/"/g, '""')}"`,
       effectiveGross.toFixed(2),
       deposit.toFixed(2),
       `"${(job.deposit_notes || (job.deposit_date ? `Paid on ${job.deposit_date}` : '')).replace(/"/g, '""')}"`,

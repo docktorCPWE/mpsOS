@@ -314,6 +314,16 @@ export interface AppNotification {
 
 export type InvoiceStatus = 'Uninvoiced' | 'Pending Invoicing' | 'Jason Approved' | 'Invoiced' | 'Paid';
 
+export interface CustomJobCharge {
+  id: string;
+  amount: number;      // Dollar amount added to the job (e.g. 250.00)
+  note: string;        // Reason / explanation shown on the invoice as a separate line item
+  addedBy: string;     // Name of authorized staff (Kyle, Jason, or Drew)
+  addedById?: string;  // Staff ID
+  addedAt: string;     // ISO timestamp
+  updatedAt?: string;  // ISO timestamp if edited
+}
+
 export interface Job {
   id: string;
   job_number: string;
@@ -354,6 +364,7 @@ export interface Job {
   deposit_amount?: number; // Dollar amount of deposit collected e.g. $1500
   deposit_date?: string; // Date deposit was received e.g. "2026-08-20"
   deposit_notes?: string; // Payment reference or notes (e.g. "Check #1042 / Stripe 50% retainer")
+  custom_charges?: CustomJobCharge[]; // Custom dollar add-ons (Kyle, Jason, Drew only) shown as separate invoice line items
   invoice_status?: InvoiceStatus;
   invoice_number?: string;
   invoice_date?: string; // e.g. "2026-08-27"
