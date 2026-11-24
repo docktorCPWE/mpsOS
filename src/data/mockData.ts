@@ -438,6 +438,12 @@ export function isMessageRelevantForUser(
 ): boolean {
   if (!staff || !msg) return false;
 
+  // Respect per-user hide/clear: only hides messages for the staff member who cleared them,
+  // keeping full history intact for the original sender and the rest of the team.
+  if (Array.isArray(msg.hiddenByStaffIds) && msg.hiddenByStaffIds.includes(staff.id)) {
+    return false;
+  }
+
   // Leadership, admins, lead drafters, and staff with full project visibility can always see & search all team chats (includes Kyle)
   if (
     canViewAllProjectCards(staff) ||

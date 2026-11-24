@@ -30,7 +30,7 @@ import {
   subscribeToChat,
   saveChatMessageToFirestore,
   deleteChatMessageFromFirestore,
-  deleteMultipleChatMessagesFromFirestore,
+  hideChatMessagesForStaffInFirestore,
   markChatMessagesAsReadInFirestore,
   purgeDummyDataFromFirestore,
   subscribeToAuth,
@@ -169,6 +169,10 @@ export default function App() {
     paused_elapsed_seconds?: number;
   }>>({});
   const pendingJobTaskMutationRef = useRef<Record<string, Record<string, { atMs: number; task: DelegatedWorkItem }>>>({});
+  const pendingChatSendRef = useRef<Record<string, { atMs: number; message: ChatMessage; retryAttempted?: boolean }>>({});
+  const pendingChatDeleteRef = useRef<Record<string, number>>({});
+  const pendingChatHideRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
+  const pendingChatReadRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
   const authenticatedStaffRef = useRef<StaffUser | null>(authenticatedStaff);
   const healedZombieTokensRef = useRef<Set<string>>(new Set());
   const lastDevCardHealAtRef = useRef<Record<string, number>>({});
@@ -589,10 +593,82 @@ export default function App() {
     );
 
     const unsubscribeChat = subscribeToChat((cloudMsgs) => {
-      if (cloudMsgs) {
-        setChatMessages(cloudMsgs);
-        saveStoredChatMessages(cloudMsgs);
+      if (!cloudMsgs) return;
+      const now = Date.now();
+      const cloudById = new Map<string, ChatMessage>();
+
+      // Reconcile cloud messages against in-flight delete, hide, and read-receipt mutations
+      for (const rawMsg of cloudMsgs) {
+        const pendingDelAt = pendingChatDeleteRef.current[rawMsg.id];
+        if (pendingDelAt) {
+          if (now - pendingDelAt < 20000) {
+            continue; // Still waiting for cloud delete confirmation
+          }
+          delete pendingChatDeleteRef.current[rawMsg.id];
+        }
+
+        let mergedMsg = rawMsg;
+
+        const pendingHide = pendingChatHideRef.current[rawMsg.id];
+        if (pendingHide) {
+          const alreadyHidden = (mergedMsg.hiddenByStaffIds || []).includes(pendingHide.staffId);
+          if (alreadyHidden || now - pendingHide.atMs > 20000) {
+            delete pendingChatHideRef.current[rawMsg.id];
+          } else {
+            mergedMsg = {
+              ...mergedMsg,
+              hiddenByStaffIds: [...(mergedMsg.hiddenByStaffIds || []), pendingHide.staffId]
+            };
+          }
+        }
+
+        const pendingRead = pendingChatReadRef.current[rawMsg.id];
+        if (pendingRead) {
+          const alreadyRead = (mergedMsg.readByStaffIds || []).includes(pendingRead.staffId);
+          if (alreadyRead || now - pendingRead.atMs > 20000) {
+            delete pendingChatReadRef.current[rawMsg.id];
+          } else {
+            mergedMsg = {
+              ...mergedMsg,
+              readByStaffIds: [...(mergedMsg.readByStaffIds || []), pendingRead.staffId]
+            };
+          }
+        }
+
+        cloudById.set(mergedMsg.id, mergedMsg);
       }
+
+      // Clean up confirmed pending deletes no longer in cloud
+      for (const delId of Object.keys(pendingChatDeleteRef.current)) {
+        if (!cloudById.has(delId)) {
+          delete pendingChatDeleteRef.current[delId];
+        }
+      }
+
+      // Protect newly sent in-flight messages so concurrent snapshots NEVER make them disappear
+      for (const sendId of Object.keys(pendingChatSendRef.current)) {
+        const entry = pendingChatSendRef.current[sendId];
+        if (!entry) continue;
+        if (cloudById.has(sendId)) {
+          delete pendingChatSendRef.current[sendId];
+        } else if (now - entry.atMs < 45000) {
+          cloudById.set(sendId, entry.message);
+          if (now - entry.atMs > 3000 && !entry.retryAttempted) {
+            entry.retryAttempted = true;
+            saveChatMessageToFirestore(entry.message).catch(err =>
+              console.warn('[Firestore] Retry saving chat message failed:', err)
+            );
+          }
+        } else {
+          delete pendingChatSendRef.current[sendId];
+        }
+      }
+
+      const reconciled = Array.from(cloudById.values()).sort(
+        (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+      );
+      setChatMessages(reconciled);
+      saveStoredChatMessages(reconciled);
     });
 
     // Non-destructive Dev Project Cards cloud reconciliation:
@@ -2602,15 +2678,45 @@ export default function App() {
     replyToId?: string
   ) => {
     const replyTarget = replyToId ? chatMessages.find(m => m.id === replyToId) : undefined;
+    const liveJobs = jobsRef.current;
+
+    // Collect all referenced jobs from explicit mentions, text scanning (e.g. M26-314 or #M26-314),
+    // and ancestor messages in the same reply thread so Q&A threads stay linked to the job.
+    const detectedJobNumberSet = new Set<string>(referencedJobNumbers || []);
+
+    // Scan message text against all known jobs (case-insensitive, with or without leading #)
+    liveJobs.forEach(j => {
+      const cleanNum = (j.job_number || '').replace(/^#/, '').trim();
+      if (!cleanNum) return;
+      const escaped = cleanNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`(^|[^A-Za-z0-9])#?${escaped}(?![A-Za-z0-9])`, 'i').test(text)) {
+        detectedJobNumberSet.add(j.job_number);
+      }
+    });
+
+    // Inherit job reference(s) from parent reply chain if replying to a job-tagged thread
+    if (replyTarget) {
+      const byId = new Map<string, ChatMessage>(chatMessages.map(m => [m.id, m]));
+      const visited = new Set<string>();
+      let cursor: ChatMessage | undefined = replyTarget;
+      while (cursor && !visited.has(cursor.id)) {
+        visited.add(cursor.id);
+        (cursor.referencedJobNumbers || []).forEach(rjn => detectedJobNumberSet.add(rjn));
+        cursor = cursor.replyToId ? byId.get(cursor.replyToId) : undefined;
+      }
+    }
+
+    const finalReferencedJobNumbers = Array.from(detectedJobNumberSet);
+    const nowIso = new Date().toISOString();
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       senderId: currentStaff.id,
       senderName: currentStaff.name,
       senderRole: currentStaff.title || '',
       text,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
-      ...(referencedJobNumbers && referencedJobNumbers.length > 0 ? { referencedJobNumbers } : {}),
+      ...(finalReferencedJobNumbers.length > 0 ? { referencedJobNumbers: finalReferencedJobNumbers } : {}),
       ...(replyToId ? { replyToId } : {}),
       ...(replyTarget
         ? {
@@ -2622,15 +2728,61 @@ export default function App() {
           }
         : {}),
       readByStaffIds: [currentStaff.id],
+      hiddenByStaffIds: [],
       channelId: 'general'
     };
 
+    // Guard against snapshot race conditions until Firestore confirms the write
+    pendingChatSendRef.current[newMsg.id] = {
+      atMs: Date.now(),
+      message: newMsg
+    };
+
     setChatMessages(prev => {
+      if (prev.some(m => m.id === newMsg.id)) return prev;
       const updated = [...prev, newMsg];
       saveStoredChatMessages(updated);
       return updated;
     });
     saveChatMessageToFirestore(newMsg).catch(err => console.warn('[Firestore] Error saving chat message:', err));
+
+    // Cross-post job-referenced Studio Chat messages into each referenced job's "Messages & Notes"
+    if (finalReferencedJobNumbers.length > 0 && liveJobs.length > 0) {
+      const matchedJobs = liveJobs.filter(j => {
+        const cleanJ = (j.job_number || '').replace(/^#/, '').trim().toLowerCase();
+        return finalReferencedJobNumbers.some(rjn => rjn.replace(/^#/, '').trim().toLowerCase() === cleanJ);
+      });
+
+      if (matchedJobs.length > 0) {
+        const matchedJobIds = matchedJobs.map(j => j.id);
+        const syncedCommentId = `c-chat-${newMsg.id}`;
+        const replyPrefix = replyTarget ? ` (replying to ${replyTarget.senderName})` : '';
+        const syncedComment: JobComment = {
+          id: syncedCommentId,
+          author: currentStaff.name,
+          authorId: currentStaff.id,
+          role: 'drafter',
+          text: `[Studio Chat${replyPrefix}] ${text}`,
+          timestamp: nowIso,
+          ...(mentions && mentions.length > 0 ? { taggedStaff: mentions } : {}),
+          isJobNote: true
+        };
+
+        updateJobsState(
+          prevJobs =>
+            prevJobs.map(j => {
+              if (!matchedJobIds.includes(j.id)) return j;
+              const existingComments = j.comments || [];
+              if (existingComments.some(c => c.id === syncedCommentId)) return j;
+              return {
+                ...j,
+                comments: [...existingComments, syncedComment]
+              };
+            }),
+          matchedJobIds
+        );
+      }
+    }
 
     const lookupRoster = staffList.length > 0 ? staffList : STAFF_USERS;
 
@@ -2650,7 +2802,7 @@ export default function App() {
             recipientEmail: targetStaff.email,
             title: `💬 ${currentStaff.name} mentioned you in Studio Chat`,
             message: `"${text.slice(0, 100)}${text.length > 100 ? '...' : ''}"`,
-            timestamp: new Date().toISOString(),
+            timestamp: nowIso,
             read: false,
             type: 'comment',
             senderName: currentStaff.name
@@ -2671,7 +2823,7 @@ export default function App() {
         recipientEmail: replyTargetStaff?.email || '',
         title: `↩️ ${currentStaff.name} replied to your message in Studio Chat`,
         message: `"${text.slice(0, 100)}${text.length > 100 ? '...' : ''}"`,
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso,
         read: false,
         type: 'comment',
         senderName: currentStaff.name
@@ -2680,7 +2832,48 @@ export default function App() {
     }
   };
 
+  // Hide messages for the current staff user ONLY (never deletes shared history for senders or other team members)
+  const handleHideChatMessagesForMe = (messageIds: string[]) => {
+    if (!messageIds || messageIds.length === 0) return;
+    const now = Date.now();
+    const idSet = new Set(messageIds);
+    messageIds.forEach(id => {
+      pendingChatHideRef.current[id] = { atMs: now, staffId: currentStaff.id };
+    });
+
+    setChatMessages(prev => {
+      const updated = prev.map(m => {
+        if (!idSet.has(m.id)) return m;
+        const existing = m.hiddenByStaffIds || [];
+        if (existing.includes(currentStaff.id)) return m;
+        return { ...m, hiddenByStaffIds: [...existing, currentStaff.id] };
+      });
+      saveStoredChatMessages(updated);
+      return updated;
+    });
+
+    hideChatMessagesForStaffInFirestore(messageIds, currentStaff.id).catch(err =>
+      console.warn('[Firestore] Error hiding chat messages for staff:', err)
+    );
+  };
+
   const handleDeleteChatMessage = (messageId: string) => {
+    const targetMsg = chatMessages.find(m => m.id === messageId);
+    const isOriginalSender = Boolean(
+      targetMsg &&
+      (targetMsg.senderId === currentStaff.id ||
+        (targetMsg.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase())
+    );
+
+    // Only the original sender can permanently delete their own message;
+    // for any other person's message, hide it from the current user's view only!
+    if (!isOriginalSender) {
+      handleHideChatMessagesForMe([messageId]);
+      return;
+    }
+
+    pendingChatDeleteRef.current[messageId] = Date.now();
+    delete pendingChatSendRef.current[messageId];
     setChatMessages(prev => {
       const updated = prev.filter(m => m.id !== messageId);
       saveStoredChatMessages(updated);
@@ -2691,16 +2884,13 @@ export default function App() {
 
   const handleDeleteMultipleChatMessages = (messageIds: string[]) => {
     if (!messageIds || messageIds.length === 0) return;
-    const idSet = new Set(messageIds);
-    setChatMessages(prev => {
-      const updated = prev.filter(m => !idSet.has(m.id));
-      saveStoredChatMessages(updated);
-      return updated;
-    });
-    deleteMultipleChatMessagesFromFirestore(messageIds).catch(err => console.warn('[Firestore] Error deleting multiple chat messages:', err));
+    // Bulk clear / "Clear Read" ALWAYS hides messages only for the current user so nobody
+    // accidentally wipes out another team member's or sender's chat history!
+    handleHideChatMessagesForMe(messageIds);
   };
 
   const handleMarkChatRead = (specificMessageIds?: string[]) => {
+    const now = Date.now();
     setChatMessages(prev => {
       const targetSet = specificMessageIds && specificMessageIds.length > 0 ? new Set(specificMessageIds) : null;
       const relevantMsgs = prev.filter(m => {
@@ -2712,6 +2902,10 @@ export default function App() {
         .map(m => m.id);
 
       if (unreadIds.length === 0) return prev;
+
+      unreadIds.forEach(id => {
+        pendingChatReadRef.current[id] = { atMs: now, staffId: currentStaff.id };
+      });
 
       const unreadSet = new Set(unreadIds);
       const updated = prev.map(m => {
@@ -2726,10 +2920,17 @@ export default function App() {
     });
   };
 
-  // Count unread chat messages for current staff (only counting messages visible to their profile)
-  const unreadChatCount = chatMessages.filter(
-    m => isMessageRelevantForUser(m, currentStaff, jobs, chatMessages) && !(m.readByStaffIds || []).includes(currentStaff.id)
-  ).length;
+  // Count unread chat messages for current staff (only counting visible messages sent by someone else)
+  const unreadChatCount = chatMessages.filter(m => {
+    const isOwnMessage =
+      m.senderId === currentStaff.id ||
+      (m.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase();
+    return (
+      !isOwnMessage &&
+      isMessageRelevantForUser(m, currentStaff, jobs, chatMessages) &&
+      !(m.readByStaffIds || []).includes(currentStaff.id)
+    );
+  }).length;
 
   // 1. Update Job Status & Automatically Trigger Email
   const handleUpdateJobStatus = (jobId: string, newStatus: JobPhase) => {
@@ -4063,9 +4264,6 @@ export default function App() {
         onOpenKyleInbox={() => setIsKyleInboxOpen(true)}
         onToggleChat={() => {
           setIsChatOpen(prev => !prev);
-          if (!isChatOpen) {
-            handleMarkChatRead();
-          }
         }}
         isChatOpen={isChatOpen}
         unreadChatCount={unreadChatCount}

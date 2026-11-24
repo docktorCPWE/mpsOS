@@ -289,6 +289,7 @@ export interface ChatMessage {
     text: string;
   };
   readByStaffIds: string[]; // staff IDs who have read this message
+  hiddenByStaffIds?: string[]; // staff IDs who cleared/hid this message from their own view (never deletes for others)
   channelId?: string;
 }
 

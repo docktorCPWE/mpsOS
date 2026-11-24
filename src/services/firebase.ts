@@ -743,7 +743,8 @@ export function subscribeToChat(
             timestamp: normalizedTs,
             mentions: Array.isArray(data.mentions) ? data.mentions : undefined,
             referencedJobNumbers: Array.isArray(data.referencedJobNumbers) ? data.referencedJobNumbers : undefined,
-            readByStaffIds: Array.isArray(data.readByStaffIds) ? data.readByStaffIds : []
+            readByStaffIds: Array.isArray(data.readByStaffIds) ? data.readByStaffIds : [],
+            hiddenByStaffIds: Array.isArray(data.hiddenByStaffIds) ? data.hiddenByStaffIds : []
           });
         });
         msgs.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
@@ -760,20 +761,35 @@ export function subscribeToChat(
   }
 }
 
-export async function saveChatMessageToFirestore(message: ChatMessage): Promise<void> {
+export async function saveChatMessageToFirestore(message: ChatMessage): Promise<boolean> {
   const path = `discussions/${message.id}`;
-  try {
-    // Strip all undefined fields so Firestore setDoc never rejects optional fields (mentions, replyToId, etc.)
-    const sanitized = JSON.parse(
-      JSON.stringify({
-        ...message,
-        readByStaffIds: Array.isArray(message.readByStaffIds) ? message.readByStaffIds : []
-      })
-    );
-    await setDoc(doc(db, 'discussions', message.id), sanitized, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, path);
+  // Strip all undefined fields so Firestore setDoc never rejects optional fields (mentions, replyToId, etc.)
+  const sanitized = JSON.parse(
+    JSON.stringify({
+      ...message,
+      readByStaffIds: Array.isArray(message.readByStaffIds) ? message.readByStaffIds : [],
+      hiddenByStaffIds: Array.isArray(message.hiddenByStaffIds) ? message.hiddenByStaffIds : []
+    })
+  );
+
+  const retryDelaysMs = [0, 400, 1100, 2200];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+    if (retryDelaysMs[attempt] > 0) {
+      await new Promise(resolve => setTimeout(resolve, retryDelaysMs[attempt]));
+    }
+    try {
+      await setDoc(doc(db, 'discussions', message.id), sanitized, { merge: true });
+      return true;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Firestore] Chat save attempt ${attempt + 1} failed for ${message.id}:`, err);
+    }
   }
+
+  handleFirestoreError(lastError, OperationType.WRITE, path);
+  return false;
 }
 
 export async function deleteChatMessageFromFirestore(messageId: string): Promise<void> {
@@ -800,16 +816,44 @@ export async function deleteMultipleChatMessagesFromFirestore(messageIds: string
   }
 }
 
+export async function hideChatMessagesForStaffInFirestore(messageIds: string[], staffId: string): Promise<void> {
+  if (!messageIds || messageIds.length === 0 || !staffId) return;
+  // Firestore writeBatch supports up to 500 operations per batch
+  const CHUNK_SIZE = 400;
+  try {
+    for (let i = 0; i < messageIds.length; i += CHUNK_SIZE) {
+      const chunk = messageIds.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const id of chunk) {
+        batch.set(
+          doc(db, 'discussions', id),
+          { hiddenByStaffIds: arrayUnion(staffId) },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('[Firestore] Notice while hiding chat messages for staff:', err);
+  }
+}
+
 export async function markChatMessagesAsReadInFirestore(messageIds: string[], staffId: string): Promise<void> {
   if (!messageIds || messageIds.length === 0 || !staffId) return;
+  const CHUNK_SIZE = 400;
   try {
-    const batch = writeBatch(db);
-    for (const id of messageIds) {
-      batch.update(doc(db, 'discussions', id), {
-        readByStaffIds: arrayUnion(staffId)
-      });
+    for (let i = 0; i < messageIds.length; i += CHUNK_SIZE) {
+      const chunk = messageIds.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const id of chunk) {
+        batch.set(
+          doc(db, 'discussions', id),
+          { readByStaffIds: arrayUnion(staffId) },
+          { merge: true }
+        );
+      }
+      await batch.commit();
     }
-    await batch.commit();
   } catch (err) {
     console.warn('[Firestore] Notice while syncing message read states:', err);
   }

@@ -164,8 +164,11 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       const latestTimestampMs = Math.max(
         ...allMsgs.map(m => new Date(m.timestamp || 0).getTime() || 0)
       );
+      const isOwnMsg = (m: ChatMessage) =>
+        m.senderId === currentStaff.id ||
+        (m.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase();
       const isUnread = (m: ChatMessage) =>
-        m.senderId !== currentStaff.id && !(m.readByStaffIds || []).includes(currentStaff.id);
+        !isOwnMsg(m) && !(m.readByStaffIds || []).includes(currentStaff.id);
       const isRootUnread = isUnread(root);
       const unreadReplies = sortedReplies.filter(isUnread);
       const unreadIds = allMsgs.filter(isUnread).map(m => m.id);
@@ -185,7 +188,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     // Order threads by latest activity so threads with fresh replies surface naturally
     result.sort((a, b) => a.latestTimestampMs - b.latestTimestampMs);
     return result;
-  }, [userRelevantMessages, currentStaff.id]);
+  }, [userRelevantMessages, currentStaff.id, currentStaff.name]);
 
   if (!isOpen) return null;
 
@@ -265,12 +268,14 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       }
     });
 
-    // Detect referenced jobs from text
+    // Detect referenced jobs from text (supports both #M26-314 and M26-314 case-insensitively)
     const foundJobNumbers: string[] = [];
     jobs.forEach(j => {
-      const cleanNum = j.job_number.replace(/^#/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(#?${cleanNum})\\b`, 'i');
-      if (regex.test(inputText)) {
+      const cleanNum = (j.job_number || '').replace(/^#/, '').trim();
+      if (!cleanNum) return;
+      const escaped = cleanNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(^|[^A-Za-z0-9])#?${escaped}(?![A-Za-z0-9])`, 'i');
+      if (regex.test(inputText) && !foundJobNumbers.includes(j.job_number)) {
         foundJobNumbers.push(j.job_number);
       }
     });
@@ -286,12 +291,22 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
       }
     }
 
+    const trimmed = inputText.trim();
     onSendMessage(
-      inputText.trim(),
+      trimmed,
       foundMentions.length > 0 ? foundMentions : undefined,
       foundJobNumbers.length > 0 ? foundJobNumbers : undefined,
       replyingTo?.id
     );
+
+    // Ensure the sender always immediately sees the message they just sent
+    // (don't hide it behind an Unread / Mentions / Plans filter or non-matching search query)
+    if (activeTab !== 'all') {
+      setActiveTab('all');
+    }
+    if (searchQuery.trim() && !trimmed.toLowerCase().includes(searchQuery.trim().toLowerCase())) {
+      setSearchQuery('');
+    }
 
     setInputText('');
     setReplyingTo(null);
@@ -306,12 +321,16 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     }
   };
 
+  const isOwnMessage = (m: ChatMessage) =>
+    m.senderId === currentStaff.id ||
+    (m.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase();
+
   // Count unread and read messages for this user
   const unreadCount = userRelevantMessages.filter(
-    m => m.senderId !== currentStaff.id && !(m.readByStaffIds || []).includes(currentStaff.id)
+    m => !isOwnMessage(m) && !(m.readByStaffIds || []).includes(currentStaff.id)
   ).length;
   const readCount = userRelevantMessages.filter(
-    m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id)
+    m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id)
   ).length;
 
   const currentFirstName = (currentStaff.name || '').trim().split(/\s+/)[0].toLowerCase();
@@ -394,7 +413,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
   const handleSelectAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     setSelectedMessageIds(new Set(readIds));
   };
@@ -419,7 +438,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
   const executeQuickDeleteAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => m.senderId === currentStaff.id || (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     if (readIds.length === 0) return;
     if (onDeleteMultipleMessages) {
@@ -580,15 +599,15 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             </button>
           )}
 
-          {/* Quick Clear All Read Messages Button (inline confirm, no window.confirm) */}
+          {/* Quick Clear All Read Messages Button (hides from current user's view only — never deletes for others) */}
           {readCount > 0 && !isMultiSelectMode && (
             confirmDeleteAllRead ? (
-              <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/50 rounded-lg px-2 py-1">
-                <span className="text-[10px] font-bold text-red-200">Delete {readCount} read?</span>
+              <div className="flex items-center gap-1 bg-slate-800 border border-slate-600 rounded-lg px-2 py-1">
+                <span className="text-[10px] font-bold text-slate-200">Hide {readCount} read for you?</span>
                 <button
                   type="button"
                   onClick={executeQuickDeleteAllRead}
-                  className="text-[10px] font-bold bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.5 rounded cursor-pointer"
+                  className="text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white px-1.5 py-0.5 rounded cursor-pointer"
                 >
                   Yes
                 </button>
@@ -604,11 +623,11 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmDeleteAllRead(true)}
-                className="px-2 py-1 text-slate-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition flex items-center gap-1 text-[11px] font-medium border border-transparent hover:border-red-500/30 cursor-pointer"
-                title={`Delete all ${readCount} read messages simultaneously`}
+                className="px-2 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition flex items-center gap-1 text-[11px] font-medium border border-transparent hover:border-slate-700 cursor-pointer"
+                title={`Hide ${readCount} read messages from your view only (senders and other team members keep their chat history)`}
               >
-                <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                <span className="hidden sm:inline">Delete Read ({readCount})</span>
+                <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Clear Read ({readCount})</span>
               </button>
             )
           )}
@@ -628,7 +647,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700'
             }`}
-            title={isMultiSelectMode ? "Exit selection mode" : "Select multiple messages to delete simultaneously"}
+            title={isMultiSelectMode ? "Exit selection mode" : "Select multiple messages to hide from your view"}
           >
             <CheckSquare className="w-3.5 h-3.5" />
             <span>{isMultiSelectMode ? 'Cancel' : 'Select'}</span>
@@ -768,14 +787,14 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
             <div className="flex items-center gap-1.5">
               {selectedMessageIds.size > 0 && (
                 confirmBulkDelete ? (
-                  <div className="flex items-center gap-1.5 bg-red-950 border border-red-500/60 rounded-lg px-2 py-1">
-                    <span className="text-xs font-bold text-red-200">
-                      Delete {selectedMessageIds.size} message{selectedMessageIds.size > 1 ? 's' : ''}?
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1">
+                    <span className="text-xs font-bold text-slate-200">
+                      Hide {selectedMessageIds.size} message{selectedMessageIds.size > 1 ? 's' : ''} from your view?
                     </span>
                     <button
                       type="button"
                       onClick={executeBulkDelete}
-                      className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-2 py-0.5 rounded transition cursor-pointer"
+                      className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded transition cursor-pointer"
                     >
                       Confirm
                     </button>
@@ -791,10 +810,11 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                   <button
                     type="button"
                     onClick={() => setConfirmBulkDelete(true)}
-                    className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    title="Hide selected messages from your view only (does not delete for other team members)"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Selected ({selectedMessageIds.size})</span>
+                    <span>Hide Selected ({selectedMessageIds.size})</span>
                   </button>
                 )
               )}
@@ -974,7 +994,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                           {onDeleteMessage && (
                             deletingMessageId === msg.id ? (
                               <div className="flex items-center gap-1 bg-red-950/90 border border-red-500/40 rounded px-1.5 py-0.5 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
-                                <span className="text-[10px] text-red-300 font-bold">Delete?</span>
+                                <span className="text-[10px] text-red-300 font-bold">{isMe ? 'Delete?' : 'Hide?'}</span>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1001,7 +1021,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                                   setDeletingMessageId(msg.id);
                                 }}
                                 className="text-[11px] text-slate-400 hover:text-red-400 p-1 hover:bg-red-500/10 rounded transition cursor-pointer"
-                                title="Delete message"
+                                title={isMe ? 'Delete your message' : 'Hide message from your view only'}
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
