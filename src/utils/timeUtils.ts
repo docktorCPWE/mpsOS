@@ -106,15 +106,13 @@ export function calculateJobTotalSeconds(job: Job, nowTimestamp?: number): numbe
 /**
  * Calculate billable hours for additional work / offline drafting / 1-on-1s.
  * Rules:
- * 1. Minimum 1.0 hour for all additional billing entries.
- * 2. After the first hour, calculate in quarter-hour (0.25h) increments (e.g. 1.0, 1.25, 1.5, 1.75, 2.0...).
+ * 1. Minimum 0.25 hour (15 mins) for all additional billing entries.
+ * 2. Round up in quarter-hour (0.25h) increments (0.25, 0.50, 0.75, 1.00, 1.25, 1.50...).
  */
 export function calculateAdditionalBillableHours(rawHours: number): number {
   if (!rawHours || rawHours <= 0) return 0;
-  if (rawHours <= 1.0) return 1.0;
-  const extra = rawHours - 1.0;
-  const roundedExtra = Math.ceil(extra * 4) / 4;
-  return Number((1.0 + roundedExtra).toFixed(2));
+  const quarters = Math.ceil(Math.round(rawHours * 4 * 1e6) / 1e6);
+  return Number(Math.max(0.25, quarters * 0.25).toFixed(2));
 }
 
 /**

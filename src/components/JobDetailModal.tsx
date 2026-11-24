@@ -989,7 +989,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
   // Manual Time Log / Additional Billing Form State
   const [billingCategory, setBillingCategory] = useState<AdditionalBillingCategory>('Revisions Exceeded Plan Scope');
   const [manualTaskInput, setManualTaskInput] = useState('');
-  const [manualHoursInput, setManualHoursInput] = useState('1.5');
+  const [manualHoursInput, setManualHoursInput] = useState('0.25');
   const [manualRateInput, setManualRateInput] = useState<string>(String(job.hourly_rate || 85));
   const [hourlyRateInput, setHourlyRateInput] = useState<number>(job.hourly_rate || 85);
 
@@ -1306,7 +1306,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
           action: 'Additional Billing Logged',
           performedBy: drafterName,
           timestamp: new Date().toISOString(),
-          details: `Logged ${billableHours} hrs for "${taskDesc}" @ $${rate}/hr (Total: $${totalBillableAmount.toFixed(2)}${rawHours < 1.0 ? ' - 1.0h min applied' : ''})`
+          details: `Logged ${billableHours} hrs for "${taskDesc}" @ $${rate}/hr (Total: $${totalBillableAmount.toFixed(2)}${rawHours < 0.25 ? ' - 0.25h min applied' : Math.abs(billableHours - rawHours) > 0.0001 ? ` - rounded from ${rawHours}h` : ''})`
         },
         ...job.audit_logs
       ]
@@ -1314,7 +1314,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
 
     onUpdateJob(updated);
     setManualTaskInput('');
-    setManualHoursInput('1.5');
+    setManualHoursInput('0.25');
   };
 
   // Phase change handler
@@ -5324,7 +5324,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                     </p>
                   </div>
                   <span className="text-[10px] font-mono bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full self-start sm:self-auto shrink-0">
-                    1.0h Min • 0.25h Increments
+                    0.25h Min • 0.25h Increments
                   </span>
                 </div>
 
@@ -5419,7 +5419,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                   {/* Hours Input */}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 uppercase font-mono mb-1">
-                      Hours Worked (e.g. 1.5)
+                      Hours Worked (e.g. 0.25, 0.5, 1.5)
                     </label>
                     <div className="relative">
                       <input
@@ -5428,7 +5428,7 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                         min="0.01"
                         value={manualHoursInput}
                         onChange={(e) => setManualHoursInput(e.target.value)}
-                        placeholder="1.5"
+                        placeholder="0.25"
                         className="w-full bg-white border border-slate-300 p-2 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                         required
                       />
@@ -5439,26 +5439,35 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                 {/* Quick Hours Increment Chips */}
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                   <span className="text-slate-400 font-mono">Quick Select:</span>
-                  {['1.0', '1.25', '1.5', '1.75', '2.0', '2.5', '3.0', '4.0'].map((h) => (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => setManualHoursInput(h)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition ${
-                        manualHoursInput === h
-                          ? 'bg-blue-600 text-white border-blue-600 font-bold'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {h === '1.0' ? '1.0 hr (Min)' : `${h} hrs`}
-                    </button>
-                  ))}
+                  {['0.25', '0.5', '0.75', '1.0', '1.25', '1.5', '1.75', '2.0', '2.5', '3.0', '4.0'].map((h) => {
+                    const isSelected = parseFloat(manualHoursInput) === parseFloat(h);
+                    const chipLabel =
+                      h === '0.25'
+                        ? '0.25 hr (Min)'
+                        : parseFloat(h) <= 1
+                        ? `${h} hr`
+                        : `${h} hrs`;
+                    return (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() => setManualHoursInput(h)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border transition ${
+                          isSelected
+                            ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {chipLabel}
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() => {
-                      const cur = parseFloat(manualHoursInput) || 1.0;
-                      const next = (cur + 0.25).toFixed(2);
-                      setManualHoursInput(next.endsWith('.00') ? next.slice(0, -3) : next);
+                      const cur = parseFloat(manualHoursInput) || 0;
+                      const next = Number((cur + 0.25).toFixed(2));
+                      setManualHoursInput(Number.isInteger(next) ? `${next}.0` : String(next));
                     }}
                     className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 font-semibold"
                   >
@@ -5483,12 +5492,12 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                           </span>
                         </div>
 
-                        {rawH > 0 && rawH < 1.0 && (
+                        {rawH > 0 && rawH < 0.25 && (
                           <p className="text-[11px] text-amber-700 font-medium">
-                            • 1.0 hr minimum threshold applied ({rawH}h entered → billed as 1.00 hr).
+                            • 0.25 hr minimum threshold applied ({rawH}h entered → billed as 0.25 hr).
                           </p>
                         )}
-                        {rawH > 1.0 && (rawH % 0.25 !== 0) && (
+                        {rawH >= 0.25 && Math.abs(billableH - rawH) > 0.0001 && (
                           <p className="text-[11px] text-blue-700 font-medium">
                             • Quarter-hour increment applied ({rawH}h entered → rounded to {billableH.toFixed(2)} hrs).
                           </p>
