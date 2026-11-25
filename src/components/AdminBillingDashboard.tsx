@@ -237,7 +237,7 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
   const [selectedDrafterFilter, setSelectedDrafterFilter] = useState<string>('ALL');
   const [roadblockFilter, setRoadblockFilter] = useState<'ALL' | 'ROADBLOCKS_ONLY' | 'CLEAN_ONLY'>('ALL');
   const [minDaysInPhaseFilter, setMinDaysInPhaseFilter] = useState<number>(0);
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'days_desc' | 'activity_newest' | 'cost_desc' | 'job_number'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'days_desc' | 'activity_newest' | 'cost_desc' | 'job_number' | 'job_number_desc'>('newest');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   // Canonicalize raw drafter names so that if a name corresponds to an existing staff user, it maps to their full name
@@ -422,8 +422,11 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
     if (sortBy === 'cost_desc') {
       return calculateJobGrossInvoiceAmount(b, nowTimestamp) - calculateJobGrossInvoiceAmount(a, nowTimestamp);
     }
-    if (sortBy === 'job_number') {
-      return a.job_number.localeCompare(b.job_number);
+    if (sortBy === 'job_number' || sortBy === 'job_number_desc') {
+      const numA = (a.job_number || '').replace(/^#/, '').trim();
+      const numB = (b.job_number || '').replace(/^#/, '').trim();
+      const cmp = numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+      return sortBy === 'job_number' ? cmp : -cmp;
     }
     return 0;
   });
@@ -972,7 +975,8 @@ export const AdminBillingDashboard: React.FC<AdminBillingDashboardProps> = ({
                 <option value="activity_newest">Last Activity (Newest first)</option>
                 <option value="days_desc">Time in Phase (Longest first)</option>
                 <option value="cost_desc">Billable Amount (High to Low)</option>
-                <option value="job_number">Job Number (Ascending)</option>
+                <option value="job_number">Plan / Job Number (Ascending)</option>
+                <option value="job_number_desc">Plan / Job Number (Descending)</option>
               </select>
             </div>
 

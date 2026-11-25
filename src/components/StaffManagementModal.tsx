@@ -49,8 +49,8 @@ interface StaffManagementModalProps {
   readOnly?: boolean;
   canSwitchAccounts?: boolean;
   onSwitchToStaff?: (staff: StaffUser) => void;
-  onAddStaff: (newStaff: StaffUser) => void;
-  onUpdateStaff: (updatedStaff: StaffUser) => void;
+  onAddStaff: (newStaff: StaffUser) => void | Promise<void>;
+  onUpdateStaff: (updatedStaff: StaffUser) => void | Promise<void>;
   onDeleteStaff: (staffId: string) => void;
   onResetStaff: () => void;
 }
@@ -201,6 +201,10 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<StaffUser | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSavingForm, setIsSavingForm] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
   // Form State for Add / Edit
   const [formData, setFormData] = useState<{
@@ -246,12 +250,20 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   if (!isOpen) return null;
 
   const showToast = (msg: string) => {
+    setErrorToast(null);
     setSuccessToast(msg);
-    setTimeout(() => setSuccessToast(null), 3000);
+    setTimeout(() => setSuccessToast(null), 3500);
+  };
+
+  const showErrorToast = (msg: string) => {
+    setSuccessToast(null);
+    setErrorToast(msg);
+    setTimeout(() => setErrorToast(null), 5000);
   };
 
   // Open Create New Staff Form
   const handleOpenCreate = () => {
+    setFormError(null);
     setEditingStaff(null);
     setFormData({
       id: `staff-${Date.now()}`,
@@ -261,7 +273,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       phone: '(555) 000-0000',
       role: 'drafter',
       department: 'Drafting',
-      hourlyRate: 75,
+      hourlyRate: 85,
       status: 'active',
       preferredLayout: 'grid',
       canAccessFinancials: false,
@@ -278,21 +290,22 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
   // Open Edit Existing Staff Form
   const handleOpenEdit = (staff: StaffUser) => {
+    setFormError(null);
     setIsCreatingNew(false);
     setEditingStaff(staff);
     setFormData({
       id: staff.id,
-      name: staff.name,
-      email: staff.email,
-      title: staff.title,
+      name: staff.name || '',
+      email: staff.email || '',
+      title: staff.title || '',
       phone: staff.phone || '(555) 000-0000',
-      role: staff.role,
+      role: staff.role || 'drafter',
       department: staff.department || 'Drafting',
-      hourlyRate: staff.hourlyRate || 75,
+      hourlyRate: typeof staff.hourlyRate === 'number' && !Number.isNaN(staff.hourlyRate) ? staff.hourlyRate : 85,
       status: staff.status || 'active',
       preferredLayout: staff.preferredLayout || 'grid',
-      canAccessFinancials: staff.canAccessFinancials,
-      canDelegate: staff.canDelegate,
+      canAccessFinancials: Boolean(staff.canAccessFinancials),
+      canDelegate: Boolean(staff.canDelegate),
       canViewAllProjects: Boolean(staff.canViewAllProjects),
       canManageStaff: Boolean(staff.canManageStaff),
       canManageInvoices: Boolean(staff.canManageInvoices),
@@ -314,84 +327,119 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   };
 
   // Save Form (Create or Update)
-  const handleSaveForm = (e: React.FormEvent) => {
+  const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim()) {
-      alert('Please provide both staff name and email.');
+    if (isSavingForm) return;
+    setFormError(null);
+
+    const trimmedName = formData.name.trim();
+    const trimmedEmail = formData.email.trim().toLowerCase();
+
+    if (!trimmedName) {
+      setFormError('Please enter a full name before saving.');
+      return;
+    }
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setFormError('Please enter a valid email address before saving.');
       return;
     }
 
+    const baseRecord: Partial<StaffUser> = isCreatingNew ? {} : (editingStaff || {});
+    const safeRate = Number.isFinite(Number(formData.hourlyRate)) && Number(formData.hourlyRate) >= 0
+      ? Number(formData.hourlyRate)
+      : 0;
+
     const payload: StaffUser = {
-      id: formData.id || `staff-${Date.now()}`,
-      name: formData.name.trim(),
-      email: formData.email.trim().toLowerCase(),
+      ...baseRecord,
+      id: isCreatingNew ? (formData.id || `staff-${Date.now()}`) : (editingStaff?.id || formData.id || `staff-${Date.now()}`),
+      name: trimmedName,
+      email: trimmedEmail,
       title: formData.title.trim() || 'Staff Member',
       phone: formData.phone.trim(),
       role: formData.role,
       department: formData.department,
-      hourlyRate: Number(formData.hourlyRate) || 0,
+      hourlyRate: safeRate,
       status: formData.status,
       joinedDate: isCreatingNew ? new Date().toISOString().split('T')[0] : (editingStaff?.joinedDate || '2023-01-01'),
-      canAccessFinancials: formData.canAccessFinancials,
-      canDelegate: formData.canDelegate,
-      canViewAllProjects: formData.canViewAllProjects,
-      canManageStaff: formData.name.toLowerCase().includes('greg hyatt') ? true : formData.canManageStaff,
-      canManageInvoices: formData.canManageInvoices,
-      canEditJobPhases: formData.canEditJobPhases,
-      canManageRoadblocks: formData.canManageRoadblocks,
-      canAccessPayroll: formData.canAccessPayroll,
+      canAccessFinancials: Boolean(formData.canAccessFinancials),
+      canDelegate: Boolean(formData.canDelegate),
+      canViewAllProjects: Boolean(formData.canViewAllProjects),
+      canManageStaff: trimmedName.toLowerCase().includes('greg hyatt') ? true : Boolean(formData.canManageStaff),
+      canManageInvoices: Boolean(formData.canManageInvoices),
+      canEditJobPhases: Boolean(formData.canEditJobPhases),
+      canManageRoadblocks: Boolean(formData.canManageRoadblocks),
+      canAccessPayroll: Boolean(formData.canAccessPayroll),
       preferredLayout: formData.preferredLayout || 'grid'
     };
 
-    if (isCreatingNew) {
-      onAddStaff(payload);
-      showToast(`Added ${payload.name} to My Plan Store OS staff roster.`);
-    } else {
-      onUpdateStaff(payload);
-      showToast(`Updated permissions & profile for ${payload.name}.`);
-    }
+    setIsSavingForm(true);
+    try {
+      if (isCreatingNew) {
+        await Promise.resolve(onAddStaff(payload));
+        showToast(`Added ${payload.name} to My Plan Store OS staff roster.`);
+      } else {
+        await Promise.resolve(onUpdateStaff(payload));
+        showToast(`Saved permissions & profile for ${payload.name}.`);
+      }
 
-    setIsCreatingNew(false);
-    setEditingStaff(null);
+      setIsCreatingNew(false);
+      setEditingStaff(null);
+      setFormError(null);
+    } catch (err) {
+      console.error('[StaffManagementModal] Failed to save staff profile:', err);
+      setFormError('Could not save changes to the cloud database. Please check your connection and click Save Changes again.');
+    } finally {
+      setIsSavingForm(false);
+    }
   };
 
   // Quick Permission Toggle from Matrix View
-  const handleQuickTogglePermission = (
+  const handleQuickTogglePermission = async (
     staff: StaffUser, 
     permKey: keyof Pick<StaffUser, 'canAccessFinancials' | 'canDelegate' | 'canViewAllProjects' | 'canManageStaff' | 'canManageInvoices' | 'canEditJobPhases' | 'canManageRoadblocks' | 'canAccessPayroll'>
   ) => {
     if (readOnly) return;
     // Prevent locking out Greg Hyatt
     if (staff.name.toLowerCase().includes('greg hyatt') && permKey === 'canManageStaff') {
-      alert('Greg Hyatt is the Owner and primary Super Admin. His staff management permission cannot be disabled.');
+      showErrorToast('Greg Hyatt is the Owner and primary Super Admin. His staff management permission cannot be disabled.');
       return;
     }
 
     const updated: StaffUser = {
       ...staff,
-      [permKey]: !staff[permKey]
+      [permKey]: !Boolean(staff[permKey])
     };
-    onUpdateStaff(updated);
-    showToast(`Updated ${permKey} for ${staff.name}`);
+    try {
+      await Promise.resolve(onUpdateStaff(updated));
+      showToast(`Saved permission update for ${staff.name}.`);
+    } catch (err) {
+      console.error('[StaffManagementModal] Quick toggle failed:', err);
+      showErrorToast(`Failed to save permission change for ${staff.name}. Please try again.`);
+    }
   };
 
   // Quick Status Toggle (Active/Inactive)
-  const handleToggleStatus = (staff: StaffUser) => {
+  const handleToggleStatus = async (staff: StaffUser) => {
     if (readOnly) return;
     if (staff.name.toLowerCase().includes('greg hyatt')) {
-      alert('Cannot deactivate the Owner / Founder account.');
+      showErrorToast('Cannot deactivate the Owner / Founder account.');
       return;
     }
     const newStatus = staff.status === 'inactive' ? 'active' : 'inactive';
-    onUpdateStaff({ ...staff, status: newStatus });
-    showToast(`${staff.name} is now ${newStatus}`);
+    try {
+      await Promise.resolve(onUpdateStaff({ ...staff, status: newStatus }));
+      showToast(`${staff.name} is now ${newStatus}`);
+    } catch (err) {
+      console.error('[StaffManagementModal] Status toggle failed:', err);
+      showErrorToast(`Failed to update status for ${staff.name}.`);
+    }
   };
 
   // Confirm Delete
   const handleConfirmDelete = () => {
     if (!staffToDelete) return;
     if (staffToDelete.name.toLowerCase().includes('greg hyatt')) {
-      alert('Greg Hyatt (Owner & Founder) cannot be deleted.');
+      showErrorToast('Greg Hyatt (Owner & Founder) cannot be deleted.');
       setStaffToDelete(null);
       return;
     }
@@ -455,13 +503,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
               <>
                 {/* Reset to Default Staff Button */}
                 <button
-                  onClick={() => {
-                    if (confirm('Reset staff directory to original default profiles? Any custom staff will be refreshed.')) {
-                      onResetStaff();
-                      showToast('Staff roster reset to system defaults.');
-                    }
-                  }}
-                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition border border-slate-800"
+                  type="button"
+                  onClick={() => setConfirmResetOpen(true)}
+                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition border border-slate-800 cursor-pointer"
                   title="Reset Staff Directory to Defaults"
                 >
                   <RotateCcw className="w-4 h-4" />
@@ -604,11 +648,47 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
           </div>
         </div>
 
-        {/* Success Toast Notice */}
+        {/* Success / Error Toast Notices & Reset Confirm */}
         {successToast && (
           <div className="mx-6 mt-3 bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-xs px-4 py-2 rounded-xl flex items-center gap-2 animate-fade-in shadow-lg">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{successToast}</span>
+          </div>
+        )}
+        {errorToast && (
+          <div className="mx-6 mt-3 bg-red-950/80 border border-red-700/80 text-red-200 text-xs px-4 py-2 rounded-xl flex items-center justify-between gap-2 animate-fade-in shadow-lg">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{errorToast}</span>
+            </div>
+            <button type="button" onClick={() => setErrorToast(null)} className="text-red-300 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        {confirmResetOpen && (
+          <div className="mx-6 mt-3 bg-amber-950/80 border border-amber-700/80 text-amber-200 text-xs px-4 py-2.5 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <span>Reset staff directory to original default profiles? Any custom local overrides will be refreshed.</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmResetOpen(false)}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onResetStaff();
+                  setConfirmResetOpen(false);
+                  showToast('Staff roster reset to system defaults.');
+                }}
+                className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold cursor-pointer"
+              >
+                Confirm Reset
+              </button>
+            </div>
           </div>
         )}
 
@@ -808,6 +888,12 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                           {staff.canEditJobPhases && (
                             <span className="text-[9px] font-mono bg-teal-950/80 text-teal-300 border border-teal-800/80 px-1.5 py-0.5 rounded flex items-center gap-1">
                               <Compass className="w-2.5 h-2.5" /> Job Phases
+                            </span>
+                          )}
+
+                          {staff.canManageRoadblocks && (
+                            <span className="text-[9px] font-mono bg-orange-950/80 text-orange-300 border border-orange-800/80 px-1.5 py-0.5 rounded flex items-center gap-1">
+                              <AlertTriangle className="w-2.5 h-2.5" /> Roadblocks
                             </span>
                           )}
 
@@ -1141,7 +1227,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
             </div>
 
             {/* Drawer Body Form */}
-            <form onSubmit={handleSaveForm} className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+            <form onSubmit={handleSaveForm} noValidate className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
               
               {/* Quick Role Presets */}
               <div>
@@ -1170,9 +1256,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Full Name *</label>
                   <input
                     type="text"
-                    required
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                     placeholder="e.g. Marcus Vance"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -1182,9 +1267,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Email Address *</label>
                   <input
                     type="email"
-                    required
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                     placeholder="marcus@myplanstore.com"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -1195,7 +1279,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <input
                     type="text"
                     value={formData.title}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
                     placeholder="e.g. Senior Architectural Drafter"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -1206,7 +1290,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <input
                     type="text"
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                     placeholder="(555) 000-0000"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -1216,7 +1300,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Department</label>
                   <select
                     value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value as StaffDepartment })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value as StaffDepartment }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     {DEPARTMENTS.map(d => (
@@ -1232,9 +1316,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     <input
                       type="number"
                       min="0"
-                      step="5"
-                      value={formData.hourlyRate}
-                      onChange={(e) => setFormData({ ...formData, hourlyRate: Number(e.target.value) })}
+                      step="any"
+                      value={Number.isNaN(formData.hourlyRate) ? '' : formData.hourlyRate}
+                      onChange={(e) => setFormData(prev => ({ ...prev, hourlyRate: e.target.value === '' ? 0 : Number(e.target.value) }))}
                       className="w-full pl-7 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -1247,7 +1331,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Base System Role</label>
                   <select
                     value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value as 'admin' | 'drafter_lead' | 'drafter' }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="admin">Administrator / Executive</option>
@@ -1260,7 +1344,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Account Status</label>
                   <select
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value as 'active' | 'inactive' }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="active">Active (Full Studio Access)</option>
@@ -1272,7 +1356,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   <label className="block font-bold text-slate-300 mb-1">Default Dashboard View</label>
                   <select
                     value={formData.preferredLayout || 'grid'}
-                    onChange={(e) => setFormData({ ...formData, preferredLayout: e.target.value as any })}
+                    onChange={(e) => setFormData(prev => ({ ...prev, preferredLayout: e.target.value as 'grid' | 'board' | 'table' }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="grid">Grid Cards View (Recommended)</option>
@@ -1292,8 +1376,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canAccessFinancials}
-                    onChange={(e) => setFormData({ ...formData, canAccessFinancials: e.target.checked })}
+                    checked={Boolean(formData.canAccessFinancials)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canAccessFinancials: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1308,8 +1392,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canDelegate}
-                    onChange={(e) => setFormData({ ...formData, canDelegate: e.target.checked })}
+                    checked={Boolean(formData.canDelegate)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canDelegate: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1324,8 +1408,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canViewAllProjects}
-                    onChange={(e) => setFormData({ ...formData, canViewAllProjects: e.target.checked })}
+                    checked={Boolean(formData.canViewAllProjects)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canViewAllProjects: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1340,8 +1424,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canManageStaff}
-                    onChange={(e) => setFormData({ ...formData, canManageStaff: e.target.checked })}
+                    checked={Boolean(formData.canManageStaff)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canManageStaff: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1356,8 +1440,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canManageInvoices}
-                    onChange={(e) => setFormData({ ...formData, canManageInvoices: e.target.checked })}
+                    checked={Boolean(formData.canManageInvoices)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canManageInvoices: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1372,8 +1456,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canEditJobPhases}
-                    onChange={(e) => setFormData({ ...formData, canEditJobPhases: e.target.checked })}
+                    checked={Boolean(formData.canEditJobPhases)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canEditJobPhases: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1388,8 +1472,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canManageRoadblocks}
-                    onChange={(e) => setFormData({ ...formData, canManageRoadblocks: e.target.checked })}
+                    checked={Boolean(formData.canManageRoadblocks)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canManageRoadblocks: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
                   />
                   <div>
@@ -1404,8 +1488,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 <label className="flex items-start gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.canAccessPayroll}
-                    onChange={(e) => setFormData({ ...formData, canAccessPayroll: e.target.checked })}
+                    checked={Boolean(formData.canAccessPayroll)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, canAccessPayroll: e.target.checked }))}
                     className="mt-0.5 rounded border-slate-700 text-emerald-600 focus:ring-0"
                   />
                   <div>
@@ -1417,23 +1501,35 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 </label>
               </div>
 
+              {formError && (
+                <div className="p-3 bg-red-950/80 border border-red-700/80 rounded-xl text-red-200 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               {/* Form Buttons */}
               <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
+                  disabled={isSavingForm}
                   onClick={() => {
+                    setFormError(null);
                     setIsCreatingNew(false);
                     setEditingStaff(null);
                   }}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition cursor-pointer"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 font-semibold rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/30 cursor-pointer"
+                  disabled={isSavingForm}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/30 cursor-pointer"
                 >
-                  {isCreatingNew ? 'Create Staff Profile' : 'Save Changes'}
+                  {isSavingForm
+                    ? 'Saving...'
+                    : (isCreatingNew ? 'Create Staff Profile' : 'Save Changes')}
                 </button>
               </div>
 

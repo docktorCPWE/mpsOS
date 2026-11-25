@@ -641,9 +641,13 @@ export function subscribeToStaff(
 }
 
 export async function saveStaffToFirestore(staffUser: StaffUser): Promise<void> {
-  const path = `staff/${staffUser.id}`;
+  const rawId = String(staffUser.id || '').trim();
+  const safeDocId = /^[a-zA-Z0-9_\-#]+$/.test(rawId) && rawId.length <= 128
+    ? rawId
+    : `staff-${rawId.replace(/[^a-zA-Z0-9_\-#]/g, '-').replace(/-+/g, '-').slice(0, 80) || Date.now()}`;
+  const path = `staff/${safeDocId}`;
   // Strip any undefined optional properties so Firestore setDoc never rejects the write
-  const sanitized = JSON.parse(JSON.stringify(staffUser));
+  const sanitized = JSON.parse(JSON.stringify({ ...staffUser, id: safeDocId }));
   const retryDelaysMs = [0, 400, 1100];
   let lastError: unknown = null;
 
@@ -652,11 +656,11 @@ export async function saveStaffToFirestore(staffUser: StaffUser): Promise<void> 
       await new Promise(resolve => setTimeout(resolve, retryDelaysMs[attempt]));
     }
     try {
-      await setDoc(doc(db, 'staff', staffUser.id), sanitized, { merge: true });
+      await setDoc(doc(db, 'staff', safeDocId), sanitized, { merge: true });
       return;
     } catch (err) {
       lastError = err;
-      console.warn(`[Firestore] Staff save attempt ${attempt + 1} failed for ${staffUser.id}:`, err);
+      console.warn(`[Firestore] Staff save attempt ${attempt + 1} failed for ${safeDocId}:`, err);
     }
   }
 
@@ -1468,7 +1472,9 @@ export async function syncAuthToStaffUser(
       name: matched.name || pendingName || resolvedDisplayName || user.email?.split('@')[0] || 'Staff Member',
       email: matched.email || userEmail,
       status: 'active',
-      canViewAllProjects: (isJason || isDrew || isEthan) ? true : matched.canViewAllProjects,
+      canViewAllProjects: typeof matched.canViewAllProjects === 'boolean'
+        ? matched.canViewAllProjects
+        : (isJason || isDrew || isEthan),
       ...presenceFields
     };
     await saveStaffToFirestore(updatedMatched);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, Calendar, Trash2 } from 'lucide-react';
+import { Kanban, Grid, List, Search, Filter, AlertTriangle, Layers, Plus, CheckCircle2, Clock, ShieldAlert, ArrowRight, Download, DollarSign, Play, Square, FileSpreadsheet, X, Share2, ListTodo, Paperclip, CheckCircle, UserCheck, Sparkles, FileText, ChevronDown, ChevronUp, User, ExternalLink, Users, Briefcase, Activity, Lock, RotateCcw, Archive, Hammer, Building, MapPin, Mail, Phone, Edit3, Pin, BookmarkCheck, Check, Eye, FolderOpen, Globe, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Trash2 } from 'lucide-react';
 import { Job, JobPhase, StaffUser, DelegatedWorkItem, GregDevProjectCard, GregDevTimeEntry, TaskAttachment } from '../types';
 import { JobCard } from './JobCard';
 import { calculateJobTotalSeconds, calculateJobGrossInvoiceAmount, formatSecondsToReadable, formatSecondsToHHMMSS, exportInvoicingCSV, calculateDelegatedTaskWorkedSeconds } from '../utils/timeUtils';
@@ -184,6 +184,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   
   const [roadblockOnly, setRoadblockOnly] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [jobNumberSort, setJobNumberSort] = useState<'default' | 'asc' | 'desc'>('default');
   const [showWorkloadMatrix, setShowWorkloadMatrix] = useState(false);
   const [showDelegationHub, setShowDelegationHub] = useState(true);
   const [showKyleReviewDrawer, setShowKyleReviewDrawer] = useState(false);
@@ -494,7 +495,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
   const myTouchedJobsCount = activeJobs.filter(j => isJobAssignedToDrafter(j, currentStaff.name)).length;
 
   // Filter logic: Search by MPS / Job Number, Customer Name, House Style, or Drafter
-  const filteredJobs = jobs.filter(job => {
+  const matchedJobs = jobs.filter(job => {
     const isArchived = isJobArchived(job);
     const q = searchQuery.toLowerCase().trim();
     const hasSearch = q.length > 0;
@@ -570,6 +571,20 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
 
     return matchesSearch && matchesRoadblock;
   });
+
+  // Sort strictly by plan/job number (natural numeric order, e.g., #M25-347 < #M26-99 < #M26-239 < #M26-314)
+  const filteredJobs = jobNumberSort === 'default'
+    ? matchedJobs
+    : [...matchedJobs].sort((a, b) => {
+        const numA = (a.job_number || '').replace(/^#/, '').trim();
+        const numB = (b.job_number || '').replace(/^#/, '').trim();
+        const cmp = numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+        return jobNumberSort === 'asc' ? cmp : -cmp;
+      });
+
+  const handleToggleJobNumberSort = () => {
+    setJobNumberSort(prev => (prev === 'asc' ? 'desc' : 'asc'));
+  };
   
   // Delegated tasks assigned to the current active user
   const myAssignedTasks = allDelegatedTasks.filter(
@@ -2205,10 +2220,10 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       )}
 
       {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 text-xs">
         
         {/* Search Input for Job #, Customer, Style, Drafter */}
-        <div className="relative flex-1 w-full">
+        <div className="relative flex-1 w-full min-w-[220px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -2229,7 +2244,7 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
         </div>
 
         {/* Drafter Dropdown Filter (Available for Managers/Leads, or showing active drafter status) */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full lg:w-auto">
           {!isIndividualDrafter ? (
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 px-3 py-1.5 rounded-xl w-full sm:w-auto">
               <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
@@ -2282,6 +2297,35 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             </div>
           )}
 
+          {/* Plan # Sort Filter (Ascending / Descending by Job Number Only) */}
+          <div
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shrink-0 ${
+              jobNumberSort !== 'default'
+                ? 'bg-blue-50 border-blue-300 text-blue-800 ring-1 ring-blue-200'
+                : 'bg-slate-50 border-slate-300 text-slate-700'
+            }`}
+            title="Sort jobs by Plan / Job Number only"
+          >
+            {jobNumberSort === 'asc' ? (
+              <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            ) : jobNumberSort === 'desc' ? (
+              <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            ) : (
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            )}
+            <span className="text-slate-500 font-bold whitespace-nowrap text-[11px]">Plan #:</span>
+            <select
+              value={jobNumberSort}
+              onChange={(e) => setJobNumberSort(e.target.value as 'default' | 'asc' | 'desc')}
+              className="bg-transparent text-slate-900 font-bold focus:outline-none cursor-pointer text-xs"
+              aria-label="Sort by Plan Number"
+            >
+              <option value="default">Default Order</option>
+              <option value="asc">Ascending (Low → High)</option>
+              <option value="desc">Descending (High → Low)</option>
+            </select>
+          </div>
+
           {/* Roadblock Filter Pill */}
           <button
             onClick={() => setRoadblockOnly(!roadblockOnly)}
@@ -2315,12 +2359,18 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
       </div>
 
       {/* Active Search & Filter Indicator */}
-      {(searchQuery || (isAllCardsAuthorized && showArchived)) && (
+      {(searchQuery || (isAllCardsAuthorized && showArchived) || jobNumberSort !== 'default') && (
         <div className="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between gap-2 text-slate-600">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-800">
               Showing {filteredJobs.length} {filteredJobs.length === 1 ? 'project' : 'projects'}
             </span>
+            {jobNumberSort !== 'default' && (
+              <span className="text-blue-700 font-semibold flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                {jobNumberSort === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                <span>Sorted by Plan # ({jobNumberSort === 'asc' ? 'Ascending' : 'Descending'})</span>
+              </span>
+            )}
             {searchQuery && (
               <span className="text-slate-500">
                 matching query <strong className="text-blue-700">"{searchQuery}"</strong>
@@ -2334,13 +2384,14 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             )}
           </div>
 
-          {(searchQuery || showArchived) && (
+          {(searchQuery || showArchived || jobNumberSort !== 'default') && (
             <button
               onClick={() => {
                 setSearchQuery('');
                 setShowArchived(false);
+                setJobNumberSort('default');
               }}
-              className="text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+              className="text-blue-600 hover:text-blue-800 font-semibold cursor-pointer shrink-0"
             >
               Reset Filters
             </button>
@@ -2953,7 +3004,39 @@ export const DrafterDashboard: React.FC<DrafterDashboardProps> = ({
             <table className="w-full min-w-[1100px] text-left text-xs text-slate-700">
               <thead className="bg-slate-50 border-b border-slate-200 uppercase font-mono text-[10px] text-slate-500 tracking-wider">
                 <tr>
-                  <th className="p-3.5 pl-4">Job # / Owner</th>
+                  <th className="p-3.5 pl-4">
+                    <button
+                      type="button"
+                      onClick={handleToggleJobNumberSort}
+                      className={`inline-flex items-center gap-1.5 uppercase font-mono text-[10px] tracking-wider transition cursor-pointer select-none px-2 py-1 -ml-2 rounded-lg border ${
+                        jobNumberSort !== 'default'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 font-bold'
+                          : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                      title={
+                        jobNumberSort === 'asc'
+                          ? 'Sorted by Job # Ascending — click for Descending'
+                          : jobNumberSort === 'desc'
+                          ? 'Sorted by Job # Descending — click for Ascending'
+                          : 'Sort by Job Number (Ascending / Descending)'
+                      }
+                    >
+                      <span>Job # / Owner</span>
+                      {jobNumberSort === 'asc' ? (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-sans font-bold text-blue-700">
+                          <ArrowUp className="w-3.5 h-3.5" />
+                          ASC
+                        </span>
+                      ) : jobNumberSort === 'desc' ? (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-sans font-bold text-blue-700">
+                          <ArrowDown className="w-3.5 h-3.5" />
+                          DESC
+                        </span>
+                      ) : (
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      )}
+                    </button>
+                  </th>
                   <th className="p-3.5">Project & Customer</th>
                   <th className="p-3.5">Drafter</th>
                   <th className="p-3.5">Phase & Status</th>

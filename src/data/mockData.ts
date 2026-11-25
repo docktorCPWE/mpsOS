@@ -130,8 +130,8 @@ export function canUserAccessPayroll(userNameOrStaff?: string | StaffUser): bool
 export function canViewAllProjectCards(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
   if (typeof userNameOrStaff === 'object') {
-    if (userNameOrStaff.canViewAllProjects === true) {
-      return true;
+    if (typeof userNameOrStaff.canViewAllProjects === 'boolean') {
+      return userNameOrStaff.canViewAllProjects;
     }
     if (userNameOrStaff.role === 'admin' || userNameOrStaff.role === 'drafter_lead') {
       return true;

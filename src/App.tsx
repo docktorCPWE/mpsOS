@@ -174,6 +174,7 @@ export default function App() {
   const pendingChatDeleteRef = useRef<Record<string, number>>({});
   const pendingChatHideRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
   const pendingChatReadRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
+  const pendingStaffMutationRef = useRef<Record<string, { atMs: number; staff: StaffUser }>>({});
   const authenticatedStaffRef = useRef<StaffUser | null>(authenticatedStaff);
   const healedZombieTokensRef = useRef<Set<string>>(new Set());
   const lastDevCardHealAtRef = useRef<Record<string, number>>({});
@@ -555,15 +556,73 @@ export default function App() {
     const unsubscribeStaff = subscribeToStaff(
       (cloudStaff) => {
         if (cloudStaff && cloudStaff.length > 0) {
-          // Firestore is authoritative for real staff: only skip obsolete legacy mock docs,
-          // and auto-clear any stale localStorage deleted markers when a staff member re-creates their account!
+          const now = Date.now();
           const activeCloudStaff = cloudStaff.filter(s => !isLegacyMockStaffDoc(s));
           activeCloudStaff.forEach(s => {
             removeDeletedStaffId({ id: s.id, email: s.email });
           });
 
+          const staffEditableFieldsMatch = (a: StaffUser, b: StaffUser): boolean => (
+            a.name === b.name &&
+            (a.email || '').toLowerCase().trim() === (b.email || '').toLowerCase().trim() &&
+            a.title === b.title &&
+            (a.phone || '') === (b.phone || '') &&
+            a.role === b.role &&
+            (a.department || '') === (b.department || '') &&
+            Number(a.hourlyRate || 0) === Number(b.hourlyRate || 0) &&
+            (a.status || 'active') === (b.status || 'active') &&
+            (a.preferredLayout || 'grid') === (b.preferredLayout || 'grid') &&
+            Boolean(a.canAccessFinancials) === Boolean(b.canAccessFinancials) &&
+            Boolean(a.canDelegate) === Boolean(b.canDelegate) &&
+            Boolean(a.canViewAllProjects) === Boolean(b.canViewAllProjects) &&
+            Boolean(a.canManageStaff) === Boolean(b.canManageStaff) &&
+            Boolean(a.canManageInvoices) === Boolean(b.canManageInvoices) &&
+            Boolean(a.canEditJobPhases) === Boolean(b.canEditJobPhases) &&
+            Boolean(a.canManageRoadblocks) === Boolean(b.canManageRoadblocks) &&
+            Boolean(a.canAccessPayroll) === Boolean(b.canAccessPayroll)
+          );
+
+          // Reconcile cloud snapshot against in-flight staff profile/permission mutations
+          const seenIds = new Set<string>();
+          const reconciledCloud = activeCloudStaff.map(cloudItem => {
+            seenIds.add(cloudItem.id);
+            const pending = pendingStaffMutationRef.current[cloudItem.id];
+            if (!pending) return cloudItem;
+
+            if (staffEditableFieldsMatch(cloudItem, pending.staff) || (now - pending.atMs) > 25000) {
+              delete pendingStaffMutationRef.current[cloudItem.id];
+              return cloudItem;
+            }
+
+            // Preserve in-flight profile/permission edits while keeping latest cloud presence/auth fields
+            return {
+              ...cloudItem,
+              ...pending.staff,
+              id: cloudItem.id,
+              authUid: cloudItem.authUid || pending.staff.authUid,
+              emailVerified: cloudItem.emailVerified ?? pending.staff.emailVerified,
+              isOnline: cloudItem.isOnline ?? pending.staff.isOnline,
+              lastSeenAt: cloudItem.lastSeenAt || pending.staff.lastSeenAt,
+              lastLoginAt: cloudItem.lastLoginAt || pending.staff.lastLoginAt,
+              forceLogoutAt: cloudItem.forceLogoutAt || pending.staff.forceLogoutAt
+            };
+          });
+
+          // Retain newly added staff records that are still in flight to Firestore
+          const pendingEntries = Object.entries(pendingStaffMutationRef.current) as Array<[string, { atMs: number; staff: StaffUser }]>;
+          for (const [pendingId, pendingEntry] of pendingEntries) {
+            if (!seenIds.has(pendingId)) {
+              if ((now - pendingEntry.atMs) <= 25000) {
+                reconciledCloud.push(pendingEntry.staff);
+                seenIds.add(pendingId);
+              } else {
+                delete pendingStaffMutationRef.current[pendingId];
+              }
+            }
+          }
+
           // Ensure all active non-deleted core staff (Greg, Kyle, Jason, Drew, Ethan) exist in roster
-          const merged = [...activeCloudStaff];
+          const merged = [...reconciledCloud];
           for (const core of STAFF_USERS) {
             if (isStaffDeleted(core)) continue;
             const exists = merged.some(s => s.id === core.id || s.name.toLowerCase() === core.name.toLowerCase() || (core.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle')));
@@ -575,16 +634,26 @@ export default function App() {
           setStaffList(merged);
           saveStoredStaff(merged);
 
+          const findMatchingStaff = (target: StaffUser) =>
+            merged.find(s => s.id === target.id) ||
+            merged.find(s => s.email && target.email && s.email.toLowerCase().trim() === target.email.toLowerCase().trim()) ||
+            merged.find(s => s.name.toLowerCase().trim() === target.name.toLowerCase().trim()) ||
+            (target.name.toLowerCase().includes('kyle') ? merged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
+
           // Update currentStaff if matching cloud record has latest edits to capabilities
           setCurrentStaff(prevCurrent => {
             if (isLegacyMockStaffDoc(prevCurrent)) {
               return merged[0] || STAFF_USERS[0];
             }
-            const updatedMatch = merged.find(s => s.id === prevCurrent.id) ||
-                                 merged.find(s => s.email && prevCurrent.email && s.email.toLowerCase() === prevCurrent.email.toLowerCase()) ||
-                                 merged.find(s => s.name.toLowerCase() === prevCurrent.name.toLowerCase()) ||
-                                 (prevCurrent.name.toLowerCase().includes('kyle') ? merged.find(s => s.name.toLowerCase().includes('kyle')) : undefined);
+            const updatedMatch = findMatchingStaff(prevCurrent);
             return updatedMatch ? { ...prevCurrent, ...updatedMatch } : prevCurrent;
+          });
+
+          // Keep authenticatedStaff in sync with latest permission changes too
+          setAuthenticatedStaff(prevAuth => {
+            if (!prevAuth) return prevAuth;
+            const updatedMatch = findMatchingStaff(prevAuth);
+            return updatedMatch ? { ...prevAuth, ...updatedMatch } : prevAuth;
           });
         }
       },
@@ -2590,33 +2659,116 @@ export default function App() {
   };
 
   // Staff Management handlers
-  const handleAddStaff = (newStaff: StaffUser) => {
-    removeDeletedStaffId({ id: newStaff.id, email: newStaff.email });
-    const updated = [...staffList, newStaff];
-    setStaffList(updated);
-    saveStoredStaff(updated);
-    saveStaffToFirestore(newStaff).catch(err => console.warn('[Firestore] Error saving staff:', err));
+  const handleAddStaff = async (newStaff: StaffUser): Promise<void> => {
+    const cleanStaff: StaffUser = {
+      ...newStaff,
+      email: (newStaff.email || '').trim().toLowerCase(),
+      name: (newStaff.name || '').trim()
+    };
+    removeDeletedStaffId({ id: cleanStaff.id, email: cleanStaff.email });
+    pendingStaffMutationRef.current[cleanStaff.id] = { atMs: Date.now(), staff: cleanStaff };
+
+    setStaffList(prev => {
+      const exists = prev.some(s => s.id === cleanStaff.id);
+      const updated = exists
+        ? prev.map(s => (s.id === cleanStaff.id ? { ...s, ...cleanStaff } : s))
+        : [...prev, cleanStaff];
+      saveStoredStaff(updated);
+      return updated;
+    });
+
+    try {
+      await saveStaffToFirestore(cleanStaff);
+    } catch (err) {
+      delete pendingStaffMutationRef.current[cleanStaff.id];
+      console.error('[Firestore] Error saving staff:', err);
+      throw err;
+    }
   };
 
-  const handleUpdateStaff = (updatedStaff: StaffUser) => {
-    const updated = staffList.map(s => {
-      const isMatch = s.id === updatedStaff.id ||
-        (s.email && updatedStaff.email && s.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
-        s.name.toLowerCase() === updatedStaff.name.toLowerCase() ||
-        (updatedStaff.name.toLowerCase().includes('kyle') && s.name.toLowerCase().includes('kyle'));
-      return isMatch ? updatedStaff : s;
+  const handleUpdateStaff = async (updatedStaff: StaffUser): Promise<void> => {
+    const normalizedEmail = (updatedStaff.email || '').trim().toLowerCase();
+    const prevList = staffListRef.current;
+
+    // Match exact document ID first, plus any duplicate doc sharing the exact same non-empty email
+    // so stale duplicate docs in Firestore cannot revert permission changes.
+    const docsToPersist: StaffUser[] = [];
+    let matchedPrimary = false;
+
+    const nextList = prevList.map(s => {
+      const idMatch = s.id === updatedStaff.id;
+      const emailMatch = Boolean(normalizedEmail) && Boolean(s.email) && s.email.trim().toLowerCase() === normalizedEmail;
+      if (idMatch || emailMatch) {
+        if (idMatch) matchedPrimary = true;
+        const mergedRecord: StaffUser = {
+          ...s,
+          ...updatedStaff,
+          id: s.id,
+          email: normalizedEmail || s.email,
+          // Never drop live account/session metadata during a profile or permission edit
+          authUid: updatedStaff.authUid || s.authUid,
+          emailVerified: updatedStaff.emailVerified ?? s.emailVerified,
+          isOnline: updatedStaff.isOnline ?? s.isOnline,
+          lastSeenAt: updatedStaff.lastSeenAt || s.lastSeenAt,
+          lastLoginAt: updatedStaff.lastLoginAt || s.lastLoginAt,
+          forceLogoutAt: updatedStaff.forceLogoutAt || s.forceLogoutAt,
+          joinedDate: updatedStaff.joinedDate || s.joinedDate
+        };
+        docsToPersist.push(mergedRecord);
+        return mergedRecord;
+      }
+      return s;
     });
-    setStaffList(updated);
-    saveStoredStaff(updated);
-    const isCurrentMatch = currentStaff.id === updatedStaff.id ||
-      (currentStaff.email && updatedStaff.email && currentStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
-      currentStaff.name.toLowerCase() === updatedStaff.name.toLowerCase() ||
-      (updatedStaff.name.toLowerCase().includes('kyle') && currentStaff.name.toLowerCase().includes('kyle'));
-    if (isCurrentMatch) {
-      setCurrentStaff(updatedStaff);
-      saveStoredActiveStaffId(updatedStaff.id);
+
+    if (!matchedPrimary) {
+      const fallbackRecord: StaffUser = {
+        ...updatedStaff,
+        email: normalizedEmail || updatedStaff.email
+      };
+      docsToPersist.push(fallbackRecord);
+      if (!nextList.some(s => s.id === fallbackRecord.id)) {
+        nextList.push(fallbackRecord);
+      }
     }
-    saveStaffToFirestore(updatedStaff).catch(err => console.warn('[Firestore] Error updating staff:', err));
+
+    const nowMs = Date.now();
+    docsToPersist.forEach(docItem => {
+      removeDeletedStaffId({ id: docItem.id, email: docItem.email });
+      pendingStaffMutationRef.current[docItem.id] = { atMs: nowMs, staff: docItem };
+    });
+
+    const primaryUpdated = docsToPersist.find(d => d.id === updatedStaff.id) || docsToPersist[0];
+
+    setStaffList(nextList);
+    saveStoredStaff(nextList);
+
+    const matchesProfile = (target: StaffUser | null) => {
+      if (!target) return false;
+      return (
+        target.id === primaryUpdated.id ||
+        (Boolean(target.email) && Boolean(primaryUpdated.email) && target.email.trim().toLowerCase() === primaryUpdated.email.trim().toLowerCase()) ||
+        target.name.trim().toLowerCase() === primaryUpdated.name.trim().toLowerCase()
+      );
+    };
+
+    if (matchesProfile(currentStaff)) {
+      setCurrentStaff(prev => ({ ...prev, ...primaryUpdated }));
+      saveStoredActiveStaffId(primaryUpdated.id);
+    }
+
+    if (matchesProfile(authenticatedStaffRef.current)) {
+      setAuthenticatedStaff(prev => (prev ? { ...prev, ...primaryUpdated } : prev));
+    }
+
+    try {
+      await Promise.all(docsToPersist.map(docItem => saveStaffToFirestore(docItem)));
+    } catch (err) {
+      docsToPersist.forEach(docItem => {
+        delete pendingStaffMutationRef.current[docItem.id];
+      });
+      console.error('[Firestore] Error updating staff:', err);
+      throw err;
+    }
   };
 
   const handleSelectStaff = (staff: StaffUser) => {
