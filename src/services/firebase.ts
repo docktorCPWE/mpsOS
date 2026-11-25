@@ -642,11 +642,25 @@ export function subscribeToStaff(
 
 export async function saveStaffToFirestore(staffUser: StaffUser): Promise<void> {
   const path = `staff/${staffUser.id}`;
-  try {
-    await setDoc(doc(db, 'staff', staffUser.id), staffUser, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, path);
+  // Strip any undefined optional properties so Firestore setDoc never rejects the write
+  const sanitized = JSON.parse(JSON.stringify(staffUser));
+  const retryDelaysMs = [0, 400, 1100];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+    if (retryDelaysMs[attempt] > 0) {
+      await new Promise(resolve => setTimeout(resolve, retryDelaysMs[attempt]));
+    }
+    try {
+      await setDoc(doc(db, 'staff', staffUser.id), sanitized, { merge: true });
+      return;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Firestore] Staff save attempt ${attempt + 1} failed for ${staffUser.id}:`, err);
+    }
   }
+
+  handleFirestoreError(lastError, OperationType.WRITE, path);
 }
 
 export async function seedStaffToFirestore(staffList: StaffUser[]): Promise<void> {
@@ -1096,6 +1110,22 @@ export interface RegisterEmailResult {
   needsVerification: boolean;
 }
 
+async function sendVerificationEmailSafe(user: User): Promise<void> {
+  try {
+    if (typeof window !== 'undefined' && /^https?:\/\//i.test(window.location.origin)) {
+      await sendEmailVerification(user, {
+        url: window.location.origin,
+        handleCodeInApp: false
+      });
+      return;
+    }
+  } catch (continueUrlErr) {
+    // Fallback if current preview origin isn't allowlisted in Firebase Auth authorized domains
+    console.warn('[Auth] Verification continue URL fallback:', continueUrlErr);
+  }
+  await sendEmailVerification(user);
+}
+
 export async function registerWithEmail(
   email: string,
   pass: string,
@@ -1103,6 +1133,9 @@ export async function registerWithEmail(
 ): Promise<RegisterEmailResult> {
   const cleanEmail = email.trim();
   const cleanName = fullName.trim();
+  if (cleanName) {
+    savePendingSignupName(cleanEmail, cleanName);
+  }
   // Mark active BEFORE calling Firebase Auth so onAuthStateChanged never treats this fresh sign-up as stale
   markAuthSessionActive('pending');
   try {
@@ -1110,15 +1143,25 @@ export async function registerWithEmail(
     const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
     const user = userCredential.user;
     markAuthSessionActive(user.uid);
-    removeDeletedStaffId({ id: `staff-${user.uid.slice(0, 8)}`, email: cleanEmail });
+    const safeUidPrefix = user.uid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || Date.now().toString(36);
+    removeDeletedStaffId({ id: `staff-${safeUidPrefix}`, email: cleanEmail });
 
     // Set profile display name
     if (cleanName) {
-      await updateProfile(user, { displayName: cleanName });
+      await updateProfile(user, { displayName: cleanName }).catch(() => {});
     }
 
+    // Immediately provision the employee's Staff Directory record in Firestore at signup
+    // so they appear in Staff Listings right away (even if they verify their email in another tab/device)
+    await syncAuthToStaffUser(user, [], {
+      isInitialSignup: true,
+      fullNameOverride: cleanName
+    }).catch((syncErr) => {
+      console.warn('[Firestore] Initial signup staff profile sync notice:', syncErr);
+    });
+
     // Send email verification link
-    await sendEmailVerification(user);
+    await sendVerificationEmailSafe(user);
     console.log('[Auth] Verification email sent to:', user.email);
 
     return { user, reactivated: false, needsVerification: true };
@@ -1134,15 +1177,24 @@ export async function registerWithEmail(
         const existingCred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
         const existingUser = existingCred.user;
         markAuthSessionActive(existingUser.uid);
-        removeDeletedStaffId({ id: `staff-${existingUser.uid.slice(0, 8)}`, email: cleanEmail });
+        const safeUidPrefix = existingUser.uid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || Date.now().toString(36);
+        removeDeletedStaffId({ id: `staff-${safeUidPrefix}`, email: cleanEmail });
 
         if (cleanName && existingUser.displayName !== cleanName) {
           await updateProfile(existingUser, { displayName: cleanName }).catch(() => {});
         }
 
+        // Immediately provision / restore their Staff Directory record in Firestore
+        await syncAuthToStaffUser(existingUser, [], {
+          isInitialSignup: !existingUser.emailVerified,
+          fullNameOverride: cleanName
+        }).catch((syncErr) => {
+          console.warn('[Firestore] Reactivation staff profile sync notice:', syncErr);
+        });
+
         if (!existingUser.emailVerified) {
           try {
-            await sendEmailVerification(existingUser);
+            await sendVerificationEmailSafe(existingUser);
             console.log('[Auth] Sent fresh verification email for reactivated account:', existingUser.email);
           } catch (verifyErr) {
             console.warn('[Auth] Verification email notice for reactivated account:', verifyErr);
@@ -1224,7 +1276,7 @@ export async function triggerRemoteLogoutInFirestore(
 
 export async function resendVerificationEmail(): Promise<void> {
   if (auth.currentUser) {
-    await sendEmailVerification(auth.currentUser);
+    await sendVerificationEmailSafe(auth.currentUser);
     console.log('[Auth] Resent verification email to:', auth.currentUser.email);
   } else {
     throw new Error('No user is currently signed in.');
@@ -1240,6 +1292,10 @@ export async function checkEmailVerified(): Promise<boolean> {
   await auth.currentUser.reload();
   if (auth.currentUser.emailVerified) {
     markAuthSessionActive(auth.currentUser.uid);
+    // Proactively sync verified status + Staff Directory profile to Firestore right away
+    await syncAuthToStaffUser(auth.currentUser, []).catch((err) => {
+      console.warn('[Auth] Post-verification staff sync notice:', err);
+    });
   }
   return auth.currentUser.emailVerified;
 }
@@ -1247,10 +1303,11 @@ export async function checkEmailVerified(): Promise<boolean> {
 // Maps authenticated Firebase user to a StaffUser record in the OS and updates live presence
 export async function syncAuthToStaffUser(
   user: User,
-  existingStaffList: StaffUser[]
+  existingStaffList: StaffUser[],
+  options?: { isInitialSignup?: boolean; fullNameOverride?: string }
 ): Promise<StaffUser> {
   const userEmail = (user.email || '').toLowerCase().trim();
-  const pendingName = getPendingSignupName(userEmail);
+  const pendingName = options?.fullNameOverride?.trim() || getPendingSignupName(userEmail);
   const resolvedDisplayName = (pendingName || user.displayName || '').trim();
   const userName = resolvedDisplayName.toLowerCase();
   const isOwnerEmail = ROOT_OWNER_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
@@ -1259,6 +1316,10 @@ export async function syncAuthToStaffUser(
   const isDrew = userEmail.includes('drew') || userName.includes('drew');
   const isEthan = userEmail === 'ethanp.dwg@gmail.com' || userEmail.includes('ethan') || userName.includes('ethan');
   const nowIso = new Date().toISOString();
+  const safeUidPrefix = (user.uid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || Date.now().toString(36);
+  const directStaffId = `staff-${safeUidPrefix}`;
+  const isInitialSignup = Boolean(options?.isInitialSignup);
+  const isVerified = Boolean(user.emailVerified);
 
   // If the user provided a fresh name during reactivation/sign-up, sync it to Firebase Auth profile too
   if (pendingName && user.displayName !== pendingName) {
@@ -1268,32 +1329,46 @@ export async function syncAuthToStaffUser(
   let matched: StaffUser | undefined;
   let checkedFirestore = false;
 
-  // 1. Check Firestore directly first so deleted staff profiles are accurately detected and re-created fresh
+  // 1. Check Firestore directly first: prioritize exact authUid or email match across ALL staff docs
+  // so manually pre-created staff records link cleanly with zero duplicates!
   if (db) {
     try {
-      const directDocRef = doc(db, 'staff', `staff-${user.uid.slice(0, 8)}`);
-      const directSnap = await getDoc(directDocRef);
-      if (directSnap.exists()) {
-        matched = { ...(directSnap.data() as StaffUser), id: directSnap.id };
-      } else {
-        const staffSnap = await getDocs(collection(db, 'staff'));
-        staffSnap.forEach((d) => {
-          const s = { ...(d.data() as StaffUser), id: d.id };
-          if (s.email && s.email.toLowerCase().trim() === userEmail) {
-            matched = s;
-          } else if (!matched && isOwnerEmail && (s.name.toLowerCase().includes('greg hyatt') || (s.role === 'admin' && s.canManageStaff === true))) {
-            matched = s;
-          } else if (!matched && isKyle && (s.name.toLowerCase().includes('kyle') || s.id === 'staff-kyle')) {
-            matched = s;
-          } else if (!matched && isJason && (s.name.toLowerCase().includes('jason') || s.id === 'staff-jason')) {
-            matched = s;
-          } else if (!matched && isDrew && (s.name.toLowerCase().includes('drew') || s.id === 'staff-drew')) {
-            matched = s;
-          } else if (!matched && isEthan && (s.name.toLowerCase().includes('ethan') || s.id === 'staff-ethan')) {
-            matched = s;
+      const staffSnap = await getDocs(collection(db, 'staff'));
+      let uidMatch: StaffUser | undefined;
+      let emailMatch: StaffUser | undefined;
+      let directIdMatch: StaffUser | undefined;
+      let roleFallbackMatch: StaffUser | undefined;
+
+      staffSnap.forEach((d) => {
+        const s = { ...(d.data() as StaffUser), id: d.id };
+        const sEmail = (s.email || '').toLowerCase().trim();
+        const sName = (s.name || '').toLowerCase().trim();
+
+        if (!uidMatch && s.authUid && s.authUid === user.uid) {
+          uidMatch = s;
+        }
+        if (!emailMatch && userEmail && sEmail === userEmail) {
+          emailMatch = s;
+        }
+        if (!directIdMatch && d.id === directStaffId) {
+          directIdMatch = s;
+        }
+        if (!roleFallbackMatch) {
+          if (isOwnerEmail && (sName.includes('greg hyatt') || (s.role === 'admin' && s.canManageStaff === true))) {
+            roleFallbackMatch = s;
+          } else if (isKyle && (sName.includes('kyle') || s.id === 'staff-kyle')) {
+            roleFallbackMatch = s;
+          } else if (isJason && (sName.includes('jason') || s.id === 'staff-jason')) {
+            roleFallbackMatch = s;
+          } else if (isDrew && (sName.includes('drew') || s.id === 'staff-drew')) {
+            roleFallbackMatch = s;
+          } else if (isEthan && (sName.includes('ethan') || s.id === 'staff-ethan')) {
+            roleFallbackMatch = s;
           }
-        });
-      }
+        }
+      });
+
+      matched = uidMatch || emailMatch || directIdMatch || roleFallbackMatch;
       checkedFirestore = true;
     } catch (err) {
       console.warn('[Firestore] Error looking up staff for auth user:', err);
@@ -1302,7 +1377,8 @@ export async function syncAuthToStaffUser(
 
   // 2. Fall back to in-memory staff list only if Firestore lookup was unavailable
   if (!matched && !checkedFirestore) {
-    matched = existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
+    matched = existingStaffList.find(s => s.authUid === user.uid) ||
+              existingStaffList.find(s => (s.email || '').toLowerCase().trim() === userEmail);
 
     if (!matched && isOwnerEmail) {
       matched = existingStaffList.find(s => s.name.toLowerCase().includes('greg hyatt')) ||
@@ -1325,7 +1401,24 @@ export async function syncAuthToStaffUser(
   if (matched) {
     // Ensure a real signed-in account is never locally marked deleted
     removeDeletedStaffId({ id: matched.id, email: userEmail });
-    clearPendingSignupName(userEmail);
+    if (isVerified) {
+      clearPendingSignupName(userEmail);
+    }
+
+    const presenceFields = isInitialSignup && !isVerified
+      ? {
+          authUid: user.uid,
+          emailVerified: false,
+          isOnline: Boolean(matched.isOnline),
+          lastSeenAt: matched.lastSeenAt || nowIso
+        }
+      : {
+          authUid: user.uid,
+          emailVerified: isVerified,
+          isOnline: true,
+          lastSeenAt: nowIso,
+          lastLoginAt: nowIso
+        };
 
     // If user is owner, ensure superadmin privileges
     if (isOwnerEmail) {
@@ -1343,9 +1436,7 @@ export async function syncAuthToStaffUser(
         canEditJobPhases: true,
         canManageRoadblocks: true,
         canAccessPayroll: true,
-        isOnline: true,
-        lastSeenAt: nowIso,
-        lastLoginAt: nowIso
+        ...presenceFields
       };
       await saveStaffToFirestore(updated);
       return updated;
@@ -1366,9 +1457,7 @@ export async function syncAuthToStaffUser(
         canManageInvoices: matched.canManageInvoices !== undefined ? matched.canManageInvoices : true,
         canEditJobPhases: matched.canEditJobPhases !== undefined ? matched.canEditJobPhases : true,
         canManageRoadblocks: matched.canManageRoadblocks !== undefined ? matched.canManageRoadblocks : true,
-        isOnline: true,
-        lastSeenAt: nowIso,
-        lastLoginAt: nowIso
+        ...presenceFields
       };
       await saveStaffToFirestore(updatedKyle);
       return updatedKyle;
@@ -1376,20 +1465,21 @@ export async function syncAuthToStaffUser(
     // For Ethan, Drew, Jason, and all other staff: preserve capabilities & update live presence
     const updatedMatched: StaffUser = {
       ...matched,
-      name: pendingName || matched.name || resolvedDisplayName || user.email?.split('@')[0] || 'Staff Member',
+      name: matched.name || pendingName || resolvedDisplayName || user.email?.split('@')[0] || 'Staff Member',
       email: matched.email || userEmail,
+      status: 'active',
       canViewAllProjects: (isJason || isDrew || isEthan) ? true : matched.canViewAllProjects,
-      isOnline: true,
-      lastSeenAt: nowIso,
-      lastLoginAt: nowIso
+      ...presenceFields
     };
     await saveStaffToFirestore(updatedMatched);
     return updatedMatched;
   }
 
-  // Create fresh active staff profile for verified user (covers both brand-new signups & previously deleted accounts re-registering)
+  // Create fresh active staff profile for new or re-registering user immediately
   const newStaff: StaffUser = {
-    id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : isEthan ? 'staff-ethan' : `staff-${user.uid.slice(0, 8)}`,
+    id: isKyle ? 'staff-kyle' : isJason ? 'staff-jason' : isDrew ? 'staff-drew' : isEthan ? 'staff-ethan' : directStaffId,
+    authUid: user.uid,
+    emailVerified: isVerified,
     name: resolvedDisplayName || (isKyle ? 'Kyle Edmonson' : isJason ? 'Jason Barnett' : isDrew ? 'Drew Lupkey' : isEthan ? 'Ethan Pierce' : user.email?.split('@')[0] || 'Staff Member'),
     email: userEmail,
     title: isOwnerEmail ? 'System Owner & Principal' : isKyle ? 'Lead Project Manager & Senior Drafter' : isJason ? 'Project Manager & Operations' : isDrew ? 'Admin & Billing Specialist' : isEthan ? 'Junior Drafter & CAD Specialist' : 'Architectural Drafter',
@@ -1405,13 +1495,15 @@ export async function syncAuthToStaffUser(
     canManageInvoices: isOwnerEmail || isKyle || isJason || isDrew || isEthan,
     canEditJobPhases: isOwnerEmail || isKyle || isJason,
     canManageRoadblocks: isOwnerEmail || isKyle || isJason,
-    isOnline: true,
+    isOnline: !isInitialSignup || isVerified,
     lastSeenAt: nowIso,
-    lastLoginAt: nowIso
+    ...((!isInitialSignup || isVerified) ? { lastLoginAt: nowIso } : {})
   };
 
   removeDeletedStaffId({ id: newStaff.id, email: newStaff.email });
-  clearPendingSignupName(userEmail);
+  if (isVerified) {
+    clearPendingSignupName(userEmail);
+  }
   await saveStaffToFirestore(newStaff);
   return newStaff;
 }

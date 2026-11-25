@@ -247,6 +247,8 @@ export interface StaffUser {
   canAccessPayroll?: boolean;    // Access payroll table, record payments, view employee compensation checks
   preferredLayout?: 'grid' | 'board' | 'list' | 'table'; // User's default preferred layout view (Grid Cards, Kanban, Lists, Table)
   // Real-time Session Presence & Remote Sign-Out Sync
+  authUid?: string;              // Linked Firebase Auth UID for deterministic account matching
+  emailVerified?: boolean;       // Whether this employee has confirmed their email verification link
   isOnline?: boolean;
   lastSeenAt?: string;           // ISO timestamp of last heartbeat
   lastLoginAt?: string;          // ISO timestamp of most recent sign-in

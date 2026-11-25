@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Compass, Mail, Lock, User, ArrowRight, RefreshCw, CheckCircle, AlertCircle, ShieldCheck, KeyRound, ExternalLink, LogOut, ChevronRight } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
+  auth,
   registerWithEmail,
   loginWithEmail,
   logoutUser,
@@ -45,6 +46,48 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   // If user is logged in but unverified, show the verification pending screen
   const isVerificationPending = Boolean(currentUser && !currentUser.emailVerified);
+
+  // Automatically detect when the new user clicks the email verification link and returns to this tab
+  useEffect(() => {
+    if (!isVerificationPending) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const silentCheck = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const verified = await checkEmailVerified();
+        const freshUser = auth.currentUser || currentUser;
+        if (!cancelled && verified && freshUser) {
+          setSuccessMessage('Email verified! Signing you into My Plan Store OS...');
+          onAuthenticated(freshUser);
+        }
+      } catch {
+        // Ignore transient background poll errors
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        silentCheck();
+      }
+    };
+
+    window.addEventListener('focus', silentCheck);
+    document.addEventListener('visibilitychange', handleVisibility);
+    const interval = setInterval(silentCheck, 5000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', silentCheck);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+    };
+  }, [isVerificationPending, currentUser, onAuthenticated]);
 
   const parseFirebaseError = (err: any): string => {
     const code = err?.code || '';
@@ -183,11 +226,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     try {
       const verified = await checkEmailVerified();
-      if (verified && currentUser) {
+      const freshUser = auth.currentUser || currentUser;
+      if (verified && freshUser) {
         setSuccessMessage('Email verified successfully! Welcome to My Plan Store OS.');
         setTimeout(() => {
-          onAuthenticated(currentUser);
-        }, 800);
+          onAuthenticated(freshUser);
+        }, 500);
       } else {
         setErrorMessage('Your email address has not been verified yet. Please click the link in the email sent to you, then try again.');
       }

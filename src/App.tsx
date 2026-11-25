@@ -131,6 +131,7 @@ export default function App() {
 
   // Firebase Authentication State
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+  const [authEmailVerified, setAuthEmailVerified] = useState<boolean>(false);
   const [authenticatedStaff, setAuthenticatedStaff] = useState<StaffUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isDemoModeBypassed, setIsDemoModeBypassed] = useState<boolean>(false);
@@ -839,7 +840,7 @@ export default function App() {
       unsubscribeTimeCards();
       unsubscribePayroll();
     };
-  }, [isAuthLoading, authUser?.uid, authUser?.email, authUser?.emailVerified, isDemoModeBypassed]);
+  }, [isAuthLoading, authUser?.uid, authUser?.email, authEmailVerified, isDemoModeBypassed]);
 
   // Listen to Firebase Auth state & enforce session-scoped login (no stale cookies keeping users logged in)
   useEffect(() => {
@@ -862,6 +863,7 @@ export default function App() {
           console.warn('[Auth] Stale session cleanup notice:', err);
         }
         setAuthUser(null);
+        setAuthEmailVerified(false);
         setAuthenticatedStaff(null);
         setIsAuthLoading(false);
         return;
@@ -872,6 +874,7 @@ export default function App() {
       }
 
       setAuthUser(user);
+      setAuthEmailVerified(Boolean(user?.emailVerified));
       setIsAuthLoading(false);
 
       if (!user) {
@@ -889,6 +892,22 @@ export default function App() {
           setAuthenticatedStaff(hydratedStaff);
           setCurrentStaff(hydratedStaff);
           saveStoredActiveStaffId(hydratedStaff.id);
+          setStaffList(prev => {
+            const exists = prev.some(
+              s => s.id === hydratedStaff.id ||
+                (s.email && hydratedStaff.email && s.email.toLowerCase().trim() === hydratedStaff.email.toLowerCase().trim())
+            );
+            const next = exists
+              ? prev.map(s =>
+                  s.id === hydratedStaff.id ||
+                  (s.email && hydratedStaff.email && s.email.toLowerCase().trim() === hydratedStaff.email.toLowerCase().trim())
+                    ? { ...s, ...hydratedStaff }
+                    : s
+                )
+              : [...prev, hydratedStaff];
+            saveStoredStaff(next);
+            return next;
+          });
         } catch (err) {
           console.warn('[Auth] Staff profile sync notice:', err);
         }
@@ -900,7 +919,7 @@ export default function App() {
   // Cross-device remote sign-out watcher: if the signed-in user clocks out from another device (e.g. mobile),
   // automatically sign this session out cleanly so their desktop does not stay logged in.
   useEffect(() => {
-    if (!authUser || !authUser.emailVerified || !authenticatedStaff?.id) return;
+    if (!authUser || !authEmailVerified || !authenticatedStaff?.id) return;
 
     const myEmail = (authenticatedStaff.email || '').toLowerCase().trim();
     const cloudMe = staffList.find(
@@ -924,18 +943,19 @@ export default function App() {
       console.log('[Auth] Remote sign-out triggered from another device:', cloudMe.forceLogoutAt);
       logoutUser(undefined, { skipPresenceUpdate: true }).catch(() => {});
       setAuthUser(null);
+      setAuthEmailVerified(false);
       setAuthenticatedStaff(null);
       setIsDemoModeBypassed(false);
       setRemoteLogoutNotice(
         'Your shift was clocked out from another device. All active timers have been stopped & saved, and this session was automatically signed out.'
       );
     }
-  }, [staffList, authUser?.uid, authUser?.emailVerified, authenticatedStaff?.id, authenticatedStaff?.email]);
+  }, [staffList, authUser?.uid, authEmailVerified, authenticatedStaff?.id, authenticatedStaff?.email]);
 
   // Real-time online presence heartbeat + safe pagehide + inactivity auto-sign-out (8h)
   useEffect(() => {
     const staffId = authenticatedStaff?.id;
-    if (!authUser || !authUser.emailVerified || !staffId) return;
+    if (!authUser || !authEmailVerified || !staffId) return;
 
     const IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours of complete inactivity
     lastActivityRef.current = Date.now();
@@ -960,6 +980,7 @@ export default function App() {
         console.log('[Auth] Signing out due to extended inactivity.');
         logoutUser(staffId).catch(() => {});
         setAuthUser(null);
+        setAuthEmailVerified(false);
         setAuthenticatedStaff(null);
         return;
       }
@@ -971,6 +992,7 @@ export default function App() {
         if (!hasActiveWorkOrShiftRef.current && Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
           logoutUser(staffId).catch(() => {});
           setAuthUser(null);
+          setAuthEmailVerified(false);
           setAuthenticatedStaff(null);
           return;
         }
@@ -1004,11 +1026,12 @@ export default function App() {
       window.removeEventListener('pagehide', handlePageClose);
       window.removeEventListener('beforeunload', handlePageClose);
     };
-  }, [authUser?.uid, authUser?.emailVerified, authenticatedStaff?.id]);
+  }, [authUser?.uid, authEmailVerified, authenticatedStaff?.id]);
 
   const handleSignOut = async () => {
     await logoutUser(authenticatedStaff?.id || currentStaff?.id);
     setAuthUser(null);
+    setAuthEmailVerified(false);
     setAuthenticatedStaff(null);
     setIsDemoModeBypassed(false);
   };
@@ -4179,7 +4202,7 @@ export default function App() {
   }
 
   // 2. Gate access: Require user to be authenticated and have a verified email address
-  const isAuthRequired = !isDemoModeBypassed && (!authUser || !authUser.emailVerified);
+  const isAuthRequired = !isDemoModeBypassed && (!authUser || !authEmailVerified);
   if (isAuthRequired) {
     return (
       <AuthScreen
@@ -4190,6 +4213,7 @@ export default function App() {
           markAuthSessionActive(user.uid);
           setRemoteLogoutNotice(null);
           setAuthUser(user);
+          setAuthEmailVerified(true);
           setIsDemoModeBypassed(false);
           try {
             const matched = await syncAuthToStaffUser(user, staffListRef.current);
@@ -4200,6 +4224,22 @@ export default function App() {
             setAuthenticatedStaff(hydrated);
             setCurrentStaff(hydrated);
             saveStoredActiveStaffId(hydrated.id);
+            setStaffList(prev => {
+              const exists = prev.some(
+                s => s.id === hydrated.id ||
+                  (s.email && hydrated.email && s.email.toLowerCase().trim() === hydrated.email.toLowerCase().trim())
+              );
+              const next = exists
+                ? prev.map(s =>
+                    s.id === hydrated.id ||
+                    (s.email && hydrated.email && s.email.toLowerCase().trim() === hydrated.email.toLowerCase().trim())
+                      ? { ...s, ...hydrated }
+                      : s
+                  )
+                : [...prev, hydrated];
+              saveStoredStaff(next);
+              return next;
+            });
           } catch (err) {
             console.warn('[Auth] Staff profile sync notice:', err);
           }
