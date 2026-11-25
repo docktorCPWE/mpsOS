@@ -400,15 +400,20 @@ export function canUserManageInvoices(userNameOrStaff?: string | StaffUser): boo
 
 /**
  * Strict role-based permission for Job Intake / Creation:
- * Only Kyle or Jason Barnett are authorized to create a new job.
+ * Only Kyle, Jason Barnett, or Greg Hyatt are authorized to create a new job.
  */
 export function canUserCreateJob(userNameOrStaff?: string | StaffUser): boolean {
   if (!userNameOrStaff) return false;
+  if (typeof userNameOrStaff === 'object') {
+    if (userNameOrStaff.id === 'staff-greg') return true;
+    if (userNameOrStaff.email && userNameOrStaff.email.toLowerCase() === 'arkcwd@gmail.com') return true;
+  }
   const name = typeof userNameOrStaff === 'object' ? userNameOrStaff.name : userNameOrStaff;
-  const lower = name.toLowerCase().trim();
+  const lower = (name || '').toLowerCase().trim();
   const isKyle = lower.includes('kyle');
   const isJasonBarnett = lower.includes('jason barnett') || lower === 'jason';
-  return isKyle || isJasonBarnett;
+  const isGregHyatt = lower.includes('greg hyatt') || lower === 'greg';
+  return isKyle || isJasonBarnett || isGregHyatt;
 }
 
 function doesNameMatchStaff(candidate: string | undefined, staff: StaffUser): boolean {

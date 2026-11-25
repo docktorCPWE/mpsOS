@@ -60,6 +60,28 @@ export async function generateInvoicePDF(
   let canvas: HTMLCanvasElement;
 
   try {
+    // Ensure all embedded images (e.g. invoice logo) finish loading & decoding before capture
+    const images = Array.from(clonedElement.querySelectorAll('img'));
+    await Promise.all(
+      images.map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+              if (typeof img.decode === 'function') {
+                img.decode().then(() => resolve()).catch(() => resolve());
+              } else {
+                resolve();
+              }
+              return;
+            }
+            const done = () => resolve();
+            const timer = setTimeout(done, 3000);
+            img.addEventListener('load', () => { clearTimeout(timer); done(); }, { once: true });
+            img.addEventListener('error', () => { clearTimeout(timer); done(); }, { once: true });
+          })
+      )
+    );
+
     // Brief frame wait to ensure fonts and layout dimensions calculate accurately
     await new Promise((resolve) => setTimeout(resolve, 60));
 

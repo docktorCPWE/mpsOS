@@ -25,6 +25,8 @@ interface OfficialInvoiceModalProps {
 
 type EditTabType = 'time_entries' | 'financials' | 'invoice_terms' | 'customer_plan';
 
+const OFFICIAL_INVOICE_LOGO_URL = '/assets/aistudio/Drew_Liked_2e785d7d.png';
+
 export const OfficialInvoiceModal: React.FC<OfficialInvoiceModalProps> = ({
   job,
   isOpen,
@@ -1790,30 +1792,35 @@ My Plan Store`,
               
               {/* TOP HEADER: BRANDING & INVOICE IDENTIFIER */}
               <div className="border-b-2 border-slate-900 pb-5 flex flex-col sm:flex-row justify-between items-start gap-4 sm:gap-6">
-                {/* Brand Info */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 bg-slate-900 text-white rounded-lg flex items-center justify-center font-black text-sm tracking-tighter shadow-xs">
-                      MPS
-                    </div>
+                {/* Brand Info with Persistent Official Logo (Top Left) */}
+                <div className="flex items-start gap-4">
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-[#1a1b1d] border border-slate-900 shadow-sm shrink-0">
+                    <img
+                      src={OFFICIAL_INVOICE_LOGO_URL}
+                      alt="My Plan Store — We Know Blueprints"
+                      crossOrigin="anonymous"
+                      className="w-full h-full block"
+                    />
+                  </div>
+                  <div className="space-y-1.5 pt-0.5">
                     <div>
-                      <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-950 uppercase">
+                      <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-950 uppercase leading-tight">
                         My Plan Store
                       </h1>
-                      <p className="text-[11px] font-bold text-blue-700 tracking-wider uppercase">
+                      <p className="text-[11px] font-bold text-blue-700 tracking-wider uppercase mt-0.5">
                         Architectural Design & CAD Drafting Services
                       </p>
                     </div>
-                  </div>
 
-                  <div className="text-xs text-slate-600 space-y-0.5 pt-1.5">
-                    <p className="font-semibold text-slate-900">1813 Harkrider St, Conway, AR 72032</p>
-                    <p className="flex items-center gap-2">
-                      <span>Phone: <strong>(501) 291-3228</strong></span>
-                      <span>•</span>
-                      <span>Email: billing@myplanstore.com</span>
-                    </p>
-                    <p>Web: www.myplanstore.com</p>
+                    <div className="text-xs text-slate-600 space-y-0.5 pt-1">
+                      <p className="font-semibold text-slate-900">1813 Harkrider St, Conway, AR 72032</p>
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span>Phone: <strong>(501) 291-3228</strong></span>
+                        <span>•</span>
+                        <span>Email: billing@myplanstore.com</span>
+                      </p>
+                      <p>Web: www.myplanstore.com</p>
+                    </div>
                   </div>
                 </div>
 

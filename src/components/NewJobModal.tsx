@@ -65,7 +65,7 @@ export const NewJobModal: React.FC<NewJobModalProps> = ({
           <div>
             <h3 className="text-base font-bold text-slate-900">Permission Restricted</h3>
             <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-              Only <strong>Kyle</strong> or <strong>Jason Barnett</strong> are authorized to create and onboard new jobs.
+              Only <strong>Kyle</strong>, <strong>Jason Barnett</strong>, or <strong>Greg Hyatt</strong> are authorized to create and onboard new jobs.
             </p>
           </div>
           <button

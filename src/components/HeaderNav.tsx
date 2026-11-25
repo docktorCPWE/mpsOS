@@ -619,13 +619,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             {/* Right: Operational Action Controls */}
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
 
-              {/* Job Creation Action: Strictly Kyle or Jason Barnett */}
+              {/* Job Creation Action: Kyle, Jason Barnett, or Greg Hyatt */}
               {userRole !== 'customer' && (
                 canUserCreateJob(currentStaff) ? (
                   <button
                     onClick={onOpenNewJobModal}
                     className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1 rounded-lg transition shadow-xs border border-blue-400/20 active:scale-95 cursor-pointer shrink-0"
-                    title="Create new project (Authorized for Kyle & Jason Barnett)"
+                    title="Create new project (Authorized for Kyle, Jason Barnett & Greg Hyatt)"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>New Job</span>
@@ -633,11 +633,11 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 ) : (
                   <div
                     className="flex items-center gap-1 bg-slate-800/80 text-slate-400 text-xs font-medium px-2 py-1 rounded-lg border border-slate-700/60 cursor-not-allowed select-none shrink-0"
-                    title="Creation Restricted: Only Kyle or Jason Barnett can create a new job"
+                    title="Creation Restricted: Only Kyle, Jason Barnett, or Greg Hyatt can create a new job"
                   >
                     <Lock className="w-3 h-3 text-slate-500" />
                     <span className="hidden xl:inline text-[11px]">New Job</span>
-                    <span className="text-[9px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.2 rounded">Kyle / Jason only</span>
+                    <span className="text-[9px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.2 rounded">Kyle / Jason / Greg</span>
                   </div>
                 )
               )}

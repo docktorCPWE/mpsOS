@@ -3151,10 +3151,10 @@ export default function App() {
     );
   };
 
-  // 6. Create New Job Intake (Restricted strictly to Kyle or Jason Barnett)
+  // 6. Create New Job Intake (Restricted to Kyle, Jason Barnett, or Greg Hyatt)
   const handleCreateJob = (newJob: Job) => {
     if (!canUserCreateJob(currentStaff)) {
-      alert('Permission Restricted: Only Kyle or Jason Barnett have authorization to create a new job.');
+      alert('Permission Restricted: Only Kyle, Jason Barnett, or Greg Hyatt have authorization to create a new job.');
       return;
     }
     updateJobsState(prevJobs => [newJob, ...prevJobs], newJob.id);
@@ -4254,7 +4254,7 @@ export default function App() {
         onSelectJob={handleOpenJobDetail}
         onOpenNewJobModal={() => {
           if (!canUserCreateJob(currentStaff)) {
-            alert('Permission Restricted: Only Kyle or Jason Barnett are authorized to create a new job.');
+            alert('Permission Restricted: Only Kyle, Jason Barnett, or Greg Hyatt are authorized to create a new job.');
             return;
           }
           setIsNewJobModalOpen(true);
