@@ -210,6 +210,32 @@
         "missedClockOut": { "type": "boolean", "description": "Flag for auto-closed runaway shift" }
       },
       "required": ["id", "staffId", "staffName", "date", "clockInTime", "status"]
+    },
+    "JobAttachment": {
+      "title": "JobAttachment",
+      "description": "Metadata manifest for an offloaded architectural PDF, image, or CAD file attachment stored outside the parent job document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique attachment file ID" },
+        "jobId": { "type": "string", "description": "Associated job ID if available" },
+        "name": { "type": "string", "description": "Original filename" },
+        "mimeType": { "type": "string", "description": "MIME content type e.g. application/pdf" },
+        "sizeBytes": { "type": "number", "description": "Original raw file size in bytes" },
+        "chunkCount": { "type": "number", "description": "Number of base64 chunks stored in the chunks subcollection" },
+        "uploadedBy": { "type": "string", "description": "Name of staff member who uploaded the file" },
+        "uploadedAt": { "type": "string", "description": "Upload timestamp ISO string" }
+      },
+      "required": ["id", "name", "mimeType", "chunkCount"]
+    },
+    "JobAttachmentChunk": {
+      "title": "JobAttachmentChunk",
+      "description": "Individual base64 slice of a cloud-stored attachment file (< 450 KB per document)",
+      "type": "object",
+      "properties": {
+        "index": { "type": "number", "description": "Zero-based chunk order index" },
+        "data": { "type": "string", "description": "Base64 payload segment for this chunk" }
+      },
+      "required": ["index", "data"]
     }
   },
   "firestore": {
@@ -252,6 +278,14 @@
     "/time_cards/{shiftId}": {
       "schema": "TimeCardShift",
       "description": "Real-time employee shift clock-in, break, and clock-out time cards synced across devices"
+    },
+    "/job_attachments/{fileId}": {
+      "schema": "JobAttachment",
+      "description": "Manifest records for offloaded PDF, CAD, and image attachments linked from jobs"
+    },
+    "/job_attachments/{fileId}/chunks/{chunkId}": {
+      "schema": "JobAttachmentChunk",
+      "description": "Chunked base64 payload documents for offloaded job attachments"
     }
   }
 }

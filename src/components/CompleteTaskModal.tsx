@@ -48,7 +48,7 @@ interface CompleteTaskModalProps {
   task: DelegatedWorkItem | null;
   job?: Job | null;
   currentStaff: StaffUser;
-  onCompleteTask: (payload: CompleteTaskPayload) => void;
+  onCompleteTask: (payload: CompleteTaskPayload) => void | Promise<boolean>;
 }
 
 const SAMPLE_REVIEW_FILES: { name: string; size: string; type: string; category: DeliverableFile['category']; url: string }[] = [
@@ -93,6 +93,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
   const [completionDate, setCompletionDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [notifyDelegator, setNotifyDelegator] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Pre-populate template and reset stale fields only when opening the modal for a specific task
@@ -104,6 +105,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     setLoggedHours('');
     setTimeTaskDescription('');
     setCompletionDate(new Date().toISOString().split('T')[0]);
+    setIsSubmitting(false);
     setErrorMsg('');
 
     // Detect most appropriate initial template based on task properties
@@ -189,12 +191,13 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     }
   };
 
-  // Handle local file uploads
+  // Handle local file uploads (offloaded to cloud attachment storage so PDFs never bloat the job doc)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
+    setErrorMsg('');
     const newCats: Record<string, DeliverableFile['category']> = { ...fileCategories };
 
     try {
@@ -202,7 +205,10 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       const processed = await Promise.all(
         fileList.map(async (file: File, index: number) => {
           const fileId = `att-comp-${Date.now()}-${index}`;
-          const res = await processFileForAttachment(file);
+          const res = await processFileForAttachment(file, {
+            jobId: job?.id || task.jobId || task.jobNumber,
+            uploadedBy: currentStaff.name
+          });
           const defaultCat: DeliverableFile['category'] = 
             file.name.toLowerCase().endsWith('.dwg') ? 'CAD / DWG File' :
             file.name.toLowerCase().includes('foundation') ? 'Foundation Plan' :
@@ -230,8 +236,11 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       setFileCategories({ ...newCats });
     } catch (err) {
       console.warn('Error processing review files:', err);
+      setErrorMsg('There was a problem preparing one of the files. Please try attaching it again.');
     } finally {
       setIsUploading(false);
+      // Allow re-selecting the same file if needed
+      e.target.value = '';
     }
   };
 
@@ -266,12 +275,16 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
     setFileCategories(nextCats);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isUploading || isSubmitting) return;
     if (!completionNotes.trim()) {
       setErrorMsg('Please enter a brief completion note or review summary for Kyle.');
       return;
     }
+
+    setErrorMsg('');
+    setIsSubmitting(true);
 
     const delegatorStaff = STAFF_USERS.find(s => s.name.toLowerCase().includes(delegator.toLowerCase()));
     const effectiveCompletionDate = completionDate ? new Date(completionDate + 'T12:00:00').toISOString() : new Date().toISOString();
@@ -333,8 +346,19 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       completedAtDate: effectiveCompletionDate
     };
 
-    onCompleteTask(payload);
-    onClose();
+    try {
+      const result = await onCompleteTask(payload);
+      if (result === false) {
+        setErrorMsg('Could not confirm cloud save yet. Please check your internet connection and click submit again.');
+        setIsSubmitting(false);
+        return;
+      }
+      onClose();
+    } catch (err) {
+      console.warn('Error completing task:', err);
+      setErrorMsg('Could not save completion to cloud. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -779,18 +803,27 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
         <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex items-center justify-between shrink-0">
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-50 rounded-xl transition cursor-pointer"
           >
             Cancel
           </button>
 
           <button
+            type="button"
+            disabled={isUploading || isSubmitting}
             onClick={handleSubmit}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>Mark Task Completed & Submit to {delegator}</span>
+            <span>
+              {isUploading
+                ? 'Uploading File(s) to Cloud...'
+                : isSubmitting
+                ? 'Saving Completion...'
+                : `Mark Task Completed & Submit to ${delegator}`}
+            </span>
           </button>
         </div>
 

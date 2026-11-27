@@ -17,7 +17,9 @@ import {
   FileText, 
   CheckCheck, 
   CheckSquare,
-  Square
+  Square,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { ChatMessage, Job, StaffUser } from '../types';
 import { STAFF_USERS, isMessageRelevantForUser } from '../data/mockData';
@@ -34,6 +36,9 @@ interface GeneralChatWidgetProps {
   onDeleteMultipleMessages?: (messageIds: string[]) => void;
   onSelectJob: (job: Job) => void;
   onMarkAsRead: (messageIds?: string[]) => void;
+  syncingMessageIds?: string[];
+  failedMessageIds?: string[];
+  onRetrySendMessage?: (messageId: string) => void;
 }
 
 interface ChatThread {
@@ -58,7 +63,10 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
   onDeleteMessage,
   onDeleteMultipleMessages,
   onSelectJob,
-  onMarkAsRead
+  onMarkAsRead,
+  syncingMessageIds = [],
+  failedMessageIds = [],
+  onRetrySendMessage
 }) => {
   const effectiveStaffList = staffList && staffList.length > 0 ? staffList : STAFF_USERS;
   const [inputText, setInputText] = useState('');
@@ -325,12 +333,12 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
     m.senderId === currentStaff.id ||
     (m.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase();
 
-  // Count unread and read messages for this user
+  // Count unread and read messages from others for this user (never count own sent messages as "clearable read")
   const unreadCount = userRelevantMessages.filter(
     m => !isOwnMessage(m) && !(m.readByStaffIds || []).includes(currentStaff.id)
   ).length;
   const readCount = userRelevantMessages.filter(
-    m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id)
+    m => !isOwnMessage(m) && (m.readByStaffIds || []).includes(currentStaff.id)
   ).length;
 
   const currentFirstName = (currentStaff.name || '').trim().split(/\s+/)[0].toLowerCase();
@@ -413,7 +421,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
   const handleSelectAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => !isOwnMessage(m) && (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     setSelectedMessageIds(new Set(readIds));
   };
@@ -438,7 +446,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
 
   const executeQuickDeleteAllRead = () => {
     const readIds = userRelevantMessages
-      .filter(m => isOwnMessage(m) || (m.readByStaffIds || []).includes(currentStaff.id))
+      .filter(m => !isOwnMessage(m) && (m.readByStaffIds || []).includes(currentStaff.id))
       .map(m => m.id);
     if (readIds.length === 0) return;
     if (onDeleteMultipleMessages) {
@@ -864,10 +872,12 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
               : true;
 
             const renderMessageCard = (msg: ChatMessage, isNestedReply: boolean) => {
-              const isMe = msg.senderId === currentStaff.id || msg.senderName === currentStaff.name;
+              const isMe = isOwnMessage(msg);
               const mentionsMe = doesMsgMentionCurrentUser(msg);
               const isSelected = selectedMessageIds.has(msg.id);
               const isMsgUnread = !isMe && !(msg.readByStaffIds || []).includes(currentStaff.id);
+              const isSyncing = syncingMessageIds.includes(msg.id);
+              const isFailed = failedMessageIds.includes(msg.id);
               const showThreadGreenDot = !isNestedReply && hasUnread;
 
               return (
@@ -952,8 +962,27 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Green Dot / New indicator */}
-                      {isMsgUnread ? (
+                      {/* Delivery / Sync status or New indicator */}
+                      {isFailed ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRetrySendMessage?.(msg.id);
+                          }}
+                          className="inline-flex items-center gap-1 text-[9px] font-bold text-red-200 bg-red-600/30 hover:bg-red-600/50 border border-red-500/60 px-1.5 py-0.5 rounded-full cursor-pointer transition"
+                          title="Cloud save failed — click to retry sending"
+                        >
+                          <AlertCircle className="w-2.5 h-2.5 text-red-300" />
+                          <span>Not synced · Retry</span>
+                          <RefreshCw className="w-2.5 h-2.5" />
+                        </button>
+                      ) : isSyncing ? (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-amber-200 bg-amber-500/15 border border-amber-500/40 px-1.5 py-0.5 rounded-full">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                          Saving...
+                        </span>
+                      ) : isMsgUnread ? (
                         <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 px-1.5 py-0.2 rounded-full">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           New
@@ -964,7 +993,7 @@ export const GeneralChatWidget: React.FC<GeneralChatWidgetProps> = ({
                           {unreadReplyCount} new {unreadReplyCount === 1 ? 'reply' : 'replies'}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-500 flex items-center gap-0.5" title="Read">
+                        <span className="text-[10px] text-slate-500 flex items-center gap-0.5" title="Synced & Read">
                           <CheckCheck className="w-3 h-3 text-blue-400/70" />
                         </span>
                       )}

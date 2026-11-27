@@ -87,5 +87,18 @@ service cloud.firestore {
       allow create, update: if isValidId(shiftId);
       allow delete: if isValidId(shiftId);
     }
+
+    // Offloaded Job File Attachments (chunked PDFs, CAD files, and high-res images)
+    match /job_attachments/{fileId} {
+      allow read: if true;
+      allow create, update: if isValidId(fileId);
+      allow delete: if isValidId(fileId);
+
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow create, update: if isValidId(fileId) && isValidId(chunkId);
+        allow delete: if isValidId(fileId) && isValidId(chunkId);
+      }
+    }
   }
 }

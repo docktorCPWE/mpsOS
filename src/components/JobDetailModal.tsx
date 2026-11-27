@@ -8,7 +8,7 @@ import { isJobArchived, STAFF_USERS, canUserDeleteDelegatedItem, canUserAddCusto
 import { applyInvoiceStatusTransition, isJasonApproved, canUserApproveAsJason, canGenerateInvoice } from '../utils/invoiceWorkflow';
 import { OfficialInvoiceModal } from './OfficialInvoiceModal';
 import { deleteFileFromJobInFirestore } from '../services/firebase';
-import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab } from '../utils/attachmentUtils';
+import { downloadFileFromUrl, createBlobUrlFromDataUrl, openFileInNewTab, processFileForAttachment, isCloudFileUrl } from '../utils/attachmentUtils';
 import { UniversalFileViewerModal } from './UniversalFileViewerModal';
 import { FileThumbnailPreview } from './FileThumbnailPreview';
 
@@ -1477,36 +1477,46 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
     onUpdateJob(updated);
   };
 
-  // Handle local file selection for deliverables
-  const handleDeliverableFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle local file selection for deliverables (uses cloud attachment offloading so PDFs never bloat the job doc)
+  const handleDeliverableFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setAttachedFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setAttachedFileUrl(result);
-      if (!fileTitle) {
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
-        setFileTitle(nameWithoutExt);
-      }
-    };
-    reader.readAsDataURL(file);
+    if (!fileTitle) {
+      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+      setFileTitle(nameWithoutExt);
+    }
+    try {
+      const res = await processFileForAttachment(file, {
+        jobId: job.id,
+        uploadedBy: currentStaff?.name || job.assigned_drafter.split(',')[0] || 'Drafter Studio'
+      });
+      setAttachedFileUrl(res.url);
+    } catch (err) {
+      console.warn('Error uploading deliverable file:', err);
+    } finally {
+      e.target.value = '';
+    }
   };
 
-  // Handle comment file attachment
-  const handleCommentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle comment file attachment (uses cloud attachment offloading so PDFs never cause job comments to fail saving)
+  const handleCommentFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setCommentAttachmentName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setCommentAttachmentUrl(result);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const res = await processFileForAttachment(file, {
+        jobId: job.id,
+        uploadedBy: currentStaff?.name || 'Drafter Studio'
+      });
+      setCommentAttachmentUrl(res.url);
+    } catch (err) {
+      console.warn('Error uploading comment attachment:', err);
+    } finally {
+      e.target.value = '';
+    }
   };
 
   // Helper to toggle tagged staff member
@@ -3848,10 +3858,16 @@ const JobDetailModalContent: React.FC<JobDetailModalProps & { job: Job }> = ({
                   {attachedFileUrl && (
                     <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-xl flex items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-3 overflow-hidden">
-                        <img src={attachedFileUrl} alt="Attached Preview" className="w-10 h-10 object-cover rounded-lg border border-blue-300 shrink-0" />
+                        {!isCloudFileUrl(attachedFileUrl) && (attachedFileUrl.startsWith('data:image') || /^https?:\/\//i.test(attachedFileUrl)) ? (
+                          <img src={attachedFileUrl} alt="Attached Preview" className="w-10 h-10 object-cover rounded-lg border border-blue-300 shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg border border-blue-300 bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                        )}
                         <div className="truncate">
-                          <p className="font-bold text-blue-950 truncate">{attachedFileName || 'Image Attached'}</p>
-                          <p className="text-[10px] text-blue-700">Ready to publish to client view</p>
+                          <p className="font-bold text-blue-950 truncate">{attachedFileName || 'File Attached'}</p>
+                          <p className="text-[10px] text-blue-700">Uploaded to cloud • Ready to publish</p>
                         </div>
                       </div>
                       <button

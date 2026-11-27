@@ -235,7 +235,199 @@ export function subscribeToJobs(
   }
 }
 
-const FIRESTORE_SAFE_JOB_BYTES = 880_000;
+// ----------------------------------------------------
+// CLOUD ATTACHMENT STORAGE (CHUNKED IN FIRESTORE)
+// Keeps jobs/{jobId} documents tiny (<100 KB) even when multi-MB PDFs/DWGs are attached
+// ----------------------------------------------------
+
+export const CLOUD_FILE_URL_PREFIX = 'mps-cloud-file://';
+const CLOUD_ATTACHMENT_CHUNK_CHARS = 380_000; // ~380 KB UTF-8 per chunk doc (well below Firestore's 1 MiB limit)
+const MAX_CLOUD_ATTACHMENT_RAW_BYTES = 15 * 1024 * 1024; // 15 MB max per file
+
+const cloudFileMemoryCache = new Map<string, string>();
+const cloudFileInflightFetches = new Map<string, Promise<string>>();
+
+export function isCloudFileUrl(url?: string | null): boolean {
+  return typeof url === 'string' && url.startsWith(CLOUD_FILE_URL_PREFIX);
+}
+
+export function extractCloudFileId(url?: string | null): string | null {
+  if (!isCloudFileUrl(url)) return null;
+  const id = (url as string).slice(CLOUD_FILE_URL_PREFIX.length).trim();
+  return id || null;
+}
+
+function cacheCloudFileDataUrl(fileId: string, dataUrl: string): void {
+  if (!fileId || !dataUrl) return;
+  // Cap in-memory cache to 30 files to keep browser memory tidy
+  if (cloudFileMemoryCache.size >= 30 && !cloudFileMemoryCache.has(fileId)) {
+    const oldestKey = cloudFileMemoryCache.keys().next().value;
+    if (oldestKey) cloudFileMemoryCache.delete(oldestKey);
+  }
+  cloudFileMemoryCache.set(fileId, dataUrl);
+}
+
+/**
+ * Uploads a data: URL (PDF, CAD/DWG, image, doc — up to 15 MB) into the dedicated
+ * `job_attachments/{fileId}/chunks/*` collection and returns a tiny `mps-cloud-file://<fileId>` pointer.
+ * This ensures attaching PDFs NEVER pushes a `jobs/{jobId}` document near Firestore's 1 MiB limit.
+ */
+export async function uploadAttachmentToFirestoreCloud(
+  dataUrl: string,
+  meta: {
+    name: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    jobId?: string;
+    uploadedBy?: string;
+  }
+): Promise<string> {
+  if (!dataUrl) return '';
+  if (isCloudFileUrl(dataUrl)) return dataUrl;
+  if (!dataUrl.startsWith('data:')) return dataUrl;
+
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx === -1) return '';
+
+  const header = dataUrl.slice(0, commaIdx);
+  const base64Body = dataUrl.slice(commaIdx + 1);
+  const mimeMatch = header.match(/^data:([^;]+);base64$/i);
+  const mimeType = meta.mimeType || (mimeMatch ? mimeMatch[1] : 'application/octet-stream');
+  const approxRawBytes = meta.sizeBytes ?? Math.round((base64Body.length * 3) / 4);
+
+  if (approxRawBytes > MAX_CLOUD_ATTACHMENT_RAW_BYTES) {
+    console.warn(`[Firestore] File "${meta.name}" exceeds 15 MB cloud attachment cap (${approxRawBytes} bytes).`);
+    return '';
+  }
+
+  const rand = Math.random().toString(36).slice(2, 8);
+  const fileId = `file-${Date.now()}-${rand}`;
+
+  const chunks: string[] = [];
+  for (let offset = 0; offset < base64Body.length; offset += CLOUD_ATTACHMENT_CHUNK_CHARS) {
+    chunks.push(base64Body.slice(offset, offset + CLOUD_ATTACHMENT_CHUNK_CHARS));
+  }
+  if (chunks.length === 0) {
+    chunks.push('');
+  }
+
+  const writeAllChunks = async () => {
+    // Write chunks sequentially in small batches to avoid hitting request payload limits
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkDocRef = doc(db, 'job_attachments', fileId, 'chunks', `chunk_${i}`);
+      await setDoc(chunkDocRef, {
+        index: i,
+        data: chunks[i]
+      });
+    }
+    // Write manifest last so any reader sees a complete set of chunks
+    await setDoc(doc(db, 'job_attachments', fileId), {
+      id: fileId,
+      jobId: meta.jobId || '',
+      name: meta.name || 'attachment',
+      mimeType,
+      sizeBytes: approxRawBytes,
+      chunkCount: chunks.length,
+      uploadedBy: meta.uploadedBy || '',
+      uploadedAt: new Date().toISOString()
+    });
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 400 * attempt));
+      }
+      await writeAllChunks();
+      cacheCloudFileDataUrl(fileId, dataUrl);
+      return `${CLOUD_FILE_URL_PREFIX}${fileId}`;
+    } catch (err) {
+      console.warn(`[Firestore] Attachment cloud upload attempt ${attempt + 1} failed for "${meta.name}":`, err);
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Resolves a `mps-cloud-file://<fileId>` pointer back into a full `data:<mime>;base64,...` URL
+ * with in-memory caching and deduplicated concurrent fetches.
+ */
+export async function fetchCloudAttachmentDataUrl(urlOrId: string): Promise<string> {
+  if (!urlOrId) return '';
+  if (!isCloudFileUrl(urlOrId)) return urlOrId;
+
+  const fileId = extractCloudFileId(urlOrId);
+  if (!fileId) return '';
+
+  const cached = cloudFileMemoryCache.get(fileId);
+  if (cached) return cached;
+
+  const existingPromise = cloudFileInflightFetches.get(fileId);
+  if (existingPromise) return existingPromise;
+
+  const fetchPromise = (async () => {
+    try {
+      const manifestSnap = await getDoc(doc(db, 'job_attachments', fileId));
+      if (!manifestSnap.exists()) {
+        console.warn(`[Firestore] Cloud attachment manifest not found: ${fileId}`);
+        return '';
+      }
+      const manifest = manifestSnap.data() as Record<string, any>;
+      const mimeType = typeof manifest.mimeType === 'string' && manifest.mimeType
+        ? manifest.mimeType
+        : 'application/octet-stream';
+
+      const chunksSnap = await getDocs(collection(db, 'job_attachments', fileId, 'chunks'));
+      const chunkEntries: Array<{ index: number; data: string }> = [];
+      chunksSnap.forEach((d) => {
+        const cData = d.data() as Record<string, any>;
+        chunkEntries.push({
+          index: typeof cData.index === 'number' ? cData.index : 0,
+          data: typeof cData.data === 'string' ? cData.data : ''
+        });
+      });
+
+      if (chunkEntries.length === 0) return '';
+      chunkEntries.sort((a, b) => a.index - b.index);
+      const fullBase64 = chunkEntries.map(c => c.data).join('');
+      const resolvedDataUrl = `data:${mimeType};base64,${fullBase64}`;
+      cacheCloudFileDataUrl(fileId, resolvedDataUrl);
+      return resolvedDataUrl;
+    } catch (err) {
+      console.warn(`[Firestore] Failed to fetch cloud attachment ${fileId}:`, err);
+      return '';
+    } finally {
+      cloudFileInflightFetches.delete(fileId);
+    }
+  })();
+
+  cloudFileInflightFetches.set(fileId, fetchPromise);
+  return fetchPromise;
+}
+
+/**
+ * Deletes an offloaded cloud attachment's manifest and chunks when permanently removed from a job.
+ */
+export async function deleteCloudAttachment(urlOrId?: string | null): Promise<void> {
+  const fileId = extractCloudFileId(urlOrId);
+  if (!fileId) return;
+  cloudFileMemoryCache.delete(fileId);
+  try {
+    const chunksSnap = await getDocs(collection(db, 'job_attachments', fileId, 'chunks'));
+    if (!chunksSnap.empty) {
+      const batch = writeBatch(db);
+      chunksSnap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    await deleteDoc(doc(db, 'job_attachments', fileId));
+  } catch (err) {
+    console.warn(`[Firestore] Notice cleaning up cloud attachment ${fileId}:`, err);
+  }
+}
+
+const FIRESTORE_SAFE_JOB_BYTES = 550_000; // Generous safety margin under Firestore's 1,048,576-byte wire limit
+const INLINE_DATA_URL_OFFLOAD_THRESHOLD = 45_000;
 
 function getUtf8ByteLength(str: string): number {
   try {
@@ -246,8 +438,125 @@ function getUtf8ByteLength(str: string): number {
 }
 
 /**
+ * Automatically offloads any large inline `data:` URLs on a job object into `job_attachments`
+ * before saving `jobs/{jobId}` so legacy or newly attached PDFs/images NEVER bloat the job document.
+ */
+async function offloadInlineJobBlobsToCloud(cleanJob: Record<string, any>): Promise<void> {
+  const jobId = String(cleanJob.id || '');
+  const uploadedByDataUrl = new Map<string, string>();
+
+  const maybeOffload = async (
+    currentUrl: unknown,
+    name: string,
+    mimeType?: string,
+    uploadedBy?: string
+  ): Promise<string | undefined> => {
+    if (typeof currentUrl !== 'string' || !currentUrl.startsWith('data:')) return undefined;
+    if (currentUrl.length <= INLINE_DATA_URL_OFFLOAD_THRESHOLD) return undefined;
+
+    const existingPointer = uploadedByDataUrl.get(currentUrl);
+    if (existingPointer !== undefined) {
+      return existingPointer;
+    }
+
+    const pointer = await uploadAttachmentToFirestoreCloud(currentUrl, {
+      name: name || 'attachment',
+      mimeType,
+      jobId,
+      uploadedBy
+    });
+    if (pointer) {
+      uploadedByDataUrl.set(currentUrl, pointer);
+      return pointer;
+    }
+    return undefined;
+  };
+
+  if (Array.isArray(cleanJob.deliverables)) {
+    for (const del of cleanJob.deliverables) {
+      const pointer = await maybeOffload(del?.fileUrl, del?.fileName || del?.title || 'deliverable', undefined, del?.authorDrafter);
+      if (pointer) del.fileUrl = pointer;
+    }
+  }
+
+  if (Array.isArray(cleanJob.delegated_tasks)) {
+    for (const task of cleanJob.delegated_tasks) {
+      if (Array.isArray(task?.attachments)) {
+        for (const att of task.attachments) {
+          const pointer = await maybeOffload(att?.url, att?.name || 'attachment', att?.type, att?.uploadedBy);
+          if (pointer) att.url = pointer;
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(cleanJob.comments)) {
+    for (const c of cleanJob.comments) {
+      const pointer = await maybeOffload(c?.attachmentUrl, c?.attachmentName || 'comment-attachment', undefined, c?.author);
+      if (pointer) c.attachmentUrl = pointer;
+      if (Array.isArray(c?.attachments)) {
+        for (const att of c.attachments) {
+          const attPointer = await maybeOffload(att?.url, att?.name || 'attachment', att?.type, c?.author);
+          if (attPointer) att.url = attPointer;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Strips all inline `data:` URLs from a job copy while preserving `mps-cloud-file://` pointers
+ * and all file metadata (name, size, type, category, uploadedAt, etc.).
+ */
+function stripAllInlineDataUrlsFromJob(cleanJob: Record<string, any>): void {
+  if (Array.isArray(cleanJob.delegated_tasks)) {
+    for (const task of cleanJob.delegated_tasks) {
+      if (Array.isArray(task?.attachments)) {
+        for (const att of task.attachments) {
+          if (typeof att?.url === 'string' && att.url.startsWith('data:')) {
+            att.url = '';
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(cleanJob.deliverables)) {
+    for (const del of cleanJob.deliverables) {
+      if (typeof del?.fileUrl === 'string' && del.fileUrl.startsWith('data:')) {
+        del.fileUrl = '';
+      }
+    }
+  }
+  if (Array.isArray(cleanJob.comments)) {
+    for (const c of cleanJob.comments) {
+      if (typeof c?.attachmentUrl === 'string' && c.attachmentUrl.startsWith('data:')) {
+        c.attachmentUrl = '';
+      }
+      if (Array.isArray(c?.attachments)) {
+        for (const att of c.attachments) {
+          if (typeof att?.url === 'string' && att.url.startsWith('data:')) {
+            att.url = '';
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(cleanJob.snapshots)) {
+    for (const snap of cleanJob.snapshots) {
+      if (Array.isArray(snap?.comments)) {
+        for (const c of snap.comments) {
+          if (typeof c?.attachmentUrl === 'string' && c.attachmentUrl.startsWith('data:')) {
+            c.attachmentUrl = '';
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
  * Ensures a job document fits comfortably under Firestore's hard 1 MiB (1,048,576 byte) limit
- * so saving a task completion, timer update, or status change NEVER fails silently due to
+ * so saving a task completion, comment, timer update, or status change NEVER fails silently due to
  * oversized or duplicated base64 data: URLs.
  */
 function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { trimmed: boolean; byteSize: number } {
@@ -286,8 +595,7 @@ function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { tr
     return { trimmed, byteSize };
   }
 
-  // Step 2: Progressively strip the largest inline data: URLs (keeping all file metadata intact)
-  // until the document fits safely under Firestore's 1 MiB limit.
+  // Step 2: Progressively strip the largest inline data: URLs (keeping cloud pointers & all file metadata intact)
   type DataUrlSlot = { len: number; clear: () => void };
   const slots: DataUrlSlot[] = [];
 
@@ -323,8 +631,18 @@ function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { tr
       }
     }
   }
+  if (Array.isArray(cleanJob.snapshots)) {
+    for (const snap of cleanJob.snapshots) {
+      if (Array.isArray(snap?.comments)) {
+        for (const c of snap.comments) {
+          if (typeof c?.attachmentUrl === 'string' && c.attachmentUrl.startsWith('data:') && c.attachmentUrl.length > 4_000) {
+            slots.push({ len: c.attachmentUrl.length, clear: () => { c.attachmentUrl = ''; } });
+          }
+        }
+      }
+    }
+  }
 
-  // Strip largest inline blobs first so we preserve as many smaller images/sheets as possible
   slots.sort((a, b) => b.len - a.len);
   for (const slot of slots) {
     if (byteSize <= FIRESTORE_SAFE_JOB_BYTES) break;
@@ -336,20 +654,42 @@ function fitJobDocumentWithinFirestoreLimit(cleanJob: Record<string, any>): { tr
   return { trimmed, byteSize };
 }
 
+function isFirestoreDocSizeError(err: any): boolean {
+  const code = String(err?.code || '').toLowerCase();
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    code === 'invalid-argument' ||
+    code === 'resource-exhausted' ||
+    msg.includes('exceeds the maximum') ||
+    msg.includes('too large') ||
+    msg.includes('longer than') ||
+    msg.includes('1048576') ||
+    msg.includes('1,048,576') ||
+    msg.includes('1048487') ||
+    msg.includes('1,048,487')
+  );
+}
+
 export async function saveJobToFirestore(
   job: Job,
   options?: { allowTimerClear?: boolean }
-): Promise<void> {
+): Promise<boolean> {
   const path = `jobs/${job.id}`;
   const allowTimerClear = Boolean(options?.allowTimerClear);
   try {
     const cleanJob: Record<string, any> = JSON.parse(JSON.stringify(job));
 
-    // Fit within Firestore's 1 MiB document size limit BEFORE attaching deleteField() sentinels
+    // Step 1: Automatically offload any large inline data: URLs into `job_attachments`
+    // so PDFs/CAD files/images are preserved in full while keeping `jobs/{jobId}` tiny.
+    await offloadInlineJobBlobsToCloud(cleanJob).catch(err => {
+      console.warn('[Firestore] Attachment offload notice for job:', job.job_number, err);
+    });
+
+    // Step 2: Fit within Firestore's safe document size limit BEFORE attaching deleteField() sentinels
     const { trimmed, byteSize } = fitJobDocumentWithinFirestoreLimit(cleanJob);
     if (trimmed) {
       console.warn(
-        `[Firestore] Job ${job.job_number} exceeded safe document size; stripped duplicate/oversized inline file blobs while preserving metadata (final size: ${byteSize} bytes).`
+        `[Firestore] Job ${job.job_number} exceeded safe document size; stripped duplicate/oversized inline file blobs while preserving cloud links & metadata (final size: ${byteSize} bytes).`
       );
     }
 
@@ -403,54 +743,31 @@ export async function saveJobToFirestore(
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await setDoc(docRef, cleanJob, { merge: true });
-        return;
+        return true;
       } catch (err: any) {
         lastErr = err;
-        const msg = String(err?.message || '').toLowerCase();
-        const isSizeError =
-          err?.code === 'invalid-argument' ||
-          msg.includes('exceeds the maximum allowed size') ||
-          msg.includes('too large') ||
-          msg.includes('1048576');
 
-        if (isSizeError) {
-          // Emergency fallback: persist critical operational state (delegated_tasks with stripped inline blobs,
-          // timers, time logs, status, custom charges) so task completion NEVER gets lost or reset.
-          const strippedTasks = Array.isArray(cleanJob.delegated_tasks)
-            ? cleanJob.delegated_tasks.map((t: any) => ({
-                ...t,
-                attachments: Array.isArray(t?.attachments)
-                  ? t.attachments.map((a: any) => ({
-                      ...a,
-                      url: typeof a?.url === 'string' && a.url.startsWith('data:') ? '' : a?.url
-                    }))
-                  : t?.attachments
-              }))
-            : [];
-
-          const emergencyUpdates: Record<string, any> = {
-            current_status: cleanJob.current_status,
-            delegated_tasks: strippedTasks,
-            time_logs: cleanJob.time_logs || [],
-            total_time_entries: cleanJob.total_time_entries || 0,
-            total_duration_minutes: cleanJob.total_duration_minutes || 0,
-            total_duration_hours: cleanJob.total_duration_hours || 0
-          };
-          if ('active_timer_start' in cleanJob) emergencyUpdates.active_timer_start = cleanJob.active_timer_start;
-          if ('active_timer_task' in cleanJob) emergencyUpdates.active_timer_task = cleanJob.active_timer_task;
-          if ('active_timer_drafter_id' in cleanJob) emergencyUpdates.active_timer_drafter_id = cleanJob.active_timer_drafter_id;
-          if ('active_timer_drafter_name' in cleanJob) emergencyUpdates.active_timer_drafter_name = cleanJob.active_timer_drafter_name;
-          if ('active_timer_delegated_task_id' in cleanJob) emergencyUpdates.active_timer_delegated_task_id = cleanJob.active_timer_delegated_task_id;
-          if ('paused_by_break' in cleanJob) emergencyUpdates.paused_by_break = cleanJob.paused_by_break;
-          if ('paused_timer_task' in cleanJob) emergencyUpdates.paused_timer_task = cleanJob.paused_timer_task;
-          if ('paused_timer_drafter_id' in cleanJob) emergencyUpdates.paused_timer_drafter_id = cleanJob.paused_timer_drafter_id;
-          if ('paused_timer_drafter_name' in cleanJob) emergencyUpdates.paused_timer_drafter_name = cleanJob.paused_timer_drafter_name;
-          if ('paused_elapsed_seconds' in cleanJob) emergencyUpdates.paused_elapsed_seconds = cleanJob.paused_elapsed_seconds;
-          if ('timer_explicit_stop_at' in cleanJob) emergencyUpdates.timer_explicit_stop_at = cleanJob.timer_explicit_stop_at;
-
-          await updateDoc(docRef, emergencyUpdates);
-          console.warn(`[Firestore] Saved critical task/timer fields for job ${job.job_number} via size-safe fallback.`);
-          return;
+        if (isFirestoreDocSizeError(err)) {
+          // Emergency size-safe fallback: strip ALL inline data: URLs across deliverables, tasks,
+          // comments, AND snapshots and overwrite those fields via setDoc({ merge: true }) so any
+          // pre-existing bloated server arrays are actually replaced and shrunk under 1 MiB!
+          try {
+            stripAllInlineDataUrlsFromJob(cleanJob);
+            await setDoc(docRef, cleanJob, { merge: true });
+            console.warn(`[Firestore] Saved job ${job.job_number} via full inline-blob strip fallback.`);
+            return true;
+          } catch (stripErr) {
+            // Second-tier emergency fallback: also trim audit_logs & snapshots while preserving
+            // ALL delegated_tasks, deliverables metadata, comments, time_logs, and timer fields.
+            console.warn(`[Firestore] Strip fallback still large for ${job.job_number}, applying compact write:`, stripErr);
+            const compactJob: Record<string, any> = {
+              ...cleanJob,
+              snapshots: Array.isArray(cleanJob.snapshots) ? cleanJob.snapshots.slice(0, 5) : [],
+              audit_logs: Array.isArray(cleanJob.audit_logs) ? cleanJob.audit_logs.slice(0, 50) : []
+            };
+            await setDoc(docRef, compactJob, { merge: true });
+            return true;
+          }
         }
 
         if (attempt < 2) {
@@ -462,6 +779,7 @@ export async function saveJobToFirestore(
     throw lastErr;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+    return false;
   }
 }
 
@@ -494,8 +812,11 @@ export async function deleteFileFromJobInFirestore(
     const currentJob = snap.data() as Job;
 
     if (options.type === 'task_attachment' && options.taskId) {
+      let deletedUrl: string | undefined;
       const updatedTasks = (currentJob.delegated_tasks || []).map(task => {
         if (task.id === options.taskId) {
+          const targetAtt = (task.attachments || []).find(att => att.id === options.fileId);
+          if (targetAtt?.url) deletedUrl = targetAtt.url;
           return {
             ...task,
             attachments: (task.attachments || []).filter(att => att.id !== options.fileId)
@@ -507,12 +828,30 @@ export async function deleteFileFromJobInFirestore(
       await updateDoc(jobDocRef, {
         delegated_tasks: updatedTasks
       });
+      // Only delete underlying cloud blob if no remaining deliverable/attachment still references the same pointer
+      if (deletedUrl && isCloudFileUrl(deletedUrl)) {
+        const stillReferenced =
+          (currentJob.deliverables || []).some(d => d.fileUrl === deletedUrl) ||
+          updatedTasks.some(t => (t.attachments || []).some(a => a.url === deletedUrl));
+        if (!stillReferenced) {
+          await deleteCloudAttachment(deletedUrl);
+        }
+      }
       console.log(`[Firestore] Deleted attachment ${options.fileId} from task ${options.taskId} in job ${jobId}. Document size reduced.`);
     } else if (options.type === 'deliverable') {
+      const targetDel = (currentJob.deliverables || []).find(del => del.id === options.fileId);
       const updatedDeliverables = (currentJob.deliverables || []).filter(del => del.id !== options.fileId);
       await updateDoc(jobDocRef, {
         deliverables: updatedDeliverables
       });
+      if (targetDel?.fileUrl && isCloudFileUrl(targetDel.fileUrl)) {
+        const stillReferenced =
+          updatedDeliverables.some(d => d.fileUrl === targetDel.fileUrl) ||
+          (currentJob.delegated_tasks || []).some(t => (t.attachments || []).some(a => a.url === targetDel.fileUrl));
+        if (!stillReferenced) {
+          await deleteCloudAttachment(targetDel.fileUrl);
+        }
+      }
       console.log(`[Firestore] Deleted deliverable ${options.fileId} from job ${jobId}. Document size reduced.`);
     }
   } catch (err) {
@@ -1017,43 +1356,28 @@ export async function purgeDummyDataFromFirestore(): Promise<void> {
       console.warn('[Firestore] Notice during dev_time_entries cleanup:', e);
     }
 
-    // 6. Scan discussions to purge testing messages
+    // 6. Scan discussions to purge ONLY explicit legacy dummy seed IDs
+    // CRITICAL: NEVER delete real user-authored messages (msg-<timestamp>-...) based on text heuristics!
     try {
       const chatSnap = await getDocs(collection(db, 'discussions'));
       const batch = writeBatch(db);
       let purgeCount = 0;
+      const legacySeedIds = new Set(['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp']);
       chatSnap.forEach((d) => {
-        const m = d.data() as ChatMessage;
-        const text = (m.text || '').toLowerCase();
-        const hasTestJob = (m.referencedJobNumbers || []).some(j => {
-          const clean = String(j || '').replace(/^#/, '').trim().toUpperCase();
-          return ['M26-195', '195', 'M26-1000', '1000', 'M26-8800', '8800', 'M26-300', '300'].includes(clean);
-        });
-        const isTestMessage = 
-          hasTestJob ||
-          /\bm26-195\b/i.test(text) || 
-          /\bm26-1000\b/i.test(text) || 
-          /\bm26-8800\b/i.test(text) || 
-          /\bm26-300\b/i.test(text) || 
-          text.includes('smiley') ||
-          text.includes('chelsey') ||
-          text.includes('testing dummy') ||
-          text.includes('draw prelim based on customer plan') ||
-          text.includes('make changes per customer notes') ||
-          text.includes('create prelim based on sketch') ||
-          d.id.startsWith('msg-ethan-') || 
-          d.id.startsWith('msg-jm-') || 
-          d.id.startsWith('msg-dr-') || 
-          ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(d.id);
+        const isExplicitLegacySeed =
+          d.id.startsWith('msg-ethan-') ||
+          d.id.startsWith('msg-jm-') ||
+          d.id.startsWith('msg-dr-') ||
+          legacySeedIds.has(d.id);
 
-        if (isTestMessage) {
+        if (isExplicitLegacySeed) {
           batch.delete(doc(db, 'discussions', d.id));
           purgeCount++;
         }
       });
       if (purgeCount > 0) {
         await batch.commit();
-        console.log(`[Firestore] Purged ${purgeCount} test chat messages from discussions.`);
+        console.log(`[Firestore] Purged ${purgeCount} legacy seed chat messages from discussions.`);
       }
     } catch (e) {
       console.warn('[Firestore] Notice during chat purge:', e);

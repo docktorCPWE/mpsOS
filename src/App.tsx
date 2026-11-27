@@ -116,6 +116,8 @@ export default function App() {
   }); // Default: Greg Hyatt (Owner)
   const [notifications, setNotifications] = useState<AppNotification[]>(() => getStoredNotifications());
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [syncingChatMessageIds, setSyncingChatMessageIds] = useState<string[]>([]);
+  const [failedChatMessageIds, setFailedChatMessageIds] = useState<string[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [timeCards, setTimeCards] = useState<TimeCardShift[]>([]);
   const [pausedJobsNotice, setPausedJobsNotice] = useState<{ jobNumbers: string[]; devProjects?: string[]; remoteSignedOut?: boolean; type: 'paused' | 'resumed' | 'clock_out_stopped' } | null>(null);
@@ -169,8 +171,9 @@ export default function App() {
     paused_timer_drafter_name?: string;
     paused_elapsed_seconds?: number;
   }>>({});
-  const pendingJobTaskMutationRef = useRef<Record<string, Record<string, { atMs: number; task: DelegatedWorkItem }>>>({});
-  const pendingChatSendRef = useRef<Record<string, { atMs: number; message: ChatMessage; retryAttempted?: boolean }>>({});
+  const pendingJobTaskMutationRef = useRef<Record<string, Record<string, { atMs: number; task: DelegatedWorkItem; retryAttempted?: boolean }>>>({});
+  const pendingJobCommentMutationRef = useRef<Record<string, Record<string, { atMs: number; comment: JobComment; retryAttempted?: boolean }>>>({});
+  const pendingChatSendRef = useRef<Record<string, { atMs: number; message: ChatMessage; retryCount: number; lastRetryAtMs: number; failed?: boolean }>>({});
   const pendingChatDeleteRef = useRef<Record<string, number>>({});
   const pendingChatHideRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
   const pendingChatReadRef = useRef<Record<string, { atMs: number; staffId: string }>>({});
@@ -198,6 +201,34 @@ export default function App() {
   useEffect(() => {
     jobsRef.current = jobs;
   }, [jobs]);
+
+  // Automatically retry any unsynced chat messages whenever browser connectivity returns
+  useEffect(() => {
+    const handleOnline = () => {
+      const pendingIds = Object.keys(pendingChatSendRef.current);
+      if (pendingIds.length === 0) return;
+      pendingIds.forEach(msgId => {
+        const entry = pendingChatSendRef.current[msgId];
+        if (!entry?.message) return;
+        entry.failed = false;
+        entry.lastRetryAtMs = Date.now();
+        setFailedChatMessageIds(prev => prev.filter(id => id !== msgId));
+        setSyncingChatMessageIds(prev => (prev.includes(msgId) ? prev : [...prev, msgId]));
+        saveChatMessageToFirestore(entry.message)
+          .then(() => {
+            setSyncingChatMessageIds(prev => prev.filter(id => id !== msgId));
+            setFailedChatMessageIds(prev => prev.filter(id => id !== msgId));
+          })
+          .catch(() => {
+            entry.failed = true;
+            setSyncingChatMessageIds(prev => prev.filter(id => id !== msgId));
+            setFailedChatMessageIds(prev => (prev.includes(msgId) ? prev : [...prev, msgId]));
+          });
+      });
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   useEffect(() => {
     devCardsRef.current = devCards;
@@ -459,7 +490,8 @@ export default function App() {
           jobIntentsChanged = true;
         }
 
-        // 2. Protect in-flight delegated task mutations (status / completion / review / revision) for 20s
+        // 2. Protect in-flight delegated task mutations (status / completion / review / revision) for 60s
+        let shouldRetryProtectedJobSave = false;
         const pendingTasksForJob = pendingJobTaskMutationRef.current[job.id];
         if (pendingTasksForJob) {
           const pendingTaskIds = Object.keys(pendingTasksForJob);
@@ -485,14 +517,19 @@ export default function App() {
                 (cloudTask.completionNotes || '') === (expected.completionNotes || '')
               );
 
-              if (cloudMatchesTask || now - entry.atMs > 20000) {
+              if (cloudMatchesTask || now - entry.atMs > 60000) {
                 delete pendingTasksForJob[taskId];
-              } else if (idx >= 0) {
-                existingTasks[idx] = expected;
-                didOverrideTask = true;
               } else {
-                existingTasks.unshift(expected);
+                if (idx >= 0) {
+                  existingTasks[idx] = expected;
+                } else {
+                  existingTasks.unshift(expected);
+                }
                 didOverrideTask = true;
+                if (now - entry.atMs > 4000 && !entry.retryAttempted) {
+                  entry.retryAttempted = true;
+                  shouldRetryProtectedJobSave = true;
+                }
               }
             }
 
@@ -507,6 +544,52 @@ export default function App() {
               };
             }
           }
+        }
+
+        // 3. Protect in-flight job comments & notes so concurrent snapshots NEVER drop newly posted job messages
+        const pendingCommentsForJob = pendingJobCommentMutationRef.current[job.id];
+        if (pendingCommentsForJob) {
+          const pendingCommentIds = Object.keys(pendingCommentsForJob);
+          if (pendingCommentIds.length > 0) {
+            const existingComments = [...(protectedJob.comments || [])];
+            let didMergeComment = false;
+
+            for (const commentId of pendingCommentIds) {
+              const entry = pendingCommentsForJob[commentId];
+              if (!entry) continue;
+              const existsInCloud = existingComments.some(c => c.id === commentId);
+              if (existsInCloud || now - entry.atMs > 60000) {
+                delete pendingCommentsForJob[commentId];
+              } else {
+                existingComments.push(entry.comment);
+                didMergeComment = true;
+                if (now - entry.atMs > 4000 && !entry.retryAttempted) {
+                  entry.retryAttempted = true;
+                  shouldRetryProtectedJobSave = true;
+                }
+              }
+            }
+
+            if (Object.keys(pendingCommentsForJob).length === 0) {
+              delete pendingJobCommentMutationRef.current[job.id];
+            }
+
+            if (didMergeComment) {
+              existingComments.sort(
+                (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+              );
+              protectedJob = {
+                ...protectedJob,
+                comments: existingComments
+              };
+            }
+          }
+        }
+
+        if (shouldRetryProtectedJobSave) {
+          saveJobToFirestore(protectedJob).catch(err =>
+            console.warn('[Firestore] Background retry saving protected job mutation failed:', err)
+          );
         }
 
         return protectedJob;
@@ -715,23 +798,58 @@ export default function App() {
         }
       }
 
-      // Protect newly sent in-flight messages so concurrent snapshots NEVER make them disappear
+      // Protect newly sent in-flight messages so concurrent snapshots NEVER make them disappear.
+      // NEVER silently drop an unconfirmed message after a timeout — keep it visible and retry with backoff.
+      const confirmedSendIds: string[] = [];
+      const newlyFailedSendIds: string[] = [];
+      const retryDelaysMs = [3000, 8000, 18000, 30000];
+
       for (const sendId of Object.keys(pendingChatSendRef.current)) {
         const entry = pendingChatSendRef.current[sendId];
         if (!entry) continue;
         if (cloudById.has(sendId)) {
           delete pendingChatSendRef.current[sendId];
-        } else if (now - entry.atMs < 45000) {
-          cloudById.set(sendId, entry.message);
-          if (now - entry.atMs > 3000 && !entry.retryAttempted) {
-            entry.retryAttempted = true;
-            saveChatMessageToFirestore(entry.message).catch(err =>
-              console.warn('[Firestore] Retry saving chat message failed:', err)
-            );
-          }
+          confirmedSendIds.push(sendId);
         } else {
-          delete pendingChatSendRef.current[sendId];
+          // Always preserve unconfirmed sent message in the UI until Firestore confirms it
+          cloudById.set(sendId, entry.message);
+          const nextDelay = retryDelaysMs[Math.min(entry.retryCount, retryDelaysMs.length - 1)];
+          if (entry.retryCount < retryDelaysMs.length && now - entry.lastRetryAtMs >= nextDelay) {
+            entry.retryCount += 1;
+            entry.lastRetryAtMs = now;
+            saveChatMessageToFirestore(entry.message)
+              .then(() => {
+                setSyncingChatMessageIds(prev => prev.filter(id => id !== sendId));
+                setFailedChatMessageIds(prev => prev.filter(id => id !== sendId));
+              })
+              .catch(err => {
+                console.warn('[Firestore] Retry saving chat message failed:', err);
+                if (entry.retryCount >= retryDelaysMs.length) {
+                  entry.failed = true;
+                  setSyncingChatMessageIds(prev => prev.filter(id => id !== sendId));
+                  setFailedChatMessageIds(prev => (prev.includes(sendId) ? prev : [...prev, sendId]));
+                }
+              });
+          } else if (entry.retryCount >= retryDelaysMs.length && now - entry.lastRetryAtMs >= 15000 && !entry.failed) {
+            entry.failed = true;
+            newlyFailedSendIds.push(sendId);
+          }
         }
+      }
+
+      if (confirmedSendIds.length > 0) {
+        const confirmedSet = new Set(confirmedSendIds);
+        setSyncingChatMessageIds(prev => prev.filter(id => !confirmedSet.has(id)));
+        setFailedChatMessageIds(prev => prev.filter(id => !confirmedSet.has(id)));
+      }
+      if (newlyFailedSendIds.length > 0) {
+        const failedSet = new Set(newlyFailedSendIds);
+        setSyncingChatMessageIds(prev => prev.filter(id => !failedSet.has(id)));
+        setFailedChatMessageIds(prev => {
+          const next = new Set(prev);
+          newlyFailedSendIds.forEach(id => next.add(id));
+          return Array.from(next);
+        });
       }
 
       const reconciled = Array.from(cloudById.values()).sort(
@@ -1124,7 +1242,7 @@ export default function App() {
     newJobsOrUpdater: Job[] | ((prev: Job[]) => Job[]),
     specificJobId?: string | string[],
     options?: { allowTimerClear?: boolean }
-  ) => {
+  ): Promise<boolean> => {
     const prevJobs = jobsRef.current;
     const nextJobs = typeof newJobsOrUpdater === 'function'
       ? newJobsOrUpdater(prevJobs)
@@ -1145,11 +1263,16 @@ export default function App() {
           return JSON.stringify(newJob) !== JSON.stringify(oldJob);
         });
 
-    jobsToSync.forEach(job => {
-      saveJobToFirestore(job, options).catch(err => {
-        console.warn('[Firestore] Sync warning for job:', job.job_number, err);
-      });
-    });
+    const syncPromise: Promise<boolean> = jobsToSync.length === 0
+      ? Promise.resolve(true)
+      : Promise.all(
+          jobsToSync.map(job =>
+            saveJobToFirestore(job, options).catch(err => {
+              console.warn('[Firestore] Sync warning for job:', job.job_number, err);
+              return false;
+            })
+          )
+        ).then(results => results.every(Boolean));
 
     // Safely update detail and modal references with the fresh computed list
     setSelectedJobForDetail(prev => {
@@ -1173,6 +1296,8 @@ export default function App() {
       const match = nextJobs.find(j => j.id === prev.job.id);
       return match ? { ...prev, job: match } : null;
     });
+
+    return syncPromise;
   };
 
   // Record an in-flight delegated task mutation so out-of-order Firestore snapshots cannot revert it
@@ -1186,8 +1311,19 @@ export default function App() {
     };
   };
 
+  // Record an in-flight job comment/note so out-of-order Firestore snapshots cannot overwrite it
+  const recordPendingCommentMutation = (jobId: string, comment: JobComment) => {
+    if (!pendingJobCommentMutationRef.current[jobId]) {
+      pendingJobCommentMutationRef.current[jobId] = {};
+    }
+    pendingJobCommentMutationRef.current[jobId][comment.id] = {
+      atMs: Date.now(),
+      comment
+    };
+  };
+
   // Safe direct job update handler (used by JobDetailModal & AdminBillingDashboard) that registers
-  // in-flight task/timer mutation guards automatically before syncing to Firestore
+  // in-flight task/comment/timer mutation guards automatically before syncing to Firestore
   const handleDirectJobUpdate = (updatedJob: Job) => {
     const prevJob = jobsRef.current.find(j => j.id === updatedJob.id);
     let safeJob = updatedJob;
@@ -1207,6 +1343,14 @@ export default function App() {
           (oldTask.completionNotes || '') !== (nextTask.completionNotes || '')
         ) {
           recordPendingTaskMutation(safeJob.id, nextTask);
+        }
+      }
+
+      // Guard any newly added job comments/notes against stale snapshots
+      const prevCommentIds = new Set((prevJob.comments || []).map(c => c.id));
+      for (const nextComment of safeJob.comments || []) {
+        if (!prevCommentIds.has(nextComment.id)) {
+          recordPendingCommentMutation(safeJob.id, nextComment);
         }
       }
 
@@ -2908,10 +3052,14 @@ export default function App() {
     };
 
     // Guard against snapshot race conditions until Firestore confirms the write
+    const sendNow = Date.now();
     pendingChatSendRef.current[newMsg.id] = {
-      atMs: Date.now(),
-      message: newMsg
+      atMs: sendNow,
+      message: newMsg,
+      retryCount: 0,
+      lastRetryAtMs: sendNow
     };
+    setSyncingChatMessageIds(prev => (prev.includes(newMsg.id) ? prev : [...prev, newMsg.id]));
 
     setChatMessages(prev => {
       if (prev.some(m => m.id === newMsg.id)) return prev;
@@ -2919,7 +3067,20 @@ export default function App() {
       saveStoredChatMessages(updated);
       return updated;
     });
-    saveChatMessageToFirestore(newMsg).catch(err => console.warn('[Firestore] Error saving chat message:', err));
+    saveChatMessageToFirestore(newMsg)
+      .then(() => {
+        setSyncingChatMessageIds(prev => prev.filter(id => id !== newMsg.id));
+        setFailedChatMessageIds(prev => prev.filter(id => id !== newMsg.id));
+      })
+      .catch(err => {
+        console.warn('[Firestore] Error saving chat message:', err);
+        const pendingEntry = pendingChatSendRef.current[newMsg.id];
+        if (pendingEntry) {
+          pendingEntry.failed = true;
+        }
+        setSyncingChatMessageIds(prev => prev.filter(id => id !== newMsg.id));
+        setFailedChatMessageIds(prev => (prev.includes(newMsg.id) ? prev : [...prev, newMsg.id]));
+      });
 
     // Cross-post job-referenced Studio Chat messages into each referenced job's "Messages & Notes"
     if (finalReferencedJobNumbers.length > 0 && liveJobs.length > 0) {
@@ -2942,6 +3103,8 @@ export default function App() {
           ...(mentions && mentions.length > 0 ? { taggedStaff: mentions } : {}),
           isJobNote: true
         };
+
+        matchedJobIds.forEach(jid => recordPendingCommentMutation(jid, syncedComment));
 
         updateJobsState(
           prevJobs =>
@@ -3032,12 +3195,47 @@ export default function App() {
     );
   };
 
+  const handleRetrySendChatMessage = (messageId: string) => {
+    const pendingEntry = pendingChatSendRef.current[messageId];
+    const targetMsg = pendingEntry?.message || chatMessages.find(m => m.id === messageId);
+    if (!targetMsg) return;
+
+    const now = Date.now();
+    pendingChatSendRef.current[messageId] = {
+      atMs: pendingEntry?.atMs || now,
+      message: targetMsg,
+      retryCount: 0,
+      lastRetryAtMs: now,
+      failed: false
+    };
+
+    setFailedChatMessageIds(prev => prev.filter(id => id !== messageId));
+    setSyncingChatMessageIds(prev => (prev.includes(messageId) ? prev : [...prev, messageId]));
+
+    saveChatMessageToFirestore(targetMsg)
+      .then(() => {
+        setSyncingChatMessageIds(prev => prev.filter(id => id !== messageId));
+        setFailedChatMessageIds(prev => prev.filter(id => id !== messageId));
+      })
+      .catch(err => {
+        console.warn('[Firestore] Manual retry saving chat message failed:', err);
+        const entry = pendingChatSendRef.current[messageId];
+        if (entry) entry.failed = true;
+        setSyncingChatMessageIds(prev => prev.filter(id => id !== messageId));
+        setFailedChatMessageIds(prev => (prev.includes(messageId) ? prev : [...prev, messageId]));
+      });
+  };
+
   const handleDeleteChatMessage = (messageId: string) => {
     const targetMsg = chatMessages.find(m => m.id === messageId);
+    // Check the real authenticated staff member (not an impersonated switched-account view)
+    // so switching into a teammate's account can never permanently delete their messages for everyone.
+    const actualActor = authenticatedStaff || currentStaff;
     const isOriginalSender = Boolean(
       targetMsg &&
-      (targetMsg.senderId === currentStaff.id ||
-        (targetMsg.senderName || '').trim().toLowerCase() === (currentStaff.name || '').trim().toLowerCase())
+      actualActor &&
+      (targetMsg.senderId === actualActor.id ||
+        (targetMsg.senderName || '').trim().toLowerCase() === (actualActor.name || '').trim().toLowerCase())
     );
 
     // Only the original sender can permanently delete their own message;
@@ -3049,6 +3247,8 @@ export default function App() {
 
     pendingChatDeleteRef.current[messageId] = Date.now();
     delete pendingChatSendRef.current[messageId];
+    setSyncingChatMessageIds(prev => prev.filter(id => id !== messageId));
+    setFailedChatMessageIds(prev => prev.filter(id => id !== messageId));
     setChatMessages(prev => {
       const updated = prev.filter(m => m.id !== messageId);
       saveStoredChatMessages(updated);
@@ -3223,24 +3423,27 @@ export default function App() {
 
   // 3. Add Comment / Pinned Markup Feedback
   const handleAddComment = (jobId: string, text: string, pinnedLocation?: PinnedLocation) => {
+    const nowIso = new Date().toISOString();
     updateJobsState(
       prevJobs =>
         prevJobs.map(j => {
           if (j.id === jobId) {
             const authorName = userRole === 'drafter' ? currentStaff.name : j.customer_name;
-            const newComment = {
-              id: `c-${Date.now()}`,
+            const newComment: JobComment = {
+              id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               author: authorName,
+              authorId: userRole === 'drafter' ? currentStaff.id : undefined,
               role: userRole,
               text,
-              timestamp: new Date().toISOString(),
+              timestamp: nowIso,
               pinnedLocation
             };
+            recordPendingCommentMutation(j.id, newComment);
 
             return {
               ...j,
-              comments: [...j.comments, newComment],
-              last_customer_contact: new Date().toISOString()
+              comments: [...(j.comments || []), newComment],
+              last_customer_contact: nowIso
             };
           }
           return j;
@@ -3264,6 +3467,7 @@ export default function App() {
               timestamp: customTimestamp || new Date().toISOString(),
               isJobNote: true
             };
+            recordPendingCommentMutation(j.id, newNote);
 
             return {
               ...j,
@@ -3645,7 +3849,7 @@ export default function App() {
   };
 
   // 9. Handle Comprehensive Task Completion Submission (Modal with Notes, Files, Time Log, and Notification)
-  const handleCompleteTask = (payload: CompleteTaskPayload) => {
+  const handleCompleteTask = async (payload: CompleteTaskPayload): Promise<boolean> => {
     // Resilient job discovery from live jobsRef (never stale React closure!)
     const currentJobs = jobsRef.current;
     const targetJob = currentJobs.find(j =>
@@ -3656,7 +3860,7 @@ export default function App() {
 
     if (!targetJob) {
       console.warn('handleCompleteTask: Target job not found for payload', payload);
-      return;
+      return false;
     }
 
     const targetJobId = targetJob.id;
@@ -3672,7 +3876,7 @@ export default function App() {
       )
     );
 
-    updateJobsState(prevJobs =>
+    const saved = await updateJobsState(prevJobs =>
       prevJobs.map(j => {
         if (j.id === targetJobId && j.delegated_tasks) {
           const targetTask = j.delegated_tasks.find(t => String(t.id).trim() === String(payload.taskId).trim());
@@ -3798,13 +4002,15 @@ export default function App() {
           }
 
           // Add a detailed comment in the project stream for the team
-          const completionComment = {
-            id: `c-task-comp-${Date.now()}`,
+          const completionComment: JobComment = {
+            id: `c-task-comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             author: currentStaff.name,
+            authorId: currentStaff.id,
             role: 'drafter' as const,
             text: `✅ TASK COMPLETED & SUBMITTED FOR REVIEW to ${payload.delegatorName} (CC: Jason):\n"${targetTaskTitle}"\n\nReview Notes:\n${payload.resolutionNotes}${payload.reviewFiles.length > 0 ? `\n\n📁 Attached ${payload.reviewFiles.length} file(s): ${payload.reviewFiles.map(f => f.name).join(', ')}` : ''}`,
             timestamp: nowIso
           };
+          recordPendingCommentMutation(j.id, completionComment);
 
           return {
             ...j,
@@ -3886,11 +4092,17 @@ export default function App() {
       newNotifs.push(ccJasonNotif);
     }
 
+    if (!saved) {
+      console.warn('handleCompleteTask: Cloud save did not confirm for job', targetJob.job_number);
+      return false;
+    }
+
     if (newNotifs.length > 0) {
       updateNotificationsState(prev => [...newNotifs, ...prev]);
     }
 
     setTaskToComplete(null);
+    return true;
   };
 
   // 10. Handle Approving / Signing Off on a Reviewed Delegated Task
@@ -4834,6 +5046,9 @@ export default function App() {
         onDeleteMultipleMessages={handleDeleteMultipleChatMessages}
         onSelectJob={(job) => setSelectedJobForDetail(job)}
         onMarkAsRead={handleMarkChatRead}
+        syncingMessageIds={syncingChatMessageIds}
+        failedMessageIds={failedChatMessageIds}
+        onRetrySendMessage={handleRetrySendChatMessage}
       />
 
       {/* MODAL 8: Staff & Permissions Management Modal */}

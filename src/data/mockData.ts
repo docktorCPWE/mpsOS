@@ -608,10 +608,8 @@ export function isTestDeliverable(del: any): boolean {
     title.includes('full layout 3') ||
     title.includes('m26-279 oct 13 prelim') ||
     title.includes('m26 240 sept 11 prelim') ||
-    title.includes('cleanshot') ||
-    fileName.includes('cleanshot') ||
     fileName.includes('sept 11 layout') ||
-    title.includes('testing') ||
+    title.includes('testing dummy') ||
     title.includes('smiley')
   ) {
     return true;
@@ -1683,33 +1681,21 @@ export function getStoredChatMessages(): ChatMessage[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
+      const legacySeedIds = new Set(['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp']);
       const cleaned = parsed
         .filter((m: ChatMessage) => {
-          const text = (m.text || '').toLowerCase();
-          const hasTestJob = (m.referencedJobNumbers || []).some(j => {
-            const clean = String(j || '').replace(/^#/, '').trim().toUpperCase();
-            return ['M26-195', '195', 'M26-1000', '1000', 'M26-8800', '8800', 'M26-300', '300'].includes(clean);
-          });
-          const isTestText = 
-            /\bm26-195\b/i.test(text) || 
-            /\bm26-1000\b/i.test(text) || 
-            /\bm26-8800\b/i.test(text) || 
-            /\bm26-300\b/i.test(text) || 
-            text.includes('smiley') ||
-            text.includes('chelsey') ||
-            text.includes('testing dummy') ||
-            text.includes('draw prelim based on customer plan') ||
-            text.includes('make changes per customer notes') ||
-            text.includes('create prelim based on sketch');
-          const isDummyId = m.id.startsWith('msg-ethan-') || 
-                            m.id.startsWith('msg-jm-') || 
-                            m.id.startsWith('msg-dr-') || 
-                            ['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-greg-resp'].includes(m.id);
-          return !hasTestJob && !isTestText && !isDummyId;
+          if (!m || !m.id) return false;
+          const isDummyId =
+            m.id.startsWith('msg-ethan-') ||
+            m.id.startsWith('msg-jm-') ||
+            m.id.startsWith('msg-dr-') ||
+            legacySeedIds.has(m.id);
+          return !isDummyId;
         })
         .map((m: ChatMessage) => ({
           ...m,
-          readByStaffIds: Array.isArray(m.readByStaffIds) ? m.readByStaffIds : []
+          readByStaffIds: Array.isArray(m.readByStaffIds) ? m.readByStaffIds : [],
+          hiddenByStaffIds: Array.isArray(m.hiddenByStaffIds) ? m.hiddenByStaffIds : []
         }));
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(cleaned));
       return cleaned;

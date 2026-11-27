@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Download, ExternalLink, Trash2, ZoomIn, ZoomOut, RotateCw, FileText, Maximize2 } from 'lucide-react';
+import { X, Download, ExternalLink, Trash2, ZoomIn, ZoomOut, RotateCw, FileText, Loader2 } from 'lucide-react';
 import { PdfCanvasViewer } from './PdfCanvasViewer';
-import { downloadFileFromUrl, openFileInNewTab } from '../utils/attachmentUtils';
+import { downloadFileFromUrl, openFileInNewTab, isCloudFileUrl, resolveAttachmentUrl } from '../utils/attachmentUtils';
 
 export interface ViewableFile {
   id: string;
@@ -32,11 +32,45 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
 }) => {
   const [imageScale, setImageScale] = useState<number>(1.0);
   const [imageRotation, setImageRotation] = useState<number>(0);
+  const [resolvedUrl, setResolvedUrl] = useState<string>(file?.url || '');
+  const [isLoadingCloudFile, setIsLoadingCloudFile] = useState<boolean>(false);
 
-  // Reset controls when file changes
+  // Reset controls & resolve cloud-stored attachment chunks when file changes
   useEffect(() => {
     setImageScale(1.0);
     setImageRotation(0);
+
+    const rawUrl = file?.url || '';
+    if (!rawUrl) {
+      setResolvedUrl('');
+      setIsLoadingCloudFile(false);
+      return;
+    }
+
+    if (isCloudFileUrl(rawUrl)) {
+      let cancelled = false;
+      setIsLoadingCloudFile(true);
+      setResolvedUrl('');
+      resolveAttachmentUrl(rawUrl)
+        .then((dataUrl) => {
+          if (!cancelled) {
+            setResolvedUrl(dataUrl);
+            setIsLoadingCloudFile(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResolvedUrl('');
+            setIsLoadingCloudFile(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setResolvedUrl(rawUrl);
+    setIsLoadingCloudFile(false);
   }, [file?.id, file?.url]);
 
   // Handle ESC key to close
@@ -53,7 +87,7 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
   if (!file) return null;
 
   const fileName = file.name || file.title || 'Attached File';
-  const fileUrl = file.url || '';
+  const fileUrl = resolvedUrl || '';
   const lowerName = fileName.toLowerCase();
   
   const isImage = Boolean(fileUrl.startsWith('data:image')) || 
@@ -73,11 +107,11 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
   const isDoc = !isImage && !isPdf && !isCad && lowerName.match(/\.(doc|docx|odt|rtf|txt)$/) !== null;
 
   const handleDownload = () => {
-    downloadFileFromUrl(fileUrl, fileName);
+    downloadFileFromUrl(fileUrl || file.url || '', fileName);
   };
 
   const handleOpenInNewTab = () => {
-    openFileInNewTab(fileUrl, fileName);
+    openFileInNewTab(fileUrl || file.url || '', fileName);
   };
 
   return (
@@ -115,7 +149,8 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
             <button
               type="button"
               onClick={handleOpenInNewTab}
-              className="hidden sm:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
+              disabled={isLoadingCloudFile}
+              className="hidden sm:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
               title="Open file in a native browser window"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -124,7 +159,8 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
             <button
               type="button"
               onClick={handleDownload}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer active:scale-95"
+              disabled={isLoadingCloudFile}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer active:scale-95"
               title="Download original file"
             >
               <Download className="w-3.5 h-3.5" />
@@ -143,8 +179,14 @@ export const UniversalFileViewerModal: React.FC<UniversalFileViewerModalProps> =
 
         {/* Modal Main Content Area */}
         <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950">
-          {/* PDF Viewer */}
-          {isPdf && fileUrl ? (
+          {isLoadingCloudFile ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
+              <Loader2 className="w-10 h-10 text-blue-400 animate-spin mb-3" />
+              <p className="text-sm font-bold text-white">Loading attached file from cloud...</p>
+              <p className="text-xs text-slate-400 mt-1">{fileName}</p>
+            </div>
+          ) : /* PDF Viewer */
+          isPdf && fileUrl ? (
             <div className="w-full h-full">
               <PdfCanvasViewer url={fileUrl} filename={fileName} />
             </div>

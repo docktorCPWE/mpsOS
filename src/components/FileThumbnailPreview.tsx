@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-expect-error Vite asset URL import
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { Maximize2, FileText, Loader2, Image as ImageIcon, Compass } from 'lucide-react';
+import { Maximize2, FileText, Loader2, Compass } from 'lucide-react';
+import { isCloudFileUrl, resolveAttachmentUrl } from '../utils/attachmentUtils';
 
 if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -31,16 +32,41 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [resolvedUrl, setResolvedUrl] = useState<string>(url && !isCloudFileUrl(url) ? url : '');
   const [loading, setLoading] = useState<boolean>(false);
   const [hasRenderedPdf, setHasRenderedPdf] = useState<boolean>(false);
   const [pdfPageCount, setPdfPageCount] = useState<number>(0);
   const [imageError, setImageError] = useState<boolean>(false);
 
+  useEffect(() => {
+    setImageError(false);
+    if (!url) {
+      setResolvedUrl('');
+      return;
+    }
+    if (!isCloudFileUrl(url)) {
+      setResolvedUrl(url);
+      return;
+    }
+    let cancelled = false;
+    resolveAttachmentUrl(url)
+      .then((dataUrl) => {
+        if (!cancelled) setResolvedUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  const effectiveUrl = resolvedUrl;
   const cleanName = (filename || title || '').toLowerCase();
 
   // 1. Prioritize image formats first (data:image URL, image extensions, or render previewType)
   const isImage =
-    Boolean(url?.startsWith('data:image/')) ||
+    Boolean(effectiveUrl?.startsWith('data:image/')) ||
     /\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i.test(cleanName) ||
     previewType === 'render_image' ||
     category === '3D Render';
@@ -48,8 +74,8 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
   // 2. Only treat as PDF if it is NOT an image
   const isPdf =
     !isImage &&
-    (Boolean(url?.startsWith('data:application/pdf')) ||
-      Boolean(url?.includes('application/pdf')) ||
+    (Boolean(effectiveUrl?.startsWith('data:application/pdf')) ||
+      Boolean(effectiveUrl?.includes('application/pdf')) ||
       cleanName.endsWith('.pdf') ||
       previewType === 'pdf_spec');
 
@@ -62,7 +88,7 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
 
   // Render PDF Page 1 on canvas
   useEffect(() => {
-    if (!isPdf || !url) {
+    if (!isPdf || !effectiveUrl) {
       setHasRenderedPdf(false);
       return;
     }
@@ -76,8 +102,8 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
       try {
         let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
 
-        if (url.startsWith('data:')) {
-          const parts = url.split(',');
+        if (effectiveUrl.startsWith('data:')) {
+          const parts = effectiveUrl.split(',');
           if (parts.length >= 2) {
             let base64 = parts[1];
             while (base64.length % 4 !== 0) {
@@ -93,7 +119,7 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
             throw new Error('Invalid data URL');
           }
         } else {
-          loadingTask = pdfjsLib.getDocument({ url });
+          loadingTask = pdfjsLib.getDocument({ url: effectiveUrl });
         }
 
         pdfDoc = await loadingTask.promise;
@@ -160,7 +186,7 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
         }
       }
     };
-  }, [url, isPdf]);
+  }, [effectiveUrl, isPdf]);
 
   return (
     <div
@@ -222,10 +248,10 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
       )}
 
       {/* CASE 2: Image File */}
-      {isImage && url && !imageError && (
+      {isImage && effectiveUrl && !imageError && (
         <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-slate-950">
           <img
-            src={url}
+            src={effectiveUrl}
             alt={title || filename || 'Deliverable Image'}
             onError={() => setImageError(true)}
             className="w-full h-full object-contain transition duration-300 group-hover:scale-105"
@@ -239,7 +265,7 @@ export const FileThumbnailPreview: React.FC<FileThumbnailPreviewProps> = ({
       )}
 
       {/* CASE 3: CAD / DWG / Fallback */}
-      {(!isPdf && (!isImage || imageError || !url)) && (
+      {(!isPdf && (!isImage || imageError || !effectiveUrl)) && (
         <div className="relative w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-2 bg-gradient-to-br from-slate-900 to-slate-950">
           <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 flex items-center justify-center shadow-inner">
             {isCad ? <Compass className="w-6 h-6" /> : <FileText className="w-6 h-6" />}

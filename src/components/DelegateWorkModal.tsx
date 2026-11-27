@@ -172,7 +172,10 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
     try {
       const processed = await Promise.all(
         fileList.map(async (file, index) => {
-          const res = await processFileForAttachment(file);
+          const res = await processFileForAttachment(file, {
+            jobId: job.id,
+            uploadedBy: currentStaff.name
+          });
           return {
             id: `att-upload-${Date.now()}-${index}`,
             name: res.name,
@@ -188,6 +191,7 @@ export const DelegateWorkModal: React.FC<DelegateWorkModalProps> = ({
       console.warn('Error processing attachments:', err);
     } finally {
       setIsUploading(false);
+      e.target.value = '';
     }
   };
 

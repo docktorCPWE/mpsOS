@@ -1,11 +1,30 @@
 /**
- * Utility functions for safely handling, compressing, viewing, and downloading
+ * Utility functions for safely handling, compressing, uploading, viewing, and downloading
  * file attachments and project deliverables across all browsers and iframes.
  */
+import {
+  uploadAttachmentToFirestoreCloud,
+  fetchCloudAttachmentDataUrl,
+  isCloudFileUrl
+} from '../services/firebase';
+
+export { isCloudFileUrl };
+
+/**
+ * Resolves any attachment URL (including `mps-cloud-file://<id>` cloud pointers) into a usable
+ * data:/http:/blob: URL for rendering, downloading, or opening in a new tab.
+ */
+export async function resolveAttachmentUrl(url: string): Promise<string> {
+  if (!url) return '';
+  if (isCloudFileUrl(url)) {
+    return fetchCloudAttachmentDataUrl(url);
+  }
+  return url;
+}
 
 /**
  * Compresses an image file in the browser using HTML5 Canvas.
- * Reduces 2MB-10MB photos and CAD renders to crisp 30KB-70KB JPEGs.
+ * Reduces 2MB-10MB photos and CAD renders to crisp JPEGs.
  */
 export async function compressImageFile(file: File, maxDimension = 1200, quality = 0.75): Promise<string> {
   return new Promise((resolve) => {
@@ -50,51 +69,75 @@ export async function compressImageFile(file: File, maxDimension = 1200, quality
   });
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve((e.target?.result as string) || '');
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
- * Prepares an uploaded file for safe persistence.
- * For images: applies high-definition client-side canvas scaling (max 1600px @ 82% quality)
- * which ensures crisp, razor-sharp architectural rendering while keeping file size under 120KB,
- * fitting comfortably within Firestore's 1MB document limit so images persist and sync across all users.
- * For documents/PDFs: preserves exact raw bytes.
+ * Prepares an uploaded file for reliable cloud persistence without ever bloating `jobs/{jobId}`:
+ * - Images: compressed to crisp JPEG; if > 45 KB, uploaded to chunked cloud attachment storage.
+ * - PDFs, CAD/DWGs, documents (up to 15 MB): uploaded directly to chunked `job_attachments`
+ *   so the parent job document only stores a tiny `mps-cloud-file://<id>` pointer (~45 bytes).
  */
-export async function processFileForAttachment(file: File): Promise<{
+export async function processFileForAttachment(
+  file: File,
+  options?: { jobId?: string; uploadedBy?: string }
+): Promise<{
   url: string;
   name: string;
   size: string;
   type: string;
 }> {
   const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(file.name);
+  const formattedSize = file.size < 1024 * 1024
+    ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+    : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
   if (isImage) {
     try {
-      const compressedUrl = await compressImageFile(file, 1600, 0.82);
+      const compressedUrl = await compressImageFile(file, 1600, 0.80);
       if (compressedUrl && compressedUrl.startsWith('data:image')) {
         const approxBytes = Math.round((compressedUrl.length * 3) / 4);
         const compFormattedSize = approxBytes < 1024 * 1024
           ? `${Math.max(1, Math.round(approxBytes / 1024))} KB`
           : `${(approxBytes / (1024 * 1024)).toFixed(1)} MB`;
 
+        // Offload larger images to cloud attachment storage so job docs stay tiny
+        let finalUrl = compressedUrl;
+        if (compressedUrl.length > 45_000) {
+          const cloudPointer = await uploadAttachmentToFirestoreCloud(compressedUrl, {
+            name: file.name,
+            mimeType: 'image/jpeg',
+            sizeBytes: approxBytes,
+            jobId: options?.jobId,
+            uploadedBy: options?.uploadedBy
+          });
+          if (cloudPointer) {
+            finalUrl = cloudPointer;
+          }
+        }
+
         return {
-          url: compressedUrl,
+          url: finalUrl,
           name: file.name,
           size: compFormattedSize,
           type: 'image/jpeg'
         };
       }
     } catch (err) {
-      console.warn('Canvas image compression failed, falling back to FileReader:', err);
+      console.warn('Canvas image compression failed, falling back to cloud upload:', err);
     }
   }
 
-  // Non-image files (PDFs, CAD DWG, DOCX, TXT, etc.) or image fallback
-  const formattedSize = file.size < 1024 * 1024
-    ? `${Math.max(1, Math.round(file.size / 1024))} KB`
-    : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-
-  // Firestore has a hard 1 MiB (1,048,576 byte) limit per job document, and base64 adds +33% overhead.
-  // Never inline multi-MB PDFs/DWGs into base64 strings or the entire job save (including task completion) will fail.
-  const MAX_INLINE_BINARY_BYTES = 400 * 1024; // 400 KB raw (~533 KB base64)
-  if (file.size > MAX_INLINE_BINARY_BYTES) {
+  // Non-image files (PDFs, CAD DWG, DOCX, TXT, etc.) or image fallback — up to 15 MB
+  const MAX_CLOUD_FILE_BYTES = 15 * 1024 * 1024;
+  if (file.size > MAX_CLOUD_FILE_BYTES) {
+    console.warn(`File "${file.name}" (${formattedSize}) exceeds 15 MB cloud limit; saving metadata only.`);
     return {
       url: '',
       name: file.name,
@@ -103,27 +146,43 @@ export async function processFileForAttachment(file: File): Promise<{
     };
   }
 
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const rawDataUrl = (e.target?.result as string) || '';
-      resolve({
-        url: rawDataUrl,
-        name: file.name,
-        size: formattedSize,
-        type: file.type || 'application/octet-stream'
-      });
+  const rawDataUrl = await readFileAsDataUrl(file);
+  if (!rawDataUrl) {
+    return {
+      url: '',
+      name: file.name,
+      size: formattedSize,
+      type: file.type || 'application/octet-stream'
     };
-    reader.onerror = () => {
-      resolve({
-        url: '',
-        name: file.name,
-        size: formattedSize,
-        type: file.type || 'application/octet-stream'
-      });
-    };
-    reader.readAsDataURL(file);
+  }
+
+  // Always offload PDFs / CAD / binary files to `job_attachments` so `jobs/{jobId}` NEVER hits 1 MiB
+  const cloudPointer = await uploadAttachmentToFirestoreCloud(rawDataUrl, {
+    name: file.name,
+    mimeType: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+    sizeBytes: file.size,
+    jobId: options?.jobId,
+    uploadedBy: options?.uploadedBy
   });
+
+  if (cloudPointer) {
+    return {
+      url: cloudPointer,
+      name: file.name,
+      size: formattedSize,
+      type: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream')
+    };
+  }
+
+  // Fallback only for very small files (< 80 KB) if cloud upload was momentarily unreachable;
+  // larger files omit inline data so task completion ALWAYS succeeds instead of failing a 1 MiB write!
+  const safeInlineFallback = rawDataUrl.length <= 110_000 ? rawDataUrl : '';
+  return {
+    url: safeInlineFallback,
+    name: file.name,
+    size: formattedSize,
+    type: file.type || 'application/octet-stream'
+  };
 }
 
 /**
@@ -175,44 +234,20 @@ export function createBlobUrlFromDataUrl(dataUrl: string): { blobUrl: string; re
   }
 }
 
-/**
- * Reliably downloads a file from any URL (data:, blob:, http:) across all browsers
- * and iframe environments without triggering security blocks.
- */
-export function downloadFileFromUrl(url: string, filename: string): void {
-  if (!url) {
-    console.warn('No URL provided for download');
+function triggerResolvedDownload(resolvedUrl: string, safeName: string): void {
+  if (!resolvedUrl) {
+    console.warn('No resolved URL available for download');
     return;
   }
 
-  const safeName = filename || 'downloaded-file';
-
   // 1. Data URL: convert to Blob URL first so browser download manager treats it cleanly
-  if (url.startsWith('data:')) {
+  if (resolvedUrl.startsWith('data:')) {
     try {
-      const parts = url.split(',');
-      if (parts.length >= 2) {
-        const meta = parts[0];
-        let base64 = parts[1];
-        const mimeMatch = meta.match(/:(.*?);/);
-        const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-
-        while (base64.length % 4 !== 0) {
-          base64 += '=';
-        }
-
-        const byteCharacters = atob(base64);
-        const byteNumbers = new Uint8Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-
-        const blob = new Blob([byteNumbers], { type: mimeType });
-        const blobUrl = URL.createObjectURL(blob);
-
+      const blobRes = createBlobUrlFromDataUrl(resolvedUrl);
+      if (blobRes) {
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = blobUrl;
+        a.href = blobRes.blobUrl;
         a.download = safeName;
         document.body.appendChild(a);
         a.click();
@@ -220,7 +255,7 @@ export function downloadFileFromUrl(url: string, filename: string): void {
         setTimeout(() => {
           try {
             document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
+            blobRes.revoke();
           } catch {
             // ignore
           }
@@ -233,8 +268,8 @@ export function downloadFileFromUrl(url: string, filename: string): void {
   }
 
   // 2. Local relative URLs or HTTP URLs: fetch blob first to ensure correct download filename
-  if (url.startsWith('/') || url.startsWith('http://') || url.startsWith('https://')) {
-    fetch(url)
+  if (resolvedUrl.startsWith('/') || resolvedUrl.startsWith('http://') || resolvedUrl.startsWith('https://')) {
+    fetch(resolvedUrl)
       .then(res => res.blob())
       .then(blob => {
         const blobUrl = URL.createObjectURL(blob);
@@ -254,10 +289,9 @@ export function downloadFileFromUrl(url: string, filename: string): void {
         }, 1500);
       })
       .catch(() => {
-        // Fallback to direct anchor navigation
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = url;
+        a.href = resolvedUrl;
         a.download = safeName;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
@@ -278,7 +312,7 @@ export function downloadFileFromUrl(url: string, filename: string): void {
   try {
     const a = document.createElement('a');
     a.style.display = 'none';
-    a.href = url;
+    a.href = resolvedUrl;
     a.download = safeName;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
@@ -297,21 +331,82 @@ export function downloadFileFromUrl(url: string, filename: string): void {
 }
 
 /**
- * Reliably opens a file in a new browser tab.
- * For data URLs, converts to a Blob URL first because modern browsers disallow navigating top frame to data: URLs.
+ * Reliably downloads a file from any URL (mps-cloud-file://, data:, blob:, http:) across all browsers
+ * and iframe environments without triggering security blocks.
  */
-export function openFileInNewTab(url: string, filename?: string): void {
-  if (!url) return;
-
-  if (url.startsWith('data:')) {
-    const blobRes = createBlobUrlFromDataUrl(url);
-    if (blobRes) {
-      window.open(blobRes.blobUrl, '_blank', 'noopener,noreferrer');
-      // Keep blob alive for a few minutes so the new tab can finish rendering
-      setTimeout(() => blobRes.revoke(), 180000);
-      return;
-    }
+export function downloadFileFromUrl(url: string, filename: string): void {
+  if (!url) {
+    console.warn('No URL provided for download');
+    return;
   }
 
-  window.open(url, '_blank', 'noopener,noreferrer');
+  const safeName = filename || 'downloaded-file';
+
+  if (isCloudFileUrl(url)) {
+    resolveAttachmentUrl(url)
+      .then((resolved) => {
+        if (resolved) {
+          triggerResolvedDownload(resolved, safeName);
+        }
+      })
+      .catch(err => console.warn('Failed to resolve cloud file for download:', err));
+    return;
+  }
+
+  triggerResolvedDownload(url, safeName);
+}
+
+/**
+ * Reliably opens a file in a new browser tab.
+ * Resolves `mps-cloud-file://` pointers and converts `data:` URLs to Blob URLs first.
+ */
+export function openFileInNewTab(url: string, _filename?: string): void {
+  if (!url) return;
+
+  const openResolved = (resolved: string) => {
+    if (!resolved) return;
+    if (resolved.startsWith('data:')) {
+      const blobRes = createBlobUrlFromDataUrl(resolved);
+      if (blobRes) {
+        const a = document.createElement('a');
+        a.href = blobRes.blobUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a);
+          } catch {
+            // ignore
+          }
+        }, 500);
+        setTimeout(() => blobRes.revoke(), 180000);
+        return;
+      }
+    }
+
+    const a = document.createElement('a');
+    a.href = resolved;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try {
+        document.body.removeChild(a);
+      } catch {
+        // ignore
+      }
+    }, 500);
+  };
+
+  if (isCloudFileUrl(url)) {
+    resolveAttachmentUrl(url)
+      .then(openResolved)
+      .catch(err => console.warn('Failed to resolve cloud file for new tab:', err));
+    return;
+  }
+
+  openResolved(url);
 }
